@@ -1,0 +1,26 @@
+# Binaries and build output
+bin/
+dist/
+*.exe
+*.test
+
+# Test and coverage output
+coverage.*
+*.out
+
+# Local environment
+.env
+.env.*
+!.env.example
+
+# Go workspace/cache
+go.work
+go.work.sum
+.gocache/
+.gotelemetry/
+
+# Editor/OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
