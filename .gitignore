@@ -1,3 +1,31 @@
+<<<<<<< HEAD
+# Binaries and build output
+bin/
+dist/
+*.exe
+*.test
+
+# Test and coverage output
+coverage.*
+*.out
+
+# Local environment
+.env
+.env.*
+!.env.example
+
+# Go workspace/cache
+go.work
+go.work.sum
+.gocache/
+.gotelemetry/
+
+# Editor/OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+=======
 # If you prefer the allow list template instead of the deny list, see community template:
 # https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
 #
@@ -30,3 +58,4 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+>>>>>>> 328f84dc01b7f4baeff967e193573d0da5c4cf57
