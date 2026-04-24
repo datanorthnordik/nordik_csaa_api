@@ -18,7 +18,7 @@ func NewRouter(cfg config.Config, logger *slog.Logger) http.Handler {
 
 	mux.HandleFunc("GET /health", healthHandler(cfg))
 	mux.HandleFunc("GET /api/v1/sample", sampleHandler(cfg))
-	mux.HandleFunc("POST /api/v1/auth/login", authPlaceholderHandler("login api works for now"))
+	mux.HandleFunc("POST /api/v1/auth/login", authPlaceholderHandler("login api works for now as tes"))
 	mux.HandleFunc("POST /api/v1/auth/signup", authPlaceholderHandler("signup api works for now"))
 
 	return withRequestLog(logger)(withCORS(cfg)(mux))
