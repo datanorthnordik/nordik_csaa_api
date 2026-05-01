@@ -1,54 +1,55 @@
 package main
 
 import (
-	"context"
-	"errors"
-	"log/slog"
+	"log"
 	"net/http"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
-
+	"nordikcsaaapi/internal/auth"
 	"nordikcsaaapi/internal/config"
-	"nordikcsaaapi/internal/httpapi"
+	"os"
+
+	"github.com/gin-contrib/cors"
+	"github.com/gin-gonic/gin"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
 func main() {
-	cfg := config.Load()
+	cfg := config.LoadConfig()
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: cfg.LogLevel,
+	dsn := "host=" + cfg.DBHost +
+		" user=" + cfg.DBUser +
+		" password=" + cfg.DBPassword +
+		" dbname=" + cfg.DBName +
+		" port=" + cfg.DBPort +
+		" sslmode=disable"
+
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	if err != nil {
+		log.Fatal("Failed to connect to database:", err)
+	}
+
+	if err := db.AutoMigrate(&auth.Auth{}); err != nil {
+		log.Fatal("Failed to migrate database:", err)
+	}
+
+	r := gin.Default()
+	r.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"http://localhost:3000", "http://localhost:5173"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+		AllowCredentials: true,
 	}))
 
-	server := &http.Server{
-		Addr:              ":" + cfg.Port,
-		Handler:           httpapi.NewRouter(cfg, logger),
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       cfg.RequestTimeout,
-		WriteTimeout:      cfg.RequestTimeout,
-		IdleTimeout:       60 * time.Second,
+	userService := &auth.AuthService{DB: db}
+	auth.RegisterRoutes(r, userService, &cfg)
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
 	}
-
-	go func() {
-		logger.Info("server starting", "addr", server.Addr, "env", cfg.Environment)
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("server failed", "error", err)
-			os.Exit(1)
-		}
-	}()
-
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	<-stop
-
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	if err := server.Shutdown(shutdownCtx); err != nil {
-		logger.Error("server shutdown failed", "error", err)
-		os.Exit(1)
-	}
-
-	logger.Info("server stopped")
+	log.Printf("Starting server on 0.0.0.0:%s ...", port)
+	log.Fatal(r.Run("0.0.0.0:" + port))
 }

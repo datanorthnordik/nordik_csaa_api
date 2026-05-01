@@ -1,12 +1,57 @@
+version: '3.8'
+
 services:
-  api:
+  app:
     build: .
     env_file:
       - .env
     ports:
-      - "${APP_PORT:-8080}:8080"
+      - "${PORT:-8080}:8080"
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_NAME: ${DB_NAME:-nordikcsawebsite}
+      JWT_SECRET: ${JWT_SECRET:-change-me-for-local-development}
+      SMTP_KEY: ${SMTP_KEY:-}
+      GMAIL_USER: ${GMAIL_USER:-}
+      GMAIL_APP_PASSWORD: ${GMAIL_APP_PASSWORD:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
       interval: 10s
       timeout: 3s
       retries: 3
+    networks:
+      - nordik-network
+
+  postgres:
+    image: postgres:15
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_NAME:-nordikcsawebsite}
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-nordikcsawebsite}"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+    networks:
+      - nordik-network
+
+volumes:
+  pgdata:
+
+networks:
+  nordik-network:
+    driver: bridge
