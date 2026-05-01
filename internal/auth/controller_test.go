@@ -17,9 +17,11 @@ import (
 )
 
 type fakeAuthService struct {
-	usersByEmail map[string]*Auth
-	usersByID    map[int]*Auth
-	createErr    error
+	usersByEmail   map[string]*Auth
+	usersByID      map[int]*Auth
+	createErr      error
+	getUserErr     error
+	getUserByIDErr error
 }
 
 func newFakeAuthService() *fakeAuthService {
@@ -44,6 +46,9 @@ func (s *fakeAuthService) CreateUser(user Auth) (*Auth, error) {
 }
 
 func (s *fakeAuthService) GetUser(email string) (*Auth, error) {
+	if s.getUserErr != nil {
+		return nil, s.getUserErr
+	}
 	user, ok := s.usersByEmail[email]
 	if !ok {
 		return nil, errors.New("not found")
@@ -52,6 +57,9 @@ func (s *fakeAuthService) GetUser(email string) (*Auth, error) {
 }
 
 func (s *fakeAuthService) GetUserByID(id int) (*Auth, error) {
+	if s.getUserByIDErr != nil {
+		return nil, s.getUserByIDErr
+	}
 	user, ok := s.usersByID[id]
 	if !ok {
 		return nil, errors.New("not found")
@@ -169,6 +177,36 @@ func TestLoginEndpointRejectsWrongPassword(t *testing.T) {
 	}
 }
 
+func TestSignUpEndpointReturnsServiceUnavailableWhenStoreUnavailable(t *testing.T) {
+	service := newFakeAuthService()
+	service.createErr = ErrStoreUnavailable
+	router := setupRouter(service)
+
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/user/signup", strings.NewReader(`{"firstname":"Ada","lastname":"Lovelace","email":"ada@example.com","password":"secret123"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected status 503, got %d: %s", res.Code, res.Body.String())
+	}
+}
+
+func TestLoginEndpointReturnsServiceUnavailableWhenStoreUnavailable(t *testing.T) {
+	service := newFakeAuthService()
+	service.getUserErr = ErrStoreUnavailable
+	router := setupRouter(service)
+
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/user/login", strings.NewReader(`{"email":"ada@example.com","password":"secret123"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected status 503, got %d: %s", res.Code, res.Body.String())
+	}
+}
+
 func TestRefreshEndpointReturnsNewAccessToken(t *testing.T) {
 	service := newFakeAuthService()
 	user := &Auth{ID: 42, FirstName: "Grace", LastName: "Hopper", Email: "grace@example.com", Role: "User"}
@@ -199,6 +237,30 @@ func TestRefreshEndpointReturnsNewAccessToken(t *testing.T) {
 		t.Fatal("expected accessToken in response")
 	}
 	assertTokenUserID(t, payload["accessToken"], 42)
+}
+
+func TestRefreshEndpointReturnsServiceUnavailableWhenStoreUnavailable(t *testing.T) {
+	service := newFakeAuthService()
+	service.getUserByIDErr = ErrStoreUnavailable
+	user := &Auth{ID: 42, FirstName: "Grace", LastName: "Hopper", Email: "grace@example.com", Role: "User"}
+	service.usersByEmail[user.Email] = user
+	service.usersByID[user.ID] = user
+
+	controller := &AuthController{AuthService: service, CFG: &config.Config{JWTSecret: "test-secret"}}
+	refreshToken, err := controller.signToken(user, 24*time.Hour)
+	if err != nil {
+		t.Fatalf("sign refresh token: %v", err)
+	}
+
+	router := setupRouter(service)
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/user/refresh", nil)
+	req.Header.Set("Authorization", "Bearer "+refreshToken)
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected status 503, got %d: %s", res.Code, res.Body.String())
+	}
 }
 
 func TestRefreshEndpointRequiresBearerToken(t *testing.T) {
