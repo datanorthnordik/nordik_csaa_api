@@ -16,20 +16,29 @@ import (
 func main() {
 	cfg := config.LoadConfig()
 
-	dsn := "host=" + cfg.DBHost +
-		" user=" + cfg.DBUser +
-		" password=" + cfg.DBPassword +
-		" dbname=" + cfg.DBName +
-		" port=" + cfg.DBPort +
-		" sslmode=disable"
+	dsn := cfg.DatabaseURL
+	if dsn == "" {
+		dbPort := cfg.DBPort
+		if dbPort == "" {
+			dbPort = "5432"
+		}
+
+		sslMode := cfg.DBSSLMode
+		if sslMode == "" {
+			sslMode = "disable"
+		}
+
+		dsn = "host=" + cfg.DBHost +
+			" user=" + cfg.DBUser +
+			" password=" + cfg.DBPassword +
+			" dbname=" + cfg.DBName +
+			" port=" + dbPort +
+			" sslmode=" + sslMode
+	}
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
 		log.Fatal("Failed to connect to database:", err)
-	}
-
-	if err := db.AutoMigrate(&auth.Auth{}); err != nil {
-		log.Fatal("Failed to migrate database:", err)
 	}
 
 	r := gin.Default()

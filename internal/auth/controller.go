@@ -51,6 +51,10 @@ func (ac *AuthController) SignUp(c *gin.Context) {
 		Password:  password,
 	})
 	if err != nil {
+		if errors.Is(err, ErrStoreUnavailable) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Authentication service is temporarily unavailable"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -76,6 +80,10 @@ func (ac *AuthController) Login(c *gin.Context) {
 
 	user, err := ac.AuthService.GetUser(req.Email)
 	if err != nil {
+		if errors.Is(err, ErrStoreUnavailable) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Authentication service is temporarily unavailable"})
+			return
+		}
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
 		return
 	}
@@ -147,6 +155,10 @@ func (ac *AuthController) Refresh(c *gin.Context) {
 
 	user, err := ac.AuthService.GetUserByID(userID)
 	if err != nil {
+		if errors.Is(err, ErrStoreUnavailable) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Authentication service is temporarily unavailable"})
+			return
+		}
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
 		return
 	}
