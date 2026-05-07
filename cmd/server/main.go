@@ -3,8 +3,10 @@ package main
 import (
 	"log"
 	"net/http"
+	"nordikcsaaapi/internal/apiresponse"
 	"nordikcsaaapi/internal/auth"
 	"nordikcsaaapi/internal/config"
+	"nordikcsaaapi/internal/events"
 	"os"
 
 	"github.com/gin-contrib/cors"
@@ -41,16 +43,25 @@ func main() {
 		log.Fatal("Failed to connect to database:", err)
 	}
 
-	r := gin.Default()
+	r := gin.New()
+	r.Use(gin.Logger())
+	r.Use(gin.CustomRecovery(func(c *gin.Context, recovered any) {
+		log.Printf("panic recovered while handling %s %s: %v", c.Request.Method, c.Request.URL.Path, recovered)
+		apiresponse.WriteInternalError(c)
+	}))
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"http://localhost:3000", "http://localhost:5173"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
 		AllowCredentials: true,
 	}))
+	r.NoRoute(apiresponse.WriteRouteNotFound)
+	r.NoMethod(apiresponse.WriteMethodNotAllowed)
 
 	userService := &auth.AuthService{DB: db}
 	auth.RegisterRoutes(r, userService, &cfg)
+	eventService := &events.EventService{DB: db, BucketName: cfg.DriveBucketName}
+	events.RegisterRoutes(r, eventService)
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
