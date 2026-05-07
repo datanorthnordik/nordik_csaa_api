@@ -43,8 +43,8 @@ type Event struct {
 	RegistrationEndAt           *time.Time     `gorm:"column:registration_end_at" json:"registration_end_at,omitempty"`
 	RegistrationURL             string         `gorm:"column:registration_url" json:"registration_url"`
 	RepeatEnabled               bool           `gorm:"not null;default:false;column:repeat_enabled" json:"repeat_enabled"`
-	RecurrenceType              string         `gorm:"size:20;column:recurrence_type" json:"recurrence_type"`
-	RecurrenceFrequency         string         `gorm:"size:20;column:recurrence_frequency" json:"recurrence_frequency"`
+	RecurrenceType              *string        `gorm:"size:20;column:recurrence_type" json:"recurrence_type,omitempty"`
+	RecurrenceFrequency         *string        `gorm:"size:20;column:recurrence_frequency" json:"recurrence_frequency,omitempty"`
 	RecurrenceInterval          int            `gorm:"not null;default:1;column:recurrence_interval" json:"recurrence_interval"`
 	RecurrenceUntil             *time.Time     `gorm:"column:recurrence_until" json:"recurrence_until,omitempty"`
 	RecurrenceRule              JSONRawMessage `gorm:"type:jsonb;column:recurrence_rule" json:"recurrence_rule,omitempty"`
@@ -254,8 +254,8 @@ type EventDetailResponse struct {
 	RegistrationEndAt           *time.Time        `json:"registration_end_at,omitempty"`
 	RegistrationURL             string            `json:"registration_url"`
 	RepeatEnabled               bool              `json:"repeat_enabled"`
-	RecurrenceType              string            `json:"recurrence_type"`
-	RecurrenceFrequency         string            `json:"recurrence_frequency"`
+	RecurrenceType              *string           `json:"recurrence_type,omitempty"`
+	RecurrenceFrequency         *string           `json:"recurrence_frequency,omitempty"`
 	RecurrenceInterval          int               `json:"recurrence_interval"`
 	RecurrenceUntil             *time.Time        `json:"recurrence_until,omitempty"`
 	RecurrenceRule              JSONRawMessage    `json:"recurrence_rule,omitempty"`
