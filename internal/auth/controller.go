@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"nordikcsaaapi/internal/apiresponse"
 	"nordikcsaaapi/internal/config"
 	"nordikcsaaapi/internal/util"
 
@@ -34,13 +35,13 @@ type loginRequest struct {
 func (ac *AuthController) SignUp(c *gin.Context) {
 	var req signUpRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		apiresponse.WriteBindingError(c, err, req)
 		return
 	}
 
 	password, err := util.HashPassword(req.Password)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		apiresponse.WriteInternalError(c)
 		return
 	}
 
@@ -51,11 +52,14 @@ func (ac *AuthController) SignUp(c *gin.Context) {
 		Password:  password,
 	})
 	if err != nil {
-		if errors.Is(err, ErrStoreUnavailable) {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Authentication service is temporarily unavailable"})
-			return
+		switch {
+		case errors.Is(err, ErrStoreUnavailable):
+			apiresponse.WriteServiceUnavailable(c, "Authentication service is temporarily unavailable")
+		case errors.Is(err, ErrEmailAlreadyExists):
+			apiresponse.WriteConflict(c, "An account with this email already exists")
+		default:
+			apiresponse.WriteInternalError(c)
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -74,28 +78,28 @@ func (ac *AuthController) SignUp(c *gin.Context) {
 func (ac *AuthController) Login(c *gin.Context) {
 	var req loginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		apiresponse.WriteBindingError(c, err, req)
 		return
 	}
 
 	user, err := ac.AuthService.GetUser(req.Email)
 	if err != nil {
 		if errors.Is(err, ErrStoreUnavailable) {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Authentication service is temporarily unavailable"})
+			apiresponse.WriteServiceUnavailable(c, "Authentication service is temporarily unavailable")
 			return
 		}
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
+		apiresponse.WriteUnauthorized(c, "invalid_credentials", "Invalid email or password")
 		return
 	}
 
 	if err := util.VerifyPassword(req.Password, user.Password); err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
+		apiresponse.WriteUnauthorized(c, "invalid_credentials", "Invalid email or password")
 		return
 	}
 
 	accessToken, err := ac.signToken(user, 15*time.Minute)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		apiresponse.WriteInternalError(c)
 		return
 	}
 
@@ -105,7 +109,7 @@ func (ac *AuthController) Login(c *gin.Context) {
 	}
 	refreshToken, err := ac.signToken(user, refreshDuration)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		apiresponse.WriteInternalError(c)
 		return
 	}
 
@@ -126,7 +130,7 @@ func (ac *AuthController) Login(c *gin.Context) {
 func (ac *AuthController) Refresh(c *gin.Context) {
 	refreshToken, err := bearerToken(c.GetHeader("Authorization"))
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		apiresponse.WriteUnauthorized(c, "missing_bearer_token", err.Error())
 		return
 	}
 
@@ -137,35 +141,35 @@ func (ac *AuthController) Refresh(c *gin.Context) {
 		return []byte(ac.CFG.JWTSecret), nil
 	})
 	if err != nil || !token.Valid {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid refresh token"})
+		apiresponse.WriteUnauthorized(c, "invalid_refresh_token", "Invalid refresh token")
 		return
 	}
 
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid refresh token"})
+		apiresponse.WriteUnauthorized(c, "invalid_refresh_token", "Invalid refresh token")
 		return
 	}
 
 	userID, ok := claimInt(claims["user_id"])
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid refresh token"})
+		apiresponse.WriteUnauthorized(c, "invalid_refresh_token", "Invalid refresh token")
 		return
 	}
 
 	user, err := ac.AuthService.GetUserByID(userID)
 	if err != nil {
 		if errors.Is(err, ErrStoreUnavailable) {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Authentication service is temporarily unavailable"})
+			apiresponse.WriteServiceUnavailable(c, "Authentication service is temporarily unavailable")
 			return
 		}
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		apiresponse.WriteUnauthorized(c, "invalid_refresh_token", "Invalid refresh token")
 		return
 	}
 
 	accessToken, err := ac.signToken(user, 15*time.Minute)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		apiresponse.WriteInternalError(c)
 		return
 	}
 

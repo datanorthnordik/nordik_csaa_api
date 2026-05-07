@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"nordikcsaaapi/internal/apiresponse"
 	"nordikcsaaapi/internal/config"
 	"nordikcsaaapi/internal/util"
 
@@ -120,6 +121,11 @@ func TestSignUpEndpointRejectsInvalidPayload(t *testing.T) {
 	if res.Code != http.StatusBadRequest {
 		t.Fatalf("expected status 400, got %d", res.Code)
 	}
+
+	payload := assertAPIError(t, res, http.StatusBadRequest, "validation_error", "Request validation failed")
+	if len(payload.Error.Details) == 0 {
+		t.Fatal("expected validation details in error response")
+	}
 }
 
 func TestLoginEndpointReturnsBearerTokens(t *testing.T) {
@@ -175,6 +181,21 @@ func TestLoginEndpointRejectsWrongPassword(t *testing.T) {
 	if res.Code != http.StatusUnauthorized {
 		t.Fatalf("expected status 401, got %d", res.Code)
 	}
+
+	assertAPIError(t, res, http.StatusUnauthorized, "invalid_credentials", "Invalid email or password")
+}
+
+func TestSignUpEndpointReturnsConflictForDuplicateEmail(t *testing.T) {
+	service := newFakeAuthService()
+	service.createErr = ErrEmailAlreadyExists
+	router := setupRouter(service)
+
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/user/signup", strings.NewReader(`{"firstname":"Ada","lastname":"Lovelace","email":"ada@example.com","password":"secret123"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(res, req)
+
+	assertAPIError(t, res, http.StatusConflict, "conflict", "An account with this email already exists")
 }
 
 func TestSignUpEndpointReturnsServiceUnavailableWhenStoreUnavailable(t *testing.T) {
@@ -190,6 +211,8 @@ func TestSignUpEndpointReturnsServiceUnavailableWhenStoreUnavailable(t *testing.
 	if res.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected status 503, got %d: %s", res.Code, res.Body.String())
 	}
+
+	assertAPIError(t, res, http.StatusServiceUnavailable, "service_unavailable", "Authentication service is temporarily unavailable")
 }
 
 func TestLoginEndpointReturnsServiceUnavailableWhenStoreUnavailable(t *testing.T) {
@@ -205,6 +228,8 @@ func TestLoginEndpointReturnsServiceUnavailableWhenStoreUnavailable(t *testing.T
 	if res.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected status 503, got %d: %s", res.Code, res.Body.String())
 	}
+
+	assertAPIError(t, res, http.StatusServiceUnavailable, "service_unavailable", "Authentication service is temporarily unavailable")
 }
 
 func TestRefreshEndpointReturnsNewAccessToken(t *testing.T) {
@@ -261,6 +286,8 @@ func TestRefreshEndpointReturnsServiceUnavailableWhenStoreUnavailable(t *testing
 	if res.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected status 503, got %d: %s", res.Code, res.Body.String())
 	}
+
+	assertAPIError(t, res, http.StatusServiceUnavailable, "service_unavailable", "Authentication service is temporarily unavailable")
 }
 
 func TestRefreshEndpointRequiresBearerToken(t *testing.T) {
@@ -273,6 +300,8 @@ func TestRefreshEndpointRequiresBearerToken(t *testing.T) {
 	if res.Code != http.StatusUnauthorized {
 		t.Fatalf("expected status 401, got %d", res.Code)
 	}
+
+	assertAPIError(t, res, http.StatusUnauthorized, "missing_bearer_token", "Missing bearer token")
 }
 
 func TestBearerToken(t *testing.T) {
@@ -320,4 +349,24 @@ func assertTokenUserID(t *testing.T, tokenString string, want int) {
 	if !ok || got != want {
 		t.Fatalf("expected user_id %d, got %v ok=%v", want, claims["user_id"], ok)
 	}
+}
+
+func assertAPIError(t *testing.T, res *httptest.ResponseRecorder, wantStatus int, wantCode string, wantMessage string) apiresponse.ErrorResponse {
+	t.Helper()
+
+	if res.Code != wantStatus {
+		t.Fatalf("expected status %d, got %d: %s", wantStatus, res.Code, res.Body.String())
+	}
+
+	var payload apiresponse.ErrorResponse
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if payload.Error.Code != wantCode {
+		t.Fatalf("expected error code %q, got %#v", wantCode, payload)
+	}
+	if payload.Error.Message != wantMessage {
+		t.Fatalf("expected error message %q, got %#v", wantMessage, payload)
+	}
+	return payload
 }

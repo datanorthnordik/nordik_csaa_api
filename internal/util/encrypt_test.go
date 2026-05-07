@@ -1,6 +1,9 @@
 package util
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestHashAndVerifyPassword(t *testing.T) {
 	hash, err := HashPassword("secret123")
@@ -15,5 +18,19 @@ func TestHashAndVerifyPassword(t *testing.T) {
 	}
 	if err := VerifyPassword("wrong", hash); err == nil {
 		t.Fatal("expected wrong password to fail verification")
+	}
+}
+
+func TestHashPasswordError(t *testing.T) {
+	prev := bcryptGenerateFromPassword
+	bcryptGenerateFromPassword = func(password []byte, cost int) ([]byte, error) {
+		return nil, errors.New("hash failed")
+	}
+	defer func() {
+		bcryptGenerateFromPassword = prev
+	}()
+
+	if _, err := HashPassword("secret123"); err == nil {
+		t.Fatal("expected hash error")
 	}
 }

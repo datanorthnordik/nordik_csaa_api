@@ -122,6 +122,17 @@ CREATE TABLE IF NOT EXISTS events (
     CONSTRAINT chk_events_end_after_start
         CHECK (end_at IS NULL OR end_at >= start_at),
 
+    CONSTRAINT chk_events_event_type_dates
+        CHECK (
+            (event_type = 'single_day_all_day' AND end_at IS NULL)
+            OR
+            (event_type = 'single_day_partial' AND end_at IS NOT NULL AND DATE(end_at) = DATE(start_at))
+            OR
+            (event_type = 'multi_day_all_day' AND end_at IS NOT NULL AND DATE(end_at) > DATE(start_at))
+            OR
+            (event_type = 'multi_day_partial' AND end_at IS NOT NULL AND DATE(end_at) > DATE(start_at))
+        ),
+
     CONSTRAINT chk_events_privacy_type
         CHECK (privacy_type IN ('public', 'private')),
 
@@ -147,6 +158,12 @@ CREATE TABLE IF NOT EXISTS events (
             (request_review = FALSE AND cardinality(review_email_list) = 0)
             OR
             (request_review = TRUE AND cardinality(review_email_list) > 0)
+        ),
+
+    CONSTRAINT chk_events_published_review
+        CHECK (
+            published = FALSE
+            OR request_review = FALSE
         ),
 
     CONSTRAINT chk_events_registration
