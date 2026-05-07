@@ -27,6 +27,9 @@ var (
 	uploadBase64ToGCSHook = func(base64Data, bucketName, objectName, contentType string) (string, int64, error) {
 		return util.UploadBase64ToGCS(base64Data, bucketName, objectName, contentType)
 	}
+	downloadGCSObjectHook = func(bucketName, objectName string) ([]byte, string, error) {
+		return util.ReadGCSObject(bucketName, objectName)
+	}
 	deleteGCSObjectHook = func(bucketName, objectName string) error {
 		return util.DeleteGCSObject(bucketName, objectName)
 	}
@@ -75,16 +78,17 @@ func (s *EventService) ListEvents(filter ListEventsFilter) (*EventListResponse, 
 	items := make([]EventListItem, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, EventListItem{
-			ID:         row.ID,
-			Title:      row.Title,
-			Categories: []string(row.Categories),
-			Status:     eventStatus(row.Published),
-			Published:  row.Published,
-			EventType:  row.EventType,
-			StartAt:    row.StartAt,
-			EndAt:      row.EndAt,
-			CreatedAt:  row.CreatedAt,
-			UpdatedAt:  row.UpdatedAt,
+			ID:          row.ID,
+			Title:       row.Title,
+			Categories:  []string(row.Categories),
+			Status:      eventStatus(row.Published),
+			Published:   row.Published,
+			EventType:   row.EventType,
+			StartAt:     row.StartAt,
+			EndAt:       row.EndAt,
+			DateDisplay: buildEventDateDisplay(row.EventType, row.StartAt, row.EndAt),
+			CreatedAt:   row.CreatedAt,
+			UpdatedAt:   row.UpdatedAt,
 		})
 	}
 
@@ -145,6 +149,7 @@ func (s *EventService) GetEvent(id int) (*EventDetailResponse, error) {
 	var displayImage *EventMedia
 	attachments := make([]EventMedia, 0)
 	for _, item := range media {
+		item.FetchURL = buildEventMediaFetchURL(item.EventID, item.ID)
 		switch item.MediaRole {
 		case MediaRoleDisplayImage:
 			copyItem := item
@@ -162,6 +167,7 @@ func (s *EventService) GetEvent(id int) (*EventDetailResponse, error) {
 		EventType:                   event.EventType,
 		StartAt:                     event.StartAt,
 		EndAt:                       event.EndAt,
+		DateDisplay:                 buildEventDateDisplay(event.EventType, event.StartAt, event.EndAt),
 		PrivacyType:                 event.PrivacyType,
 		PrivateAudiences:            []string(event.PrivateAudiences),
 		Published:                   event.Published,
@@ -194,6 +200,39 @@ func (s *EventService) GetEvent(id int) (*EventDetailResponse, error) {
 		CreatedBy:                   event.CreatedBy,
 		CreatedAt:                   event.CreatedAt,
 		UpdatedAt:                   event.UpdatedAt,
+	}, nil
+}
+
+func (s *EventService) GetEventMediaContent(eventID int, mediaID int) (*EventMediaContent, error) {
+	if s.DB == nil {
+		return nil, ErrStoreUnavailable
+	}
+
+	var media EventMedia
+	if err := s.DB.Where("event_id = ? AND id = ?", eventID, mediaID).First(&media).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrEventMediaNotFound
+		}
+		return nil, err
+	}
+
+	bucketName, objectKey, err := s.resolveMediaObjectReference(media)
+	if err != nil {
+		return nil, err
+	}
+
+	content, contentType, err := downloadGCSObjectHook(bucketName, objectKey)
+	if err != nil {
+		if errors.Is(err, util.ErrObjectNotFound) {
+			return nil, ErrEventMediaNotFound
+		}
+		return nil, err
+	}
+
+	return &EventMediaContent{
+		Content:     content,
+		ContentType: contentType,
+		FileName:    buildMediaContentFileName(media, objectKey),
 	}, nil
 }
 
@@ -540,9 +579,6 @@ func normalizeSaveEventRequest(req SaveEventRequest) (SaveEventRequest, error) {
 	if req.Title == "" {
 		return req, errors.New("title is required")
 	}
-	if req.Teaser == "" {
-		return req, errors.New("teaser is required")
-	}
 	if len(req.Categories) == 0 {
 		return req, errors.New("at least one category is required")
 	}
@@ -778,8 +814,8 @@ func (s *EventService) buildMediaRecord(eventID int, role string, idx int, input
 		}
 		media.FileURL = strings.TrimSpace(input.FileURL)
 		media.GCPObjectKey = strings.TrimSpace(input.ObjectKey)
-		if media.GCPObjectKey == "" && strings.TrimSpace(s.BucketName) != "" {
-			objectKey, err := util.ExtractObjectPathFromGCSURL(s.BucketName, media.FileURL)
+		if media.GCPObjectKey == "" {
+			_, objectKey, err := util.ParseGCSObjectReference(s.BucketName, media.FileURL)
 			if err == nil {
 				media.GCPObjectKey = objectKey
 			}
@@ -849,21 +885,14 @@ func (s *EventService) cleanupMediaObjects(media []EventMedia) error {
 }
 
 func (s *EventService) cleanupSingleMediaObject(media EventMedia) error {
-	objectKey := strings.TrimSpace(media.GCPObjectKey)
-	if objectKey == "" && strings.TrimSpace(media.FileURL) == "" {
+	if strings.TrimSpace(media.GCPObjectKey) == "" && strings.TrimSpace(media.FileURL) == "" {
 		return nil
 	}
-	if strings.TrimSpace(s.BucketName) == "" {
-		return ErrMediaBucketNotConfigured
+	bucketName, objectKey, err := s.resolveMediaObjectReference(media)
+	if err != nil {
+		return err
 	}
-	if objectKey == "" {
-		var err error
-		objectKey, err = util.ExtractObjectPathFromGCSURL(s.BucketName, media.FileURL)
-		if err != nil {
-			return err
-		}
-	}
-	return deleteGCSObjectHook(s.BucketName, objectKey)
+	return deleteGCSObjectHook(bucketName, objectKey)
 }
 
 func (s *EventService) cleanupObjects(objectNames []string) {
@@ -902,6 +931,51 @@ func sanitizeUploadInput(value EventUploadInput) EventUploadInput {
 	value.FileURL = strings.TrimSpace(value.FileURL)
 	value.ObjectKey = strings.TrimSpace(value.ObjectKey)
 	return value
+}
+
+func (s *EventService) resolveMediaObjectReference(media EventMedia) (string, string, error) {
+	objectKey := strings.TrimSpace(media.GCPObjectKey)
+	if objectKey != "" {
+		bucketName := strings.TrimSpace(s.BucketName)
+		if bucketName != "" {
+			return bucketName, objectKey, nil
+		}
+		if strings.TrimSpace(media.FileURL) == "" {
+			return "", "", ErrMediaBucketNotConfigured
+		}
+	}
+
+	bucketName, objectKey, err := util.ParseGCSObjectReference(strings.TrimSpace(s.BucketName), media.FileURL)
+	if err != nil {
+		if errors.Is(err, util.ErrBucketNameRequired) {
+			return "", "", ErrMediaBucketNotConfigured
+		}
+		return "", "", err
+	}
+	if strings.TrimSpace(bucketName) == "" {
+		return "", "", ErrMediaBucketNotConfigured
+	}
+	return bucketName, objectKey, nil
+}
+
+func buildEventMediaFetchURL(eventID int, mediaID int) string {
+	return fmt.Sprintf("/api/events/%d/media/%d/content", eventID, mediaID)
+}
+
+func buildMediaContentFileName(media EventMedia, objectKey string) string {
+	displayName := strings.TrimSpace(media.DisplayName)
+	ext := path.Ext(strings.TrimSpace(objectKey))
+	if displayName != "" {
+		if path.Ext(displayName) == "" && ext != "" {
+			return displayName + ext
+		}
+		return displayName
+	}
+	baseName := path.Base(strings.TrimSpace(objectKey))
+	if baseName != "." && baseName != "/" && baseName != "" {
+		return baseName
+	}
+	return "event-media" + util.ExtFromFilenameOrMime("", media.MimeType)
 }
 
 func stringPtrOrNil(value string) *string {
@@ -1060,6 +1134,37 @@ func buildEventSortClause(sortBy string, sortOrder string) string {
 		sortOrder = "desc"
 	}
 	return column + " " + strings.ToUpper(sortOrder)
+}
+
+func buildEventDateDisplay(eventType string, start time.Time, end *time.Time) string {
+	switch eventType {
+	case "single_day_all_day":
+		return start.Format("2006-01-02")
+	case "single_day_partial":
+		if end == nil {
+			return formatEventDateTime(start)
+		}
+		return formatEventDateTime(start) + " - " + formatEventDateTime(end.In(start.Location()))
+	case "multi_day_all_day":
+		if end == nil {
+			return start.Format("2006-01-02")
+		}
+		return start.Format("2006-01-02") + " - " + end.In(start.Location()).Format("2006-01-02")
+	case "multi_day_partial":
+		if end == nil {
+			return formatEventDateTime(start)
+		}
+		return formatEventDateTime(start) + " - " + formatEventDateTime(end.In(start.Location()))
+	default:
+		if end == nil {
+			return formatEventDateTime(start)
+		}
+		return formatEventDateTime(start) + " - " + formatEventDateTime(end.In(start.Location()))
+	}
+}
+
+func formatEventDateTime(value time.Time) string {
+	return value.Format("2006-01-02 15:04")
 }
 
 func validateEventTypeTimeRules(req SaveEventRequest) error {

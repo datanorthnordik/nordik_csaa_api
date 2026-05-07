@@ -10,39 +10,46 @@ import (
 	"time"
 
 	"nordikcsaaapi/internal/apiresponse"
+	authpkg "nordikcsaaapi/internal/auth"
+	"nordikcsaaapi/internal/config"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 type fakeEventService struct {
-	listResp            *EventListResponse
-	eventResp           *EventDetailResponse
-	locationsResp       *SavedLocationListResponse
-	galleriesResp       *GalleryListResponse
-	createResp          *EventMutationResponse
-	updateResp          *EventMutationResponse
-	deleteAllResp       *DeleteAllDocumentsResponse
-	listErr             error
-	eventErr            error
-	locationsErr        error
-	galleriesErr        error
-	createErr           error
-	updateErr           error
-	deleteErr           error
-	deleteDocumentErr   error
-	deleteAllErr        error
-	deletePhotoErr      error
-	gotListFilter       ListEventsFilter
-	gotCreateRequest    SaveEventRequest
-	gotGetID            int
-	gotUpdateID         int
-	gotUpdateRequest    SaveEventRequest
-	gotDeleteID         int
-	gotDeleteDocumentID int
-	gotDeleteMediaID    int
-	gotDeleteAllID      int
-	gotDeletePhotoID    int
-	gotDeletePhotoMedia int
+	listResp               *EventListResponse
+	eventResp              *EventDetailResponse
+	locationsResp          *SavedLocationListResponse
+	galleriesResp          *GalleryListResponse
+	createResp             *EventMutationResponse
+	updateResp             *EventMutationResponse
+	deleteAllResp          *DeleteAllDocumentsResponse
+	mediaContentResp       *EventMediaContent
+	listErr                error
+	eventErr               error
+	locationsErr           error
+	galleriesErr           error
+	createErr              error
+	updateErr              error
+	mediaContentErr        error
+	deleteErr              error
+	deleteDocumentErr      error
+	deleteAllErr           error
+	deletePhotoErr         error
+	gotListFilter          ListEventsFilter
+	gotCreateRequest       SaveEventRequest
+	gotGetID               int
+	gotMediaContentID      int
+	gotMediaContentMediaID int
+	gotUpdateID            int
+	gotUpdateRequest       SaveEventRequest
+	gotDeleteID            int
+	gotDeleteDocumentID    int
+	gotDeleteMediaID       int
+	gotDeleteAllID         int
+	gotDeletePhotoID       int
+	gotDeletePhotoMedia    int
 }
 
 func (s *fakeEventService) ListEvents(filter ListEventsFilter) (*EventListResponse, error) {
@@ -65,6 +72,18 @@ func (s *fakeEventService) GetEvent(id int) (*EventDetailResponse, error) {
 		return &EventDetailResponse{ID: id, Title: "Spring Fair"}, nil
 	}
 	return s.eventResp, nil
+}
+
+func (s *fakeEventService) GetEventMediaContent(eventID int, mediaID int) (*EventMediaContent, error) {
+	s.gotMediaContentID = eventID
+	s.gotMediaContentMediaID = mediaID
+	if s.mediaContentErr != nil {
+		return nil, s.mediaContentErr
+	}
+	if s.mediaContentResp == nil {
+		return &EventMediaContent{Content: []byte("ok"), ContentType: "application/octet-stream", FileName: "file.bin"}, nil
+	}
+	return s.mediaContentResp, nil
 }
 
 func (s *fakeEventService) ListSavedLocations() (*SavedLocationListResponse, error) {
@@ -142,6 +161,13 @@ func setupEventRouter(service EventServicePort) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	RegisterRoutes(r, service)
+	return r
+}
+
+func setupProtectedEventRouter(service EventServicePort) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	RegisterRoutes(r, service, authpkg.RequireBearerAuth(&config.Config{JWTSecret: "test-secret"}))
 	return r
 }
 
@@ -292,6 +318,24 @@ func TestCreateEventEndpoint(t *testing.T) {
 	}
 	if service.gotCreateRequest.Title != "Spring Fair" {
 		t.Fatalf("expected title to be forwarded, got %q", service.gotCreateRequest.Title)
+	}
+}
+
+func TestCreateEventEndpointAllowsMissingTeaser(t *testing.T) {
+	service := &fakeEventService{}
+	router := setupEventRouter(service)
+
+	body := `{"title":"Spring Fair","show_title":true,"categories":["Events"],"event_type":"single_day_all_day","start_at":"2026-05-01T10:00:00Z","privacy_type":"public"}`
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/events", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusCreated {
+		t.Fatalf("expected status 201, got %d: %s", res.Code, res.Body.String())
+	}
+	if service.gotCreateRequest.Teaser != "" {
+		t.Fatalf("expected empty teaser, got %q", service.gotCreateRequest.Teaser)
 	}
 }
 
@@ -591,6 +635,56 @@ func TestDeleteEventPhotoEndpointHandlesError(t *testing.T) {
 	assertEventAPIError(t, res, http.StatusNotFound, "not_found", "event media not found")
 }
 
+func TestGetEventMediaContentEndpoint(t *testing.T) {
+	service := &fakeEventService{
+		mediaContentResp: &EventMediaContent{
+			Content:     []byte("hello"),
+			ContentType: "image/png",
+			FileName:    "banner.png",
+		},
+	}
+	router := setupProtectedEventRouter(service)
+
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/events/5/media/8/content", nil)
+	req.Header.Set("Authorization", "Bearer "+signEventTestToken(t, "test-secret"))
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", res.Code, res.Body.String())
+	}
+	if res.Body.String() != "hello" {
+		t.Fatalf("unexpected body: %q", res.Body.String())
+	}
+	if service.gotMediaContentID != 5 || service.gotMediaContentMediaID != 8 {
+		t.Fatalf("unexpected media ids: event=%d media=%d", service.gotMediaContentID, service.gotMediaContentMediaID)
+	}
+	if got := res.Header().Get("Content-Disposition"); !strings.Contains(got, "banner.png") {
+		t.Fatalf("expected content disposition filename, got %q", got)
+	}
+}
+
+func TestGetEventMediaContentEndpointRequiresAuth(t *testing.T) {
+	router := setupProtectedEventRouter(&fakeEventService{})
+
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/events/5/media/8/content", nil)
+	router.ServeHTTP(res, req)
+
+	assertEventAPIError(t, res, http.StatusUnauthorized, "missing_bearer_token", "Missing bearer token")
+}
+
+func TestGetEventMediaContentEndpointHandlesServiceError(t *testing.T) {
+	router := setupProtectedEventRouter(&fakeEventService{mediaContentErr: ErrEventMediaNotFound})
+
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/events/5/media/8/content", nil)
+	req.Header.Set("Authorization", "Bearer "+signEventTestToken(t, "test-secret"))
+	router.ServeHTTP(res, req)
+
+	assertEventAPIError(t, res, http.StatusNotFound, "not_found", "event media not found")
+}
+
 func TestWriteEventErrorAndHelpers(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
@@ -692,4 +786,20 @@ func assertEventAPIError(t *testing.T, res *httptest.ResponseRecorder, wantStatu
 		t.Fatalf("expected error message %q, got %#v", wantMessage, payload)
 	}
 	return payload
+}
+
+func signEventTestToken(t *testing.T, secret string) string {
+	t.Helper()
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"user_id": 7,
+		"email":   "ada@example.com",
+		"role":    "Admin",
+		"exp":     time.Now().Add(15 * time.Minute).Unix(),
+	})
+	signed, err := token.SignedString([]byte(secret))
+	if err != nil {
+		t.Fatalf("sign test token: %v", err)
+	}
+	return signed
 }

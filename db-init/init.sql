@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS events (
     published BOOLEAN NOT NULL DEFAULT FALSE,
     request_review BOOLEAN NOT NULL DEFAULT FALSE,
     review_email_list TEXT[] NOT NULL DEFAULT '{}',
-    teaser TEXT NOT NULL,
+    teaser TEXT NOT NULL DEFAULT '',
     description_html TEXT,
     contact_name VARCHAR(150),
     contact_email VARCHAR(255),
@@ -104,9 +104,6 @@ CREATE TABLE IF NOT EXISTS events (
 
     CONSTRAINT chk_events_title_not_blank
         CHECK (btrim(title) <> ''),
-
-    CONSTRAINT chk_events_teaser_not_blank
-        CHECK (btrim(teaser) <> ''),
 
     CONSTRAINT chk_events_categories_required
         CHECK (cardinality(categories) > 0),
@@ -330,6 +327,12 @@ CREATE TRIGGER trg_event_occurrences_set_updated_at
 BEFORE UPDATE ON event_occurrences
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
+
+ALTER TABLE events
+    ALTER COLUMN teaser SET DEFAULT '';
+
+ALTER TABLE events
+    DROP CONSTRAINT IF EXISTS chk_events_teaser_not_blank;
 
 INSERT INTO roles (role, priority)
 VALUES

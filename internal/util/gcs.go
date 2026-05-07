@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"path"
@@ -18,10 +19,12 @@ import (
 var (
 	ErrBucketNameRequired = errors.New("bucket name is required")
 	ErrObjectNameRequired = errors.New("object name is required")
+	ErrObjectNotFound     = errors.New("gcs object not found")
 )
 
 type gcsClient interface {
 	NewWriter(ctx context.Context, bucketName, objectName, contentType string) (gcsWriter, error)
+	NewReader(ctx context.Context, bucketName, objectName string) (gcsReader, error)
 	DeleteObject(ctx context.Context, bucketName, objectName string) error
 	Close() error
 }
@@ -31,8 +34,15 @@ type gcsWriter interface {
 	Close() error
 }
 
+type gcsReader interface {
+	Read(p []byte) (int, error)
+	Close() error
+	ContentType() string
+}
+
 type gcsClientFuncs struct {
 	newWriter    func(ctx context.Context, bucketName, objectName, contentType string) (gcsWriter, error)
+	newReader    func(ctx context.Context, bucketName, objectName string) (gcsReader, error)
 	deleteObject func(ctx context.Context, bucketName, objectName string) error
 	close        func() error
 }
@@ -40,6 +50,12 @@ type gcsClientFuncs struct {
 type gcsWriterFuncs struct {
 	write func(p []byte) (int, error)
 	close func() error
+}
+
+type gcsReaderFuncs struct {
+	read        func(p []byte) (int, error)
+	close       func() error
+	contentType func() string
 }
 
 var newGCSClient = func(ctx context.Context) (gcsClient, error) {
@@ -56,6 +72,19 @@ var newGCSClient = func(ctx context.Context) (gcsClient, error) {
 				close: writer.Close,
 			}, nil
 		},
+		newReader: func(ctx context.Context, bucketName, objectName string) (gcsReader, error) {
+			reader, err := client.Bucket(bucketName).Object(objectName).NewReader(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return gcsReaderFuncs{
+				read:  reader.Read,
+				close: reader.Close,
+				contentType: func() string {
+					return reader.Attrs.ContentType
+				},
+			}, nil
+		},
 		deleteObject: func(ctx context.Context, bucketName, objectName string) error {
 			return client.Bucket(bucketName).Object(objectName).Delete(ctx)
 		},
@@ -65,6 +94,10 @@ var newGCSClient = func(ctx context.Context) (gcsClient, error) {
 
 func (c gcsClientFuncs) NewWriter(ctx context.Context, bucketName, objectName, contentType string) (gcsWriter, error) {
 	return c.newWriter(ctx, bucketName, objectName, contentType)
+}
+
+func (c gcsClientFuncs) NewReader(ctx context.Context, bucketName, objectName string) (gcsReader, error) {
+	return c.newReader(ctx, bucketName, objectName)
 }
 
 func (c gcsClientFuncs) DeleteObject(ctx context.Context, bucketName, objectName string) error {
@@ -81,6 +114,21 @@ func (w gcsWriterFuncs) Write(p []byte) (int, error) {
 
 func (w gcsWriterFuncs) Close() error {
 	return w.close()
+}
+
+func (r gcsReaderFuncs) Read(p []byte) (int, error) {
+	return r.read(p)
+}
+
+func (r gcsReaderFuncs) Close() error {
+	return r.close()
+}
+
+func (r gcsReaderFuncs) ContentType() string {
+	if r.contentType == nil {
+		return ""
+	}
+	return r.contentType()
 }
 
 func UploadBase64ToGCS(base64Data, bucketName, objectName, contentType string) (string, int64, error) {
@@ -121,7 +169,47 @@ func UploadBase64ToGCS(base64Data, bucketName, objectName, contentType string) (
 		return "", 0, err
 	}
 
-	return PublicGCSURL(bucketName, objectName), int64(sizeBytes), nil
+	return GCSObjectURI(bucketName, objectName), int64(sizeBytes), nil
+}
+
+func ReadGCSObject(bucketName, objectName string) ([]byte, string, error) {
+	if strings.TrimSpace(bucketName) == "" {
+		return nil, "", ErrBucketNameRequired
+	}
+	if strings.TrimSpace(objectName) == "" {
+		return nil, "", ErrObjectNameRequired
+	}
+
+	ctx := context.Background()
+	client, err := newGCSClient(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	defer client.Close()
+
+	reader, err := client.NewReader(ctx, bucketName, objectName)
+	if err != nil {
+		if errors.Is(err, storage.ErrObjectNotExist) {
+			return nil, "", ErrObjectNotFound
+		}
+		return nil, "", err
+	}
+	defer reader.Close()
+
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, "", err
+	}
+
+	contentType := strings.TrimSpace(reader.ContentType())
+	if contentType == "" && len(data) > 0 {
+		contentType = http.DetectContentType(data)
+	}
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	return data, contentType, nil
 }
 
 func DeleteGCSObject(bucketName, objectName string) error {
@@ -143,11 +231,14 @@ func DeleteGCSObject(bucketName, objectName string) error {
 }
 
 func DeleteGCSObjectByURL(bucketName, rawURL string) error {
-	objectName, err := ExtractObjectPathFromGCSURL(bucketName, rawURL)
+	resolvedBucket, objectName, err := ParseGCSObjectReference(bucketName, rawURL)
 	if err != nil {
 		return err
 	}
-	return DeleteGCSObject(bucketName, objectName)
+	if strings.TrimSpace(resolvedBucket) == "" {
+		resolvedBucket = bucketName
+	}
+	return DeleteGCSObject(resolvedBucket, objectName)
 }
 
 func decodeBase64Payload(base64Data string) ([]byte, error) {
@@ -204,28 +295,78 @@ func PublicGCSURL(bucket, objectPath string) string {
 	return fmt.Sprintf("https://storage.googleapis.com/%s/%s", bucket, objectPath)
 }
 
+func GCSObjectURI(bucket, objectPath string) string {
+	return fmt.Sprintf("gs://%s/%s", bucket, objectPath)
+}
+
 func ExtractObjectPathFromGCSURL(bucket, raw string) (string, error) {
+	_, objectPath, err := ParseGCSObjectReference(bucket, raw)
+	return objectPath, err
+}
+
+func ParseGCSObjectReference(fallbackBucket, raw string) (string, string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", "", ErrObjectNameRequired
+	}
+
 	u, err := url.Parse(raw)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	u.RawQuery = ""
 	u.Fragment = ""
 
-	host := u.Host
-	p := strings.TrimPrefix(u.Path, "/")
+	if strings.EqualFold(u.Scheme, "gs") {
+		bucketName := strings.TrimSpace(u.Host)
+		objectPath := strings.TrimPrefix(path.Clean("/"+strings.TrimPrefix(u.Path, "/")), "/")
+		if bucketName == "" {
+			bucketName = strings.TrimSpace(fallbackBucket)
+		}
+		if bucketName == "" {
+			return "", "", ErrBucketNameRequired
+		}
+		if objectPath == "" || objectPath == "." {
+			return "", "", ErrObjectNameRequired
+		}
+		return bucketName, objectPath, nil
+	}
+
+	if u.Scheme == "" && u.Host == "" {
+		objectPath := strings.TrimPrefix(path.Clean("/"+raw), "/")
+		if objectPath == "" || objectPath == "." {
+			return "", "", ErrObjectNameRequired
+		}
+		return strings.TrimSpace(fallbackBucket), objectPath, nil
+	}
+
+	host := strings.ToLower(strings.TrimSpace(u.Host))
+	objectPath := strings.TrimPrefix(u.Path, "/")
 
 	if strings.EqualFold(host, "storage.googleapis.com") {
-		prefix := bucket + "/"
-		if strings.HasPrefix(p, prefix) {
-			return strings.TrimPrefix(p, prefix), nil
+		fallbackBucket = strings.TrimSpace(fallbackBucket)
+		prefix := fallbackBucket + "/"
+		if fallbackBucket != "" {
+			if strings.HasPrefix(objectPath, prefix) {
+				return fallbackBucket, strings.TrimPrefix(objectPath, prefix), nil
+			}
+			return fallbackBucket, objectPath, nil
 		}
-		return p, nil
+		parts := strings.SplitN(objectPath, "/", 2)
+		if len(parts) == 2 {
+			return parts[0], parts[1], nil
+		}
+		return fallbackBucket, objectPath, nil
 	}
 
 	if strings.HasSuffix(strings.ToLower(host), ".storage.googleapis.com") {
-		return p, nil
+		bucketName := strings.TrimSuffix(host, ".storage.googleapis.com")
+		return bucketName, objectPath, nil
 	}
 
-	return strings.TrimPrefix(path.Clean("/"+p), "/"), nil
+	objectPath = strings.TrimPrefix(path.Clean("/"+objectPath), "/")
+	if objectPath == "" || objectPath == "." {
+		return "", "", ErrObjectNameRequired
+	}
+	return strings.TrimSpace(fallbackBucket), objectPath, nil
 }
