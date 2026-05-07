@@ -81,6 +81,7 @@ type EventMedia struct {
 	DisplayName  string    `gorm:"size:255;column:display_name" json:"display_name"`
 	GCPObjectKey string    `gorm:"column:gcp_object_key" json:"gcp_object_key"`
 	FileURL      string    `gorm:"not null;column:file_url" json:"file_url"`
+	StorageURI   string    `gorm:"-" json:"storage_uri,omitempty"`
 	FetchURL     string    `gorm:"-" json:"fetch_url,omitempty"`
 	MimeType     string    `gorm:"size:255;column:mime_type" json:"mime_type"`
 	FileSize     int64     `gorm:"column:file_size" json:"file_size"`
@@ -112,12 +113,14 @@ type EventAddressInput struct {
 }
 
 type EventUploadInput struct {
-	DisplayName string `json:"display_name"`
-	FileName    string `json:"file_name"`
-	MimeType    string `json:"mime_type"`
-	DataBase64  string `json:"data_base64"`
-	FileURL     string `json:"file_url"`
-	ObjectKey   string `json:"object_key"`
+	DisplayName  string `json:"display_name"`
+	FileName     string `json:"file_name"`
+	MimeType     string `json:"mime_type"`
+	DataBase64   string `json:"data_base64"`
+	FileURL      string `json:"file_url"`
+	StorageURI   string `json:"storage_uri"`
+	ObjectKey    string `json:"object_key"`
+	GCPObjectKey string `json:"gcp_object_key"`
 }
 
 type EventOccurrenceInput struct {
