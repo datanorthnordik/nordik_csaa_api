@@ -238,11 +238,23 @@ func TestGetEventSuccessAndNotFound(t *testing.T) {
 	if resp.DateDisplay != "2026-05-01 10:00 - 2026-05-01 12:00" {
 		t.Fatalf("unexpected date display: %q", resp.DateDisplay)
 	}
+	if resp.DisplayImage.FileURL != "/api/events/12/media/3/content" {
+		t.Fatalf("unexpected display image file url: %q", resp.DisplayImage.FileURL)
+	}
 	if resp.DisplayImage.FetchURL != "/api/events/12/media/3/content" {
 		t.Fatalf("unexpected display image fetch url: %q", resp.DisplayImage.FetchURL)
 	}
+	if resp.DisplayImage.StorageURI != "gs://drive-bucket/events/12/banner.png" {
+		t.Fatalf("unexpected display image storage uri: %q", resp.DisplayImage.StorageURI)
+	}
+	if resp.Attachments[0].FileURL != "/api/events/12/media/4/content" {
+		t.Fatalf("unexpected attachment file url: %q", resp.Attachments[0].FileURL)
+	}
 	if resp.Attachments[0].FetchURL != "/api/events/12/media/4/content" {
 		t.Fatalf("unexpected attachment fetch url: %q", resp.Attachments[0].FetchURL)
+	}
+	if resp.Attachments[0].StorageURI != "gs://drive-bucket/events/12/agenda.pdf" {
+		t.Fatalf("unexpected attachment storage uri: %q", resp.Attachments[0].StorageURI)
 	}
 
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "events" WHERE "events"."id" = $1 ORDER BY "events"."id" LIMIT $2`)).
@@ -298,6 +310,31 @@ func TestGetEventMediaContent(t *testing.T) {
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestGetEventMediaContentWithBucketPrefix(t *testing.T) {
+	db, mock, cleanup := setupMockDB(t)
+	defer cleanup()
+
+	service := &EventService{DB: db, BucketName: "drive-bucket", BucketPrefix: "main-folder"}
+	restore := stubMediaHooks()
+	defer restore()
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "event_media" WHERE event_id = $1 AND id = $2 ORDER BY "event_media"."id" LIMIT $3`)).
+		WithArgs(12, 4, 1).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "event_id", "media_role", "display_name", "gcp_object_key", "file_url", "mime_type", "file_size", "sort_order", "created_at", "updated_at",
+		}).AddRow(
+			4, 12, MediaRoleAttachment, "Agenda", "events/12/agenda.pdf", "gs://drive-bucket/main-folder/events/12/agenda.pdf", "application/pdf", 20, 1, time.Now(), time.Now(),
+		))
+
+	resp, err := service.GetEventMediaContent(12, 4)
+	if err != nil {
+		t.Fatalf("GetEventMediaContent returned error: %v", err)
+	}
+	if string(resp.Content) != "downloaded:drive-bucket/main-folder/events/12/agenda.pdf" {
+		t.Fatalf("unexpected prefixed content: %q", string(resp.Content))
 	}
 }
 
@@ -953,6 +990,37 @@ func TestNormalizeHelpersAndUtilityBranches(t *testing.T) {
 	}
 	if uploadedObject != "" || media.GCPObjectKey != "events/1/file.pdf" {
 		t.Fatalf("unexpected buildMediaRecord result: %#v object=%q", media, uploadedObject)
+	}
+
+	media, uploadedObject, err = service.buildMediaRecord(1, MediaRoleAttachment, 0, EventUploadInput{
+		FileURL:      "/api/events/1/media/9/content",
+		StorageURI:   "gs://drive-bucket/events/1/file.pdf",
+		GCPObjectKey: "events/1/file.pdf",
+	})
+	if err != nil {
+		t.Fatalf("buildMediaRecord with storage alias returned error: %v", err)
+	}
+	if uploadedObject != "" || media.FileURL != "gs://drive-bucket/events/1/file.pdf" || media.GCPObjectKey != "events/1/file.pdf" {
+		t.Fatalf("unexpected alias buildMediaRecord result: %#v object=%q", media, uploadedObject)
+	}
+
+	service.BucketPrefix = "main-folder"
+	media, uploadedObject, err = service.buildMediaRecord(1, MediaRoleAttachment, 0, EventUploadInput{
+		FileName:   "Agenda.pdf",
+		MimeType:   "application/pdf",
+		DataBase64: "aGVsbG8=",
+	})
+	if err != nil {
+		t.Fatalf("buildMediaRecord with bucket prefix returned error: %v", err)
+	}
+	if uploadedObject != "main-folder/events/1/attachment_20260501100000_1_agenda.pdf" {
+		t.Fatalf("unexpected uploaded object with prefix: %q", uploadedObject)
+	}
+	if media.GCPObjectKey != "events/1/attachment_20260501100000_1_agenda.pdf" {
+		t.Fatalf("unexpected stored gcp_object_key: %q", media.GCPObjectKey)
+	}
+	if media.FileURL != "gs://drive-bucket/main-folder/events/1/attachment_20260501100000_1_agenda.pdf" {
+		t.Fatalf("unexpected stored file url: %q", media.FileURL)
 	}
 
 	service.BucketName = ""

@@ -36,8 +36,9 @@ var (
 )
 
 type EventService struct {
-	DB         *gorm.DB
-	BucketName string
+	DB           *gorm.DB
+	BucketName   string
+	BucketPrefix string
 }
 
 func (s *EventService) ListEvents(filter ListEventsFilter) (*EventListResponse, error) {
@@ -149,7 +150,9 @@ func (s *EventService) GetEvent(id int) (*EventDetailResponse, error) {
 	var displayImage *EventMedia
 	attachments := make([]EventMedia, 0)
 	for _, item := range media {
+		item.StorageURI = item.FileURL
 		item.FetchURL = buildEventMediaFetchURL(item.EventID, item.ID)
+		item.FileURL = item.FetchURL
 		switch item.MediaRole {
 		case MediaRoleDisplayImage:
 			copyItem := item
@@ -808,16 +811,25 @@ func (s *EventService) buildMediaRecord(eventID int, role string, idx int, input
 		SortOrder:   idx,
 	}
 
+	referenceURL := strings.TrimSpace(input.StorageURI)
+	if referenceURL == "" {
+		referenceURL = strings.TrimSpace(input.FileURL)
+	}
+	objectKey := strings.TrimSpace(input.ObjectKey)
+	if objectKey == "" {
+		objectKey = strings.TrimSpace(input.GCPObjectKey)
+	}
+
 	if strings.TrimSpace(input.DataBase64) == "" {
-		if strings.TrimSpace(input.FileURL) == "" {
+		if referenceURL == "" {
 			return EventMedia{}, "", fmt.Errorf("%s upload %d is missing both data_base64 and file_url", role, idx+1)
 		}
-		media.FileURL = strings.TrimSpace(input.FileURL)
-		media.GCPObjectKey = strings.TrimSpace(input.ObjectKey)
+		media.FileURL = referenceURL
+		media.GCPObjectKey = objectKey
 		if media.GCPObjectKey == "" {
 			_, objectKey, err := util.ParseGCSObjectReference(s.BucketName, media.FileURL)
 			if err == nil {
-				media.GCPObjectKey = objectKey
+				media.GCPObjectKey = s.relativeMediaObjectKey(objectKey)
 			}
 		}
 		return media, "", nil
@@ -828,7 +840,8 @@ func (s *EventService) buildMediaRecord(eventID int, role string, idx int, input
 	}
 
 	objectName := s.mediaObjectName(eventID, role, idx, input.FileName, input.MimeType)
-	fileURL, sizeBytes, err := uploadBase64ToGCSHook(input.DataBase64, s.BucketName, objectName, strings.TrimSpace(input.MimeType))
+	storageObjectName := s.storageObjectName(objectName)
+	fileURL, sizeBytes, err := uploadBase64ToGCSHook(input.DataBase64, s.BucketName, storageObjectName, strings.TrimSpace(input.MimeType))
 	if err != nil {
 		return EventMedia{}, "", err
 	}
@@ -836,7 +849,7 @@ func (s *EventService) buildMediaRecord(eventID int, role string, idx int, input
 	media.FileURL = fileURL
 	media.GCPObjectKey = objectName
 	media.FileSize = sizeBytes
-	return media, objectName, nil
+	return media, storageObjectName, nil
 }
 
 func (s *EventService) replaceOccurrences(tx *gorm.DB, eventID int, occurrences []EventOccurrenceInput) error {
@@ -929,7 +942,9 @@ func sanitizeUploadInput(value EventUploadInput) EventUploadInput {
 	value.MimeType = strings.TrimSpace(value.MimeType)
 	value.DataBase64 = strings.TrimSpace(value.DataBase64)
 	value.FileURL = strings.TrimSpace(value.FileURL)
+	value.StorageURI = strings.TrimSpace(value.StorageURI)
 	value.ObjectKey = strings.TrimSpace(value.ObjectKey)
+	value.GCPObjectKey = strings.TrimSpace(value.GCPObjectKey)
 	return value
 }
 
@@ -938,7 +953,7 @@ func (s *EventService) resolveMediaObjectReference(media EventMedia) (string, st
 	if objectKey != "" {
 		bucketName := strings.TrimSpace(s.BucketName)
 		if bucketName != "" {
-			return bucketName, objectKey, nil
+			return bucketName, s.storageObjectName(objectKey), nil
 		}
 		if strings.TrimSpace(media.FileURL) == "" {
 			return "", "", ErrMediaBucketNotConfigured
@@ -956,6 +971,36 @@ func (s *EventService) resolveMediaObjectReference(media EventMedia) (string, st
 		return "", "", ErrMediaBucketNotConfigured
 	}
 	return bucketName, objectKey, nil
+}
+
+func (s *EventService) storageObjectName(objectKey string) string {
+	objectKey = strings.Trim(strings.TrimSpace(objectKey), "/")
+	prefix := strings.Trim(strings.TrimSpace(s.BucketPrefix), "/")
+	if objectKey == "" {
+		return prefix
+	}
+	if prefix == "" {
+		return objectKey
+	}
+	if objectKey == prefix || strings.HasPrefix(objectKey, prefix+"/") {
+		return objectKey
+	}
+	return path.Join(prefix, objectKey)
+}
+
+func (s *EventService) relativeMediaObjectKey(objectKey string) string {
+	objectKey = strings.Trim(strings.TrimSpace(objectKey), "/")
+	prefix := strings.Trim(strings.TrimSpace(s.BucketPrefix), "/")
+	if prefix == "" {
+		return objectKey
+	}
+	if objectKey == prefix {
+		return ""
+	}
+	if strings.HasPrefix(objectKey, prefix+"/") {
+		return strings.TrimPrefix(objectKey, prefix+"/")
+	}
+	return objectKey
 }
 
 func buildEventMediaFetchURL(eventID int, mediaID int) string {
