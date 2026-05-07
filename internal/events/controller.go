@@ -47,6 +47,29 @@ func (ec *EventController) GetEvent(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+func (ec *EventController) GetEventMediaContent(c *gin.Context) {
+	id, mediaID, ok := pathEventAndMediaIDs(c)
+	if !ok {
+		return
+	}
+
+	resp, err := ec.EventService.GetEventMediaContent(id, mediaID)
+	if err != nil {
+		writeEventError(c, err)
+		return
+	}
+
+	contentType := strings.TrimSpace(resp.ContentType)
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	if fileName := sanitizeContentDispositionFilename(resp.FileName); fileName != "" {
+		c.Header("Content-Disposition", "inline; filename="+strconv.Quote(fileName))
+	}
+
+	c.Data(http.StatusOK, contentType, resp.Content)
+}
+
 func (ec *EventController) ListSavedLocations(c *gin.Context) {
 	resp, err := ec.EventService.ListSavedLocations()
 	if err != nil {
@@ -273,4 +296,11 @@ func splitQueryValues(values ...string) []string {
 		}
 	}
 	return parts
+}
+
+func sanitizeContentDispositionFilename(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.ReplaceAll(value, "\r", "")
+	value = strings.ReplaceAll(value, "\n", "")
+	return value
 }

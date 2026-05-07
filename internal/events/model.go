@@ -27,7 +27,7 @@ type Event struct {
 	Published                   bool           `gorm:"not null;default:false" json:"published"`
 	RequestReview               bool           `gorm:"not null;default:false;column:request_review" json:"request_review"`
 	ReviewEmailList             pq.StringArray `gorm:"type:text[];not null;default:'{}';column:review_email_list" json:"review_email_list"`
-	Teaser                      string         `gorm:"not null" json:"teaser"`
+	Teaser                      string         `gorm:"not null;default:''" json:"teaser"`
 	DescriptionHTML             string         `gorm:"column:description_html" json:"description_html"`
 	ContactName                 string         `gorm:"size:150;column:contact_name" json:"contact_name"`
 	ContactEmail                string         `gorm:"size:255;column:contact_email" json:"contact_email"`
@@ -81,6 +81,7 @@ type EventMedia struct {
 	DisplayName  string    `gorm:"size:255;column:display_name" json:"display_name"`
 	GCPObjectKey string    `gorm:"column:gcp_object_key" json:"gcp_object_key"`
 	FileURL      string    `gorm:"not null;column:file_url" json:"file_url"`
+	FetchURL     string    `gorm:"-" json:"fetch_url,omitempty"`
 	MimeType     string    `gorm:"size:255;column:mime_type" json:"mime_type"`
 	FileSize     int64     `gorm:"column:file_size" json:"file_size"`
 	SortOrder    int       `gorm:"not null;default:0;column:sort_order" json:"sort_order"`
@@ -137,7 +138,7 @@ type SaveEventRequest struct {
 	Published                   bool                   `json:"published"`
 	RequestReview               bool                   `json:"request_review"`
 	ReviewEmailList             []string               `json:"review_email_list"`
-	Teaser                      string                 `json:"teaser" binding:"required"`
+	Teaser                      string                 `json:"teaser"`
 	DescriptionHTML             string                 `json:"description_html"`
 	ContactName                 string                 `json:"contact_name"`
 	ContactEmail                string                 `json:"contact_email"`
@@ -207,16 +208,17 @@ type ListEventsFilter struct {
 }
 
 type EventListItem struct {
-	ID         int        `json:"id"`
-	Title      string     `json:"title"`
-	Categories []string   `json:"categories"`
-	Status     string     `json:"status"`
-	Published  bool       `json:"published"`
-	EventType  string     `json:"event_type"`
-	StartAt    time.Time  `json:"start_at"`
-	EndAt      *time.Time `json:"end_at,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+	ID          int        `json:"id"`
+	Title       string     `json:"title"`
+	Categories  []string   `json:"categories"`
+	Status      string     `json:"status"`
+	Published   bool       `json:"published"`
+	EventType   string     `json:"event_type"`
+	StartAt     time.Time  `json:"start_at"`
+	EndAt       *time.Time `json:"end_at,omitempty"`
+	DateDisplay string     `json:"date_display"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 type EventListResponse struct {
@@ -233,6 +235,7 @@ type EventDetailResponse struct {
 	EventType                   string            `json:"event_type"`
 	StartAt                     time.Time         `json:"start_at"`
 	EndAt                       *time.Time        `json:"end_at,omitempty"`
+	DateDisplay                 string            `json:"date_display"`
 	PrivacyType                 string            `json:"privacy_type"`
 	PrivateAudiences            []string          `json:"private_audiences"`
 	Published                   bool              `json:"published"`
@@ -265,6 +268,12 @@ type EventDetailResponse struct {
 	CreatedBy                   *int              `json:"created_by,omitempty"`
 	CreatedAt                   time.Time         `json:"created_at"`
 	UpdatedAt                   time.Time         `json:"updated_at"`
+}
+
+type EventMediaContent struct {
+	Content     []byte
+	ContentType string
+	FileName    string
 }
 
 type EventListPageMeta struct {

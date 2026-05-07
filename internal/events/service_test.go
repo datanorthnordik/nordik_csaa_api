@@ -120,6 +120,9 @@ func TestListEventsSuccessAndValidation(t *testing.T) {
 	if resp.Pagination.TotalItems != 11 || len(resp.Items) != 1 || resp.Items[0].Status != EventStatusPublished {
 		t.Fatalf("unexpected response: %#v", resp)
 	}
+	if resp.Items[0].DateDisplay != "2026-05-10" {
+		t.Fatalf("unexpected date display: %q", resp.Items[0].DateDisplay)
+	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
@@ -215,8 +218,8 @@ func TestGetEventSuccessAndNotFound(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "event_id", "media_role", "display_name", "gcp_object_key", "file_url", "mime_type", "file_size", "sort_order", "created_at", "updated_at",
 		}).
-			AddRow(3, 12, MediaRoleDisplayImage, "Banner", "events/12/banner.png", "https://example.com/banner.png", "image/png", 10, 0, startAt, startAt).
-			AddRow(4, 12, MediaRoleAttachment, "Agenda", "events/12/agenda.pdf", "https://example.com/agenda.pdf", "application/pdf", 20, 1, startAt, startAt))
+			AddRow(3, 12, MediaRoleDisplayImage, "Banner", "events/12/banner.png", "gs://drive-bucket/events/12/banner.png", "image/png", 10, 0, startAt, startAt).
+			AddRow(4, 12, MediaRoleAttachment, "Agenda", "events/12/agenda.pdf", "gs://drive-bucket/events/12/agenda.pdf", "application/pdf", 20, 1, startAt, startAt))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "event_occurrences" WHERE event_id = $1 ORDER BY occurrence_start_at ASC,id ASC`)).
 		WithArgs(12).
 		WillReturnRows(sqlmock.NewRows([]string{
@@ -232,6 +235,15 @@ func TestGetEventSuccessAndNotFound(t *testing.T) {
 	if resp.ID != 12 || resp.Address == nil || resp.DisplayImage == nil || len(resp.Attachments) != 1 || len(resp.Occurrences) != 1 {
 		t.Fatalf("unexpected detail response: %#v", resp)
 	}
+	if resp.DateDisplay != "2026-05-01 10:00 - 2026-05-01 12:00" {
+		t.Fatalf("unexpected date display: %q", resp.DateDisplay)
+	}
+	if resp.DisplayImage.FetchURL != "/api/events/12/media/3/content" {
+		t.Fatalf("unexpected display image fetch url: %q", resp.DisplayImage.FetchURL)
+	}
+	if resp.Attachments[0].FetchURL != "/api/events/12/media/4/content" {
+		t.Fatalf("unexpected attachment fetch url: %q", resp.Attachments[0].FetchURL)
+	}
 
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "events" WHERE "events"."id" = $1 ORDER BY "events"."id" LIMIT $2`)).
 		WithArgs(99, 1).
@@ -239,6 +251,49 @@ func TestGetEventSuccessAndNotFound(t *testing.T) {
 
 	if _, err := service.GetEvent(99); !errors.Is(err, ErrEventNotFound) {
 		t.Fatalf("expected ErrEventNotFound, got %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestGetEventMediaContent(t *testing.T) {
+	db, mock, cleanup := setupMockDB(t)
+	defer cleanup()
+
+	service := &EventService{DB: db, BucketName: "drive-bucket"}
+	restore := stubMediaHooks()
+	defer restore()
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "event_media" WHERE event_id = $1 AND id = $2 ORDER BY "event_media"."id" LIMIT $3`)).
+		WithArgs(12, 4, 1).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "event_id", "media_role", "display_name", "gcp_object_key", "file_url", "mime_type", "file_size", "sort_order", "created_at", "updated_at",
+		}).AddRow(
+			4, 12, MediaRoleAttachment, "Agenda", "events/12/agenda.pdf", "gs://drive-bucket/events/12/agenda.pdf", "application/pdf", 20, 1, time.Now(), time.Now(),
+		))
+
+	resp, err := service.GetEventMediaContent(12, 4)
+	if err != nil {
+		t.Fatalf("GetEventMediaContent returned error: %v", err)
+	}
+	if string(resp.Content) != "downloaded:drive-bucket/events/12/agenda.pdf" {
+		t.Fatalf("unexpected content: %q", string(resp.Content))
+	}
+	if resp.ContentType != "application/pdf" {
+		t.Fatalf("unexpected content type: %q", resp.ContentType)
+	}
+	if resp.FileName != "Agenda.pdf" {
+		t.Fatalf("unexpected file name: %q", resp.FileName)
+	}
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "event_media" WHERE event_id = $1 AND id = $2 ORDER BY "event_media"."id" LIMIT $3`)).
+		WithArgs(99, 4, 1).
+		WillReturnError(gorm.ErrRecordNotFound)
+
+	if _, err := service.GetEventMediaContent(99, 4); !errors.Is(err, ErrEventMediaNotFound) {
+		t.Fatalf("expected ErrEventMediaNotFound, got %v", err)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -393,7 +448,7 @@ func TestUpdateEventSuccessAndNotFound(t *testing.T) {
 
 	req := validSaveEventRequest()
 	req.DisplayImage = &EventUploadInput{FileName: "new-banner.png", MimeType: "image/png", DataBase64: "aGVsbG8=", DisplayName: "Banner"}
-	req.Attachments = []EventUploadInput{{FileURL: "https://storage.googleapis.com/drive-bucket/events/1/agenda.pdf", ObjectKey: "events/1/agenda.pdf"}}
+	req.Attachments = []EventUploadInput{{FileURL: "gs://drive-bucket/events/1/agenda.pdf", ObjectKey: "events/1/agenda.pdf"}}
 	req.Occurrences = []EventOccurrenceInput{{OccurrenceStartAt: req.StartAt, OccurrenceKind: "generated"}}
 
 	startAt := req.StartAt
@@ -419,7 +474,7 @@ func TestUpdateEventSuccessAndNotFound(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "event_media" WHERE event_id = $1 AND media_role = $2 ORDER BY "event_media"."id" LIMIT $3`)).
 		WithArgs(5, MediaRoleDisplayImage, 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "event_id", "media_role", "display_name", "gcp_object_key", "file_url", "mime_type", "file_size", "sort_order", "created_at", "updated_at"}).
-			AddRow(2, 5, MediaRoleDisplayImage, "Old Banner", "events/5/old-banner.png", "https://storage.googleapis.com/drive-bucket/events/5/old-banner.png", "image/png", 10, 0, startAt, startAt))
+			AddRow(2, 5, MediaRoleDisplayImage, "Old Banner", "events/5/old-banner.png", "gs://drive-bucket/events/5/old-banner.png", "image/png", 10, 0, startAt, startAt))
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM "event_media" WHERE "event_media"."id" = $1`)).
 		WithArgs(2).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -467,8 +522,8 @@ func TestDeleteEventAndMediaFlows(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "event_media" WHERE event_id = $1`)).
 		WithArgs(12).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "event_id", "media_role", "display_name", "gcp_object_key", "file_url", "mime_type", "file_size", "sort_order", "created_at", "updated_at"}).
-			AddRow(1, 12, MediaRoleDisplayImage, "Banner", "events/12/banner.png", "https://storage.googleapis.com/drive-bucket/events/12/banner.png", "image/png", 10, 0, now, now).
-			AddRow(2, 12, MediaRoleAttachment, "Agenda", "events/12/agenda.pdf", "https://storage.googleapis.com/drive-bucket/events/12/agenda.pdf", "application/pdf", 20, 0, now, now))
+			AddRow(1, 12, MediaRoleDisplayImage, "Banner", "events/12/banner.png", "gs://drive-bucket/events/12/banner.png", "image/png", 10, 0, now, now).
+			AddRow(2, 12, MediaRoleAttachment, "Agenda", "events/12/agenda.pdf", "gs://drive-bucket/events/12/agenda.pdf", "application/pdf", 20, 0, now, now))
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM "events" WHERE "events"."id" = $1`)).
 		WithArgs(12).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -482,7 +537,7 @@ func TestDeleteEventAndMediaFlows(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "event_media" WHERE event_id = $1 AND id = $2 ORDER BY "event_media"."id" LIMIT $3`)).
 		WithArgs(12, 2, 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "event_id", "media_role", "display_name", "gcp_object_key", "file_url", "mime_type", "file_size", "sort_order", "created_at", "updated_at"}).
-			AddRow(2, 12, MediaRoleAttachment, "Agenda", "events/12/agenda.pdf", "https://storage.googleapis.com/drive-bucket/events/12/agenda.pdf", "application/pdf", 20, 0, now, now))
+			AddRow(2, 12, MediaRoleAttachment, "Agenda", "events/12/agenda.pdf", "gs://drive-bucket/events/12/agenda.pdf", "application/pdf", 20, 0, now, now))
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM "event_media" WHERE "event_media"."id" = $1`)).
 		WithArgs(2).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -496,7 +551,7 @@ func TestDeleteEventAndMediaFlows(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "event_media" WHERE event_id = $1 AND media_role = $2`)).
 		WithArgs(12, MediaRoleAttachment).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "event_id", "media_role", "display_name", "gcp_object_key", "file_url", "mime_type", "file_size", "sort_order", "created_at", "updated_at"}).
-			AddRow(2, 12, MediaRoleAttachment, "Agenda", "events/12/agenda.pdf", "https://storage.googleapis.com/drive-bucket/events/12/agenda.pdf", "application/pdf", 20, 0, now, now))
+			AddRow(2, 12, MediaRoleAttachment, "Agenda", "events/12/agenda.pdf", "gs://drive-bucket/events/12/agenda.pdf", "application/pdf", 20, 0, now, now))
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM "event_media" WHERE event_id = $1 AND media_role = $2`)).
 		WithArgs(12, MediaRoleAttachment).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -514,7 +569,7 @@ func TestDeleteEventAndMediaFlows(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "event_media" WHERE event_id = $1 AND id = $2 ORDER BY "event_media"."id" LIMIT $3`)).
 		WithArgs(12, 1, 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "event_id", "media_role", "display_name", "gcp_object_key", "file_url", "mime_type", "file_size", "sort_order", "created_at", "updated_at"}).
-			AddRow(1, 12, MediaRoleDisplayImage, "Banner", "events/12/banner.png", "https://storage.googleapis.com/drive-bucket/events/12/banner.png", "image/png", 10, 0, now, now))
+			AddRow(1, 12, MediaRoleDisplayImage, "Banner", "events/12/banner.png", "gs://drive-bucket/events/12/banner.png", "image/png", 10, 0, now, now))
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM "event_media" WHERE "event_media"."id" = $1`)).
 		WithArgs(1).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -550,14 +605,14 @@ func TestDeleteEventErrorsAndHelpers(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "event_media" WHERE event_id = $1 AND id = $2 ORDER BY "event_media"."id" LIMIT $3`)).
 		WithArgs(12, 2, 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "event_id", "media_role", "display_name", "gcp_object_key", "file_url", "mime_type", "file_size", "sort_order", "created_at", "updated_at"}).
-			AddRow(2, 12, MediaRoleDisplayImage, "Banner", "events/12/banner.png", "https://storage.googleapis.com/drive-bucket/events/12/banner.png", "image/png", 10, 0, time.Now(), time.Now()))
+			AddRow(2, 12, MediaRoleDisplayImage, "Banner", "events/12/banner.png", "gs://drive-bucket/events/12/banner.png", "image/png", 10, 0, time.Now(), time.Now()))
 	mock.ExpectRollback()
 
 	if err := service.DeleteEventDocument(12, 2); !errors.Is(err, ErrEventMediaNotFound) {
 		t.Fatalf("expected ErrEventMediaNotFound, got %v", err)
 	}
 
-	if err := service.cleanupSingleMediaObject(EventMedia{FileURL: "https://storage.googleapis.com/drive-bucket/events/1/file.pdf"}); err == nil {
+	if err := service.cleanupSingleMediaObject(EventMedia{FileURL: "gs://drive-bucket/events/1/file.pdf"}); err == nil {
 		t.Fatal("expected cleanupSingleMediaObject to return delete error")
 	}
 
@@ -694,6 +749,19 @@ func TestNormalizeHelpersAndUtilityBranches(t *testing.T) {
 	}
 	if len(normalized.Categories) != 1 || normalized.Categories[0] != "Events" {
 		t.Fatalf("expected trimmed categories, got %#v", normalized.Categories)
+	}
+	if normalized.Teaser != "Welcome!" {
+		t.Fatalf("expected teaser to be preserved, got %q", normalized.Teaser)
+	}
+
+	req = validSaveEventRequest()
+	req.Teaser = "   "
+	normalized, err = normalizeSaveEventRequest(req)
+	if err != nil {
+		t.Fatalf("expected blank teaser to be allowed, got %v", err)
+	}
+	if normalized.Teaser != "" {
+		t.Fatalf("expected teaser to normalize to empty string, got %q", normalized.Teaser)
 	}
 
 	if !isAllowed("public", "public", "private") {
@@ -1146,13 +1214,17 @@ func stubMediaHooks() func() {
 
 func stubMediaHooksWithError(uploadErr, deleteErr error) func() {
 	prevUpload := uploadBase64ToGCSHook
+	prevDownload := downloadGCSObjectHook
 	prevDelete := deleteGCSObjectHook
 	prevNow := nowFunc
 	uploadBase64ToGCSHook = func(base64Data, bucketName, objectName, contentType string) (string, int64, error) {
 		if uploadErr != nil {
 			return "", 0, uploadErr
 		}
-		return "https://storage.googleapis.com/" + bucketName + "/" + objectName, int64(len(base64Data)), nil
+		return "gs://" + bucketName + "/" + objectName, int64(len(base64Data)), nil
+	}
+	downloadGCSObjectHook = func(bucketName, objectName string) ([]byte, string, error) {
+		return []byte("downloaded:" + bucketName + "/" + objectName), "application/pdf", nil
 	}
 	deleteGCSObjectHook = func(bucketName, objectName string) error {
 		return deleteErr
@@ -1162,6 +1234,7 @@ func stubMediaHooksWithError(uploadErr, deleteErr error) func() {
 	}
 	return func() {
 		uploadBase64ToGCSHook = prevUpload
+		downloadGCSObjectHook = prevDownload
 		deleteGCSObjectHook = prevDelete
 		nowFunc = prevNow
 	}

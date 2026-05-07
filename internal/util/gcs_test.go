@@ -3,25 +3,38 @@ package util
 import (
 	"context"
 	"errors"
+	"io"
 	"testing"
 )
 
 type fakeGCSClient struct {
-	writer           gcsWriter
-	newWriterErr     error
-	deleteErr        error
-	closeErr         error
-	gotBucketName    string
-	gotObjectName    string
-	gotContentType   string
-	gotDeleteBucket  string
-	gotDeleteObject  string
+	writer          gcsWriter
+	reader          gcsReader
+	newWriterErr    error
+	newReaderErr    error
+	deleteErr       error
+	closeErr        error
+	gotBucketName   string
+	gotObjectName   string
+	gotContentType  string
+	gotReadBucket   string
+	gotReadObject   string
+	gotDeleteBucket string
+	gotDeleteObject string
 }
 
 type fakeGCSWriter struct {
 	writeErr error
 	closeErr error
 	gotData  []byte
+}
+
+type fakeGCSReader struct {
+	data        []byte
+	offset      int
+	closeErr    error
+	contentType string
+	readErr     error
 }
 
 func (c *fakeGCSClient) NewWriter(ctx context.Context, bucketName, objectName, contentType string) (gcsWriter, error) {
@@ -32,6 +45,15 @@ func (c *fakeGCSClient) NewWriter(ctx context.Context, bucketName, objectName, c
 		return nil, c.newWriterErr
 	}
 	return c.writer, nil
+}
+
+func (c *fakeGCSClient) NewReader(ctx context.Context, bucketName, objectName string) (gcsReader, error) {
+	c.gotReadBucket = bucketName
+	c.gotReadObject = objectName
+	if c.newReaderErr != nil {
+		return nil, c.newReaderErr
+	}
+	return c.reader, nil
 }
 
 func (c *fakeGCSClient) DeleteObject(ctx context.Context, bucketName, objectName string) error {
@@ -56,6 +78,26 @@ func (w *fakeGCSWriter) Close() error {
 	return w.closeErr
 }
 
+func (r *fakeGCSReader) Read(p []byte) (int, error) {
+	if r.readErr != nil {
+		return 0, r.readErr
+	}
+	if r.offset >= len(r.data) {
+		return 0, io.EOF
+	}
+	n := copy(p, r.data[r.offset:])
+	r.offset += n
+	return n, nil
+}
+
+func (r *fakeGCSReader) Close() error {
+	return r.closeErr
+}
+
+func (r *fakeGCSReader) ContentType() string {
+	return r.contentType
+}
+
 func TestUploadBase64ToGCS(t *testing.T) {
 	writer := &fakeGCSWriter{}
 	client := &fakeGCSClient{writer: writer}
@@ -66,7 +108,7 @@ func TestUploadBase64ToGCS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UploadBase64ToGCS returned error: %v", err)
 	}
-	if url != "https://storage.googleapis.com/bucket/path/file.txt" {
+	if url != "gs://bucket/path/file.txt" {
 		t.Fatalf("unexpected url: %q", url)
 	}
 	if size != 5 {
@@ -123,6 +165,59 @@ func TestUploadBase64ToGCSErrors(t *testing.T) {
 
 	if _, _, err := UploadBase64ToGCS("not-base64", "bucket", "obj", ""); err == nil {
 		t.Fatal("expected base64 decode error")
+	}
+}
+
+func TestReadGCSObject(t *testing.T) {
+	reader := &fakeGCSReader{data: []byte("hello"), contentType: "text/plain"}
+	client := &fakeGCSClient{reader: reader}
+	restore := stubGCSClient(client, nil)
+	defer restore()
+
+	data, contentType, err := ReadGCSObject("bucket", "folder/file.txt")
+	if err != nil {
+		t.Fatalf("ReadGCSObject returned error: %v", err)
+	}
+	if string(data) != "hello" {
+		t.Fatalf("unexpected data: %q", string(data))
+	}
+	if contentType != "text/plain" {
+		t.Fatalf("unexpected content type: %q", contentType)
+	}
+	if client.gotReadBucket != "bucket" || client.gotReadObject != "folder/file.txt" {
+		t.Fatalf("unexpected read target: %s %s", client.gotReadBucket, client.gotReadObject)
+	}
+}
+
+func TestReadGCSObjectErrors(t *testing.T) {
+	if _, _, err := ReadGCSObject("", "obj"); !errors.Is(err, ErrBucketNameRequired) {
+		t.Fatalf("expected ErrBucketNameRequired, got %v", err)
+	}
+	if _, _, err := ReadGCSObject("bucket", ""); !errors.Is(err, ErrObjectNameRequired) {
+		t.Fatalf("expected ErrObjectNameRequired, got %v", err)
+	}
+
+	restore := stubGCSClient(nil, errors.New("client create failed"))
+	defer restore()
+	if _, _, err := ReadGCSObject("bucket", "obj"); err == nil {
+		t.Fatal("expected client create error")
+	}
+	restore()
+
+	client := &fakeGCSClient{newReaderErr: errors.New("new reader failed")}
+	restore = stubGCSClient(client, nil)
+	defer restore()
+	if _, _, err := ReadGCSObject("bucket", "obj"); err == nil {
+		t.Fatal("expected new reader error")
+	}
+	restore()
+
+	reader := &fakeGCSReader{readErr: errors.New("read failed")}
+	client = &fakeGCSClient{reader: reader}
+	restore = stubGCSClient(client, nil)
+	defer restore()
+	if _, _, err := ReadGCSObject("bucket", "obj"); err == nil {
+		t.Fatal("expected read error")
 	}
 }
 
@@ -221,6 +316,9 @@ func TestHelperFunctions(t *testing.T) {
 	if got := PublicGCSURL("bucket", "folder/file.pdf"); got != "https://storage.googleapis.com/bucket/folder/file.pdf" {
 		t.Fatalf("unexpected public url: %q", got)
 	}
+	if got := GCSObjectURI("bucket", "folder/file.pdf"); got != "gs://bucket/folder/file.pdf" {
+		t.Fatalf("unexpected gcs uri: %q", got)
+	}
 
 	if data, err := decodeBase64Payload("data:text/plain;base64,aGVsbG8="); err != nil || string(data) != "hello" {
 		t.Fatalf("unexpected decoded payload %q err=%v", string(data), err)
@@ -236,6 +334,8 @@ func TestHelperFunctions(t *testing.T) {
 		{"storage host without bucket prefix", "bucket", "https://storage.googleapis.com/folder/file.pdf", "folder/file.pdf"},
 		{"bucket host", "bucket", "https://bucket.storage.googleapis.com/folder/file.pdf", "folder/file.pdf"},
 		{"unknown host", "bucket", "https://example.com/folder/file.pdf", "folder/file.pdf"},
+		{"gs uri", "bucket", "gs://other-bucket/folder/file.pdf", "folder/file.pdf"},
+		{"plain object path", "bucket", "folder/file.pdf", "folder/file.pdf"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -252,6 +352,14 @@ func TestHelperFunctions(t *testing.T) {
 	if _, err := ExtractObjectPathFromGCSURL("bucket", "://bad-url"); err == nil {
 		t.Fatal("expected parse error")
 	}
+
+	bucketName, objectName, err := ParseGCSObjectReference("bucket", "gs://other-bucket/folder/file.pdf")
+	if err != nil {
+		t.Fatalf("ParseGCSObjectReference returned error: %v", err)
+	}
+	if bucketName != "other-bucket" || objectName != "folder/file.pdf" {
+		t.Fatalf("unexpected parsed reference: bucket=%q object=%q", bucketName, objectName)
+	}
 }
 
 func TestFunctionAdapters(t *testing.T) {
@@ -266,15 +374,37 @@ func TestFunctionAdapters(t *testing.T) {
 		t.Fatalf("unexpected writer close error: %v", err)
 	}
 
+	reader := gcsReaderFuncs{
+		read:        func(p []byte) (int, error) { return copy(p, []byte("abc")), nil },
+		close:       func() error { return nil },
+		contentType: func() string { return "text/plain" },
+	}
+	buf := make([]byte, 3)
+	if n, err := reader.Read(buf); err != nil || n != 3 {
+		t.Fatalf("unexpected reader result n=%d err=%v", n, err)
+	}
+	if reader.ContentType() != "text/plain" {
+		t.Fatalf("unexpected reader content type: %q", reader.ContentType())
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatalf("unexpected reader close error: %v", err)
+	}
+
 	client := gcsClientFuncs{
 		newWriter: func(ctx context.Context, bucketName, objectName, contentType string) (gcsWriter, error) {
 			return writer, nil
+		},
+		newReader: func(ctx context.Context, bucketName, objectName string) (gcsReader, error) {
+			return reader, nil
 		},
 		deleteObject: func(ctx context.Context, bucketName, objectName string) error { return nil },
 		close:        func() error { return nil },
 	}
 	if _, err := client.NewWriter(context.Background(), "bucket", "obj", "text/plain"); err != nil {
 		t.Fatalf("unexpected NewWriter error: %v", err)
+	}
+	if _, err := client.NewReader(context.Background(), "bucket", "obj"); err != nil {
+		t.Fatalf("unexpected NewReader error: %v", err)
 	}
 	if err := client.DeleteObject(context.Background(), "bucket", "obj"); err != nil {
 		t.Fatalf("unexpected DeleteObject error: %v", err)
