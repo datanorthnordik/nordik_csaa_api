@@ -655,8 +655,8 @@ func buildEventModel(req SaveEventRequest) Event {
 		RegistrationEndAt:           req.RegistrationEndAt,
 		RegistrationURL:             req.RegistrationURL,
 		RepeatEnabled:               req.RepeatEnabled,
-		RecurrenceType:              req.RecurrenceType,
-		RecurrenceFrequency:         req.RecurrenceFrequency,
+		RecurrenceType:              stringPtrOrNil(req.RecurrenceType),
+		RecurrenceFrequency:         stringPtrOrNil(req.RecurrenceFrequency),
 		RecurrenceInterval:          req.RecurrenceInterval,
 		RecurrenceUntil:             req.RecurrenceUntil,
 		RecurrenceRule:              JSONRawMessage(req.RecurrenceRule),
@@ -902,6 +902,14 @@ func sanitizeUploadInput(value EventUploadInput) EventUploadInput {
 	value.FileURL = strings.TrimSpace(value.FileURL)
 	value.ObjectKey = strings.TrimSpace(value.ObjectKey)
 	return value
+}
+
+func stringPtrOrNil(value string) *string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return &value
 }
 
 func normalizeListEventsFilter(filter ListEventsFilter) (ListEventsFilter, error) {
