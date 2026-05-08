@@ -2,25 +2,25 @@ package events
 
 import "github.com/gin-gonic/gin"
 
-func RegisterRoutes(r *gin.Engine, es EventServicePort, protected ...gin.HandlerFunc) {
+func RegisterRoutes(r *gin.Engine, es EventServicePort) {
 	controller := &EventController{EventService: es}
 
-	eventGroup := r.Group("/api/events")
+	publicGroup := r.Group("/api/events")
 	{
-		eventGroup.GET("/locations", controller.ListSavedLocations)
-		eventGroup.GET("/galleries", controller.ListGalleries)
-		eventGroup.GET("", controller.ListEvents)
-		eventGroup.GET("/:id", controller.GetEvent)
-		eventGroup.POST("", controller.CreateEvent)
-		eventGroup.PUT("/:id", controller.UpdateEvent)
-		eventGroup.DELETE("/:id", controller.DeleteEvent)
-		eventGroup.DELETE("/:id/documents/:mediaId", controller.DeleteEventDocument)
-		eventGroup.DELETE("/:id/documents", controller.DeleteAllEventDocuments)
-		eventGroup.DELETE("/:id/photos/:mediaId", controller.DeleteEventPhoto)
-		if len(protected) > 0 {
-			handlers := append([]gin.HandlerFunc{}, protected...)
-			handlers = append(handlers, controller.GetEventMediaContent)
-			eventGroup.GET("/:id/media/:mediaId/content", handlers...)
-		}
+		publicGroup.GET("", controller.ListEvents)
+		publicGroup.GET("/:id", controller.GetEvent)
+		publicGroup.GET("/:id/media/:mediaId/content", controller.GetEventMediaContent)
+	}
+
+	cmsGroup := r.Group("/api/cms/events")
+	{
+		cmsGroup.GET("/locations", controller.ListSavedLocations)
+		cmsGroup.GET("/galleries", controller.ListGalleries)
+		cmsGroup.POST("", controller.CreateEvent)
+		cmsGroup.PUT("/:id", controller.UpdateEvent)
+		cmsGroup.DELETE("/:id", controller.DeleteEvent)
+		cmsGroup.DELETE("/:id/documents/:mediaId", controller.DeleteEventDocument)
+		cmsGroup.DELETE("/:id/documents", controller.DeleteAllEventDocuments)
+		cmsGroup.DELETE("/:id/photos/:mediaId", controller.DeleteEventPhoto)
 	}
 }
