@@ -61,7 +61,7 @@ func main() {
 	userService := &auth.AuthService{DB: db}
 	auth.RegisterRoutes(r, userService, &cfg)
 	eventService := &events.EventService{DB: db, BucketName: cfg.DriveBucketName, BucketPrefix: cfg.DriveBucketPrefix}
-	events.RegisterRoutes(r, eventService, auth.RequireBearerAuth(&cfg))
+	events.RegisterRoutes(r, eventService)
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})

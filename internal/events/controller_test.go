@@ -10,11 +10,8 @@ import (
 	"time"
 
 	"nordikcsaaapi/internal/apiresponse"
-	authpkg "nordikcsaaapi/internal/auth"
-	"nordikcsaaapi/internal/config"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 )
 
 type fakeEventService struct {
@@ -164,10 +161,10 @@ func setupEventRouter(service EventServicePort) *gin.Engine {
 	return r
 }
 
-func setupProtectedEventRouter(service EventServicePort) *gin.Engine {
+func setupCMSEventRouter(service EventServicePort) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	RegisterRoutes(r, service, authpkg.RequireBearerAuth(&config.Config{JWTSecret: "test-secret"}))
+	RegisterRoutes(r, service)
 	return r
 }
 
@@ -182,7 +179,7 @@ func TestListSavedLocationsEndpoint(t *testing.T) {
 	router := setupEventRouter(service)
 
 	res := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/events/locations", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/cms/events/locations", nil)
 	router.ServeHTTP(res, req)
 
 	if res.Code != http.StatusOK {
@@ -252,7 +249,7 @@ func TestListSavedLocationsEndpointHandlesError(t *testing.T) {
 	router := setupEventRouter(&fakeEventService{locationsErr: ErrStoreUnavailable})
 
 	res := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/events/locations", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/cms/events/locations", nil)
 	router.ServeHTTP(res, req)
 
 	if res.Code != http.StatusServiceUnavailable {
@@ -273,7 +270,7 @@ func TestListGalleriesEndpoint(t *testing.T) {
 	router := setupEventRouter(service)
 
 	res := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/events/galleries", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/cms/events/galleries", nil)
 	router.ServeHTTP(res, req)
 
 	if res.Code != http.StatusOK {
@@ -293,7 +290,7 @@ func TestListGalleriesEndpointHandlesError(t *testing.T) {
 	router := setupEventRouter(&fakeEventService{galleriesErr: ErrStoreUnavailable})
 
 	res := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/events/galleries", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/cms/events/galleries", nil)
 	router.ServeHTTP(res, req)
 
 	if res.Code != http.StatusServiceUnavailable {
@@ -309,7 +306,7 @@ func TestCreateEventEndpoint(t *testing.T) {
 
 	body := `{"title":"Spring Fair","show_title":true,"categories":["Events"],"event_type":"single_day_all_day","start_at":"2026-05-01T10:00:00Z","privacy_type":"public","teaser":"Welcome!"}`
 	res := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/events", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/cms/events", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(res, req)
 
@@ -327,7 +324,7 @@ func TestCreateEventEndpointAllowsMissingTeaser(t *testing.T) {
 
 	body := `{"title":"Spring Fair","show_title":true,"categories":["Events"],"event_type":"single_day_all_day","start_at":"2026-05-01T10:00:00Z","privacy_type":"public"}`
 	res := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/events", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/cms/events", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(res, req)
 
@@ -413,7 +410,7 @@ func TestCreateEventEndpointRejectsInvalidPayload(t *testing.T) {
 	router := setupEventRouter(&fakeEventService{})
 
 	res := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/events", strings.NewReader(`{"title":`))
+	req := httptest.NewRequest(http.MethodPost, "/api/cms/events", strings.NewReader(`{"title":`))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(res, req)
 
@@ -429,7 +426,7 @@ func TestCreateEventEndpointHandlesServiceUnavailable(t *testing.T) {
 
 	body := `{"title":"Spring Fair","categories":["Events"],"event_type":"single_day_all_day","start_at":"2026-05-01T10:00:00Z","teaser":"Welcome!"}`
 	res := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/events", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/cms/events", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(res, req)
 
@@ -442,11 +439,11 @@ func TestCreateEventEndpointHandlesServiceUnavailable(t *testing.T) {
 
 func TestUpdateEventEndpoint(t *testing.T) {
 	service := &fakeEventService{}
-	router := setupEventRouter(service)
+	router := setupCMSEventRouter(service)
 
 	body := `{"title":"Updated Fair","categories":["Events"],"event_type":"single_day_all_day","start_at":"2026-05-01T10:00:00Z","teaser":"Updated!"}`
 	res := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/api/events/12", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, "/api/cms/events/12", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(res, req)
 
@@ -462,7 +459,7 @@ func TestUpdateEventEndpointRejectsBadID(t *testing.T) {
 	router := setupEventRouter(&fakeEventService{})
 
 	res := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/api/events/bad", strings.NewReader(`{}`))
+	req := httptest.NewRequest(http.MethodPut, "/api/cms/events/bad", strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(res, req)
 
@@ -480,7 +477,7 @@ func TestUpdateEventEndpointRejectsInvalidPayload(t *testing.T) {
 	router := setupEventRouter(&fakeEventService{})
 
 	res := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/api/events/12", strings.NewReader(`{"title":`))
+	req := httptest.NewRequest(http.MethodPut, "/api/cms/events/12", strings.NewReader(`{"title":`))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(res, req)
 
@@ -496,7 +493,7 @@ func TestUpdateEventEndpointReturnsNotFound(t *testing.T) {
 
 	body := `{"title":"Updated Fair","categories":["Events"],"event_type":"single_day_all_day","start_at":"2026-05-01T10:00:00Z","teaser":"Updated!"}`
 	res := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/api/events/12", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, "/api/cms/events/12", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(res, req)
 
@@ -509,10 +506,10 @@ func TestUpdateEventEndpointReturnsNotFound(t *testing.T) {
 
 func TestDeleteEventEndpoint(t *testing.T) {
 	service := &fakeEventService{}
-	router := setupEventRouter(service)
+	router := setupCMSEventRouter(service)
 
 	res := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/api/events/44", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/cms/events/44", nil)
 	router.ServeHTTP(res, req)
 
 	if res.Code != http.StatusOK {
@@ -527,7 +524,7 @@ func TestDeleteEventEndpointReturnsNotFound(t *testing.T) {
 	router := setupEventRouter(&fakeEventService{deleteErr: ErrEventNotFound})
 
 	res := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/api/events/44", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/cms/events/44", nil)
 	router.ServeHTTP(res, req)
 
 	if res.Code != http.StatusNotFound {
@@ -539,10 +536,10 @@ func TestDeleteEventEndpointReturnsNotFound(t *testing.T) {
 
 func TestDeleteEventDocumentEndpoint(t *testing.T) {
 	service := &fakeEventService{}
-	router := setupEventRouter(service)
+	router := setupCMSEventRouter(service)
 
 	res := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/api/events/5/documents/9", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/cms/events/5/documents/9", nil)
 	router.ServeHTTP(res, req)
 
 	if res.Code != http.StatusOK {
@@ -557,7 +554,7 @@ func TestDeleteEventDocumentEndpointRejectsBadMediaID(t *testing.T) {
 	router := setupEventRouter(&fakeEventService{})
 
 	res := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/api/events/5/documents/bad", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/cms/events/5/documents/bad", nil)
 	router.ServeHTTP(res, req)
 
 	if res.Code != http.StatusBadRequest {
@@ -572,10 +569,10 @@ func TestDeleteEventDocumentEndpointRejectsBadMediaID(t *testing.T) {
 
 func TestDeleteAllEventDocumentsEndpoint(t *testing.T) {
 	service := &fakeEventService{deleteAllResp: &DeleteAllDocumentsResponse{DeletedCount: 3}}
-	router := setupEventRouter(service)
+	router := setupCMSEventRouter(service)
 
 	res := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/api/events/5/documents", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/cms/events/5/documents", nil)
 	router.ServeHTTP(res, req)
 
 	if res.Code != http.StatusOK {
@@ -595,7 +592,7 @@ func TestDeleteAllEventDocumentsEndpointHandlesError(t *testing.T) {
 	router := setupEventRouter(&fakeEventService{deleteAllErr: ErrStoreUnavailable})
 
 	res := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/api/events/5/documents", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/cms/events/5/documents", nil)
 	router.ServeHTTP(res, req)
 
 	if res.Code != http.StatusServiceUnavailable {
@@ -607,10 +604,10 @@ func TestDeleteAllEventDocumentsEndpointHandlesError(t *testing.T) {
 
 func TestDeleteEventPhotoEndpoint(t *testing.T) {
 	service := &fakeEventService{}
-	router := setupEventRouter(service)
+	router := setupCMSEventRouter(service)
 
 	res := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/api/events/5/photos/8", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/cms/events/5/photos/8", nil)
 	router.ServeHTTP(res, req)
 
 	if res.Code != http.StatusOK {
@@ -625,7 +622,7 @@ func TestDeleteEventPhotoEndpointHandlesError(t *testing.T) {
 	router := setupEventRouter(&fakeEventService{deletePhotoErr: ErrEventMediaNotFound})
 
 	res := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/api/events/5/photos/8", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/cms/events/5/photos/8", nil)
 	router.ServeHTTP(res, req)
 
 	if res.Code != http.StatusNotFound {
@@ -643,11 +640,10 @@ func TestGetEventMediaContentEndpoint(t *testing.T) {
 			FileName:    "banner.png",
 		},
 	}
-	router := setupProtectedEventRouter(service)
+	router := setupEventRouter(service)
 
 	res := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/events/5/media/8/content", nil)
-	req.Header.Set("Authorization", "Bearer "+signEventTestToken(t, "test-secret"))
 	router.ServeHTTP(res, req)
 
 	if res.Code != http.StatusOK {
@@ -664,22 +660,11 @@ func TestGetEventMediaContentEndpoint(t *testing.T) {
 	}
 }
 
-func TestGetEventMediaContentEndpointRequiresAuth(t *testing.T) {
-	router := setupProtectedEventRouter(&fakeEventService{})
-
-	res := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/events/5/media/8/content", nil)
-	router.ServeHTTP(res, req)
-
-	assertEventAPIError(t, res, http.StatusUnauthorized, "missing_bearer_token", "Missing bearer token")
-}
-
 func TestGetEventMediaContentEndpointHandlesServiceError(t *testing.T) {
-	router := setupProtectedEventRouter(&fakeEventService{mediaContentErr: ErrEventMediaNotFound})
+	router := setupEventRouter(&fakeEventService{mediaContentErr: ErrEventMediaNotFound})
 
 	res := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/events/5/media/8/content", nil)
-	req.Header.Set("Authorization", "Bearer "+signEventTestToken(t, "test-secret"))
 	router.ServeHTTP(res, req)
 
 	assertEventAPIError(t, res, http.StatusNotFound, "not_found", "event media not found")
@@ -754,12 +739,12 @@ func TestPathIntRejectsInvalidValue(t *testing.T) {
 
 func TestRequestBindingParsesTimes(t *testing.T) {
 	service := &fakeEventService{}
-	router := setupEventRouter(service)
+	router := setupCMSEventRouter(service)
 
 	now := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
 	body := `{"title":"Spring Fair","categories":["Events"],"event_type":"single_day_all_day","start_at":"` + now.Format(time.RFC3339) + `","teaser":"Welcome!"}`
 	res := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/events", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/cms/events", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(res, req)
 
@@ -786,20 +771,4 @@ func assertEventAPIError(t *testing.T, res *httptest.ResponseRecorder, wantStatu
 		t.Fatalf("expected error message %q, got %#v", wantMessage, payload)
 	}
 	return payload
-}
-
-func signEventTestToken(t *testing.T, secret string) string {
-	t.Helper()
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id": 7,
-		"email":   "ada@example.com",
-		"role":    "Admin",
-		"exp":     time.Now().Add(15 * time.Minute).Unix(),
-	})
-	signed, err := token.SignedString([]byte(secret))
-	if err != nil {
-		t.Fatalf("sign test token: %v", err)
-	}
-	return signed
 }
