@@ -50,7 +50,7 @@ func main() {
 		apiresponse.WriteInternalError(c)
 	}))
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:3000", "http://localhost:5173"},
+		AllowOrigins:     []string{"http://localhost:3000", "http://localhost:5173", "https://nordikcsaacms-724838782318.us-west1.run.app"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
 		AllowCredentials: true,
@@ -61,7 +61,7 @@ func main() {
 	userService := &auth.AuthService{DB: db}
 	auth.RegisterRoutes(r, userService, &cfg)
 	eventService := &events.EventService{DB: db, BucketName: cfg.DriveBucketName, BucketPrefix: cfg.DriveBucketPrefix}
-	events.RegisterRoutes(r, eventService)
+	events.RegisterRoutes(r, eventService, auth.RequireBearerAuth(&cfg))
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
