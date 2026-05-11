@@ -97,7 +97,7 @@ func TestCreateUpdateDeleteGalleryAndImages(t *testing.T) {
 	mock.ExpectCommit()
 
 	addResp, err := svc.AddGalleryImages(5, AddGalleryImagesRequest{
-		Images: []GalleryUploadInput{{AltText: "Alt", FileName: "a.png", MimeType: "image/png", DataBase64: "aGVsbG8="}},
+		Images: []GalleryUploadInput{{Title: "First image", AltText: "Alt", FileName: "a.png", MimeType: "image/png", DataBase64: "aGVsbG8="}},
 	}, intPtr(7))
 	if err != nil || addResp.DeletedCount != 1 {
 		t.Fatalf("unexpected add result: resp=%#v err=%v", addResp, err)
@@ -107,9 +107,9 @@ func TestCreateUpdateDeleteGalleryAndImages(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "gallery_images" WHERE gallery_id = $1 AND file_url IN ($2,$3)`)).
 		WithArgs(5, "gs://drive-bucket/galleries/5/images/a.png", "gs://drive-bucket/galleries/5/images/b.png").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "gallery_id", "alt_text", "gcp_object_key", "file_url", "mime_type", "file_size", "uploaded_by", "created_at", "updated_at",
-		}).AddRow(11, 5, "Alt", "galleries/5/images/a.png", "gs://drive-bucket/galleries/5/images/a.png", "image/png", 5, 7, now, now).
-			AddRow(12, 5, "Alt2", "galleries/5/images/b.png", "gs://drive-bucket/galleries/5/images/b.png", "image/png", 5, 7, now, now))
+			"id", "gallery_id", "title", "alt_text", "gcp_object_key", "file_url", "mime_type", "file_size", "uploaded_by", "created_at", "updated_at",
+		}).AddRow(11, 5, "First image", "Alt", "galleries/5/images/a.png", "gs://drive-bucket/galleries/5/images/a.png", "image/png", 5, 7, now, now).
+			AddRow(12, 5, "Second image", "Alt2", "galleries/5/images/b.png", "gs://drive-bucket/galleries/5/images/b.png", "image/png", 5, 7, now, now))
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM "gallery_images" WHERE "gallery_images"."id" IN ($1,$2)`)).
 		WithArgs(11, 12).
 		WillReturnResult(sqlmock.NewResult(0, 2))
@@ -129,8 +129,8 @@ func TestCreateUpdateDeleteGalleryAndImages(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "gallery_images" WHERE gallery_id = $1`)).
 		WithArgs(5).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "gallery_id", "alt_text", "gcp_object_key", "file_url", "mime_type", "file_size", "uploaded_by", "created_at", "updated_at",
-		}).AddRow(13, 5, "Alt", "galleries/5/images/a.png", "gs://drive-bucket/galleries/5/images/a.png", "image/png", 5, 7, now, now))
+			"id", "gallery_id", "title", "alt_text", "gcp_object_key", "file_url", "mime_type", "file_size", "uploaded_by", "created_at", "updated_at",
+		}).AddRow(13, 5, "First image", "Alt", "galleries/5/images/a.png", "gs://drive-bucket/galleries/5/images/a.png", "image/png", 5, 7, now, now))
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM "galleries" WHERE "galleries"."id" = $1`)).
 		WithArgs(5).
 		WillReturnResult(sqlmock.NewResult(0, 1))

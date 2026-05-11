@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"nordikcsaaapi/internal/apiresponse"
+	"nordikcsaaapi/internal/httpapi"
 
 	"github.com/gin-gonic/gin"
 )
@@ -212,13 +213,37 @@ func (ec *EventController) DeleteEventPhoto(c *gin.Context) {
 }
 
 func writeEventError(c *gin.Context, err error) {
+	httpapi.HandleError(c, "events", err,
+		httpapi.ServiceUnavailableRule("Event service is temporarily unavailable", ErrStoreUnavailable, ErrMediaBucketNotConfigured),
+		httpapi.NotFoundRule(ErrEventNotFound, ErrEventMediaNotFound),
+		httpapi.ConflictRule("Unable to save event because a conflicting record already exists"),
+		httpapi.ValidationRule(isClientSafeEventError),
+	)
+}
+
+func isClientSafeEventError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+
 	switch {
-	case errors.Is(err, ErrStoreUnavailable), errors.Is(err, ErrMediaBucketNotConfigured):
-		apiresponse.WriteServiceUnavailable(c, "Event service is temporarily unavailable")
-	case errors.Is(err, ErrEventNotFound), errors.Is(err, ErrEventMediaNotFound):
-		apiresponse.WriteNotFound(c, err.Error())
+	case strings.Contains(message, " is required"),
+		strings.Contains(message, " are required"),
+		strings.Contains(message, " must be "),
+		strings.Contains(message, " must be on or after "),
+		strings.Contains(message, " must be omitted "),
+		strings.Contains(message, " must be empty "),
+		strings.Contains(message, "invalid "),
+		strings.Contains(message, "missing both data_base64 and file_url"),
+		strings.Contains(message, "at least one "),
+		strings.Contains(message, "cannot be true when "),
+		strings.Contains(message, "must be valid json"),
+		strings.Contains(message, "address not found"):
+		return true
 	default:
-		apiresponse.WriteValidationError(c, err.Error())
+		return false
 	}
 }
 

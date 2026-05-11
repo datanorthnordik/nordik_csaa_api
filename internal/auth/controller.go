@@ -8,6 +8,7 @@ import (
 
 	"nordikcsaaapi/internal/apiresponse"
 	"nordikcsaaapi/internal/config"
+	"nordikcsaaapi/internal/httpapi"
 	"nordikcsaaapi/internal/util"
 
 	"github.com/gin-gonic/gin"
@@ -41,6 +42,7 @@ func (ac *AuthController) SignUp(c *gin.Context) {
 
 	password, err := util.HashPassword(req.Password)
 	if err != nil {
+		httpapi.LogRequestError(c, "auth", err)
 		apiresponse.WriteInternalError(c)
 		return
 	}
@@ -52,14 +54,17 @@ func (ac *AuthController) SignUp(c *gin.Context) {
 		Password:  password,
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, ErrStoreUnavailable):
-			apiresponse.WriteServiceUnavailable(c, "Authentication service is temporarily unavailable")
-		case errors.Is(err, ErrEmailAlreadyExists):
-			apiresponse.WriteConflict(c, "An account with this email already exists")
-		default:
-			apiresponse.WriteInternalError(c)
-		}
+		httpapi.HandleError(c, "auth", err,
+			httpapi.ServiceUnavailableRule("Authentication service is temporarily unavailable", ErrStoreUnavailable),
+			httpapi.ErrorRule{
+				Match: func(err error) bool {
+					return errors.Is(err, ErrEmailAlreadyExists)
+				},
+				Handle: func(c *gin.Context, _ error) {
+					apiresponse.WriteConflict(c, "An account with this email already exists")
+				},
+			},
+		)
 		return
 	}
 
@@ -85,9 +90,12 @@ func (ac *AuthController) Login(c *gin.Context) {
 	user, err := ac.AuthService.GetUser(req.Email)
 	if err != nil {
 		if errors.Is(err, ErrStoreUnavailable) {
-			apiresponse.WriteServiceUnavailable(c, "Authentication service is temporarily unavailable")
+			httpapi.HandleError(c, "auth", err,
+				httpapi.ServiceUnavailableRule("Authentication service is temporarily unavailable", ErrStoreUnavailable),
+			)
 			return
 		}
+		httpapi.LogRequestError(c, "auth", err)
 		apiresponse.WriteUnauthorized(c, "invalid_credentials", "Invalid email or password")
 		return
 	}
@@ -99,6 +107,7 @@ func (ac *AuthController) Login(c *gin.Context) {
 
 	accessToken, err := ac.signToken(user, 15*time.Minute)
 	if err != nil {
+		httpapi.LogRequestError(c, "auth", err)
 		apiresponse.WriteInternalError(c)
 		return
 	}
@@ -109,6 +118,7 @@ func (ac *AuthController) Login(c *gin.Context) {
 	}
 	refreshToken, err := ac.signToken(user, refreshDuration)
 	if err != nil {
+		httpapi.LogRequestError(c, "auth", err)
 		apiresponse.WriteInternalError(c)
 		return
 	}
@@ -160,15 +170,19 @@ func (ac *AuthController) Refresh(c *gin.Context) {
 	user, err := ac.AuthService.GetUserByID(userID)
 	if err != nil {
 		if errors.Is(err, ErrStoreUnavailable) {
-			apiresponse.WriteServiceUnavailable(c, "Authentication service is temporarily unavailable")
+			httpapi.HandleError(c, "auth", err,
+				httpapi.ServiceUnavailableRule("Authentication service is temporarily unavailable", ErrStoreUnavailable),
+			)
 			return
 		}
+		httpapi.LogRequestError(c, "auth", err)
 		apiresponse.WriteUnauthorized(c, "invalid_refresh_token", "Invalid refresh token")
 		return
 	}
 
 	accessToken, err := ac.signToken(user, 15*time.Minute)
 	if err != nil {
+		httpapi.LogRequestError(c, "auth", err)
 		apiresponse.WriteInternalError(c)
 		return
 	}

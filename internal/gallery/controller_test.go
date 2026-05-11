@@ -148,12 +148,15 @@ func TestAddAndDeleteGalleryImagesEndpoints(t *testing.T) {
 	router := setupProtectedRouter(service)
 
 	res := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/galleries/4/images", strings.NewReader(`{"images":[{"alt_text":"Banner","file_name":"banner.png","mime_type":"image/png","data_base64":"aGVsbG8="}]}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/galleries/4/images", strings.NewReader(`{"images":[{"title":"Opening banner","alt_text":"Banner","file_name":"banner.png","mime_type":"image/png","data_base64":"aGVsbG8="}]}`))
 	req.Header.Set("Authorization", "Bearer "+signToken(t))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(res, req)
 	if res.Code != http.StatusCreated || service.gotAddID != 4 || len(service.gotAddReq.Images) != 1 {
 		t.Fatalf("unexpected add image result: status=%d req=%#v", res.Code, service.gotAddReq)
+	}
+	if service.gotAddReq.Images[0].Title != "Opening banner" {
+		t.Fatalf("expected image title to be forwarded, got %#v", service.gotAddReq.Images[0])
 	}
 
 	res = httptest.NewRecorder()
@@ -201,7 +204,12 @@ func TestGalleryControllerErrors(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	writeGalleryError(c, errors.New("bad"))
-	assertError(t, rec, http.StatusBadRequest, "validation_error")
+	assertError(t, rec, http.StatusInternalServerError, "internal_error")
+
+	rec = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(rec)
+	writeGalleryError(c, errors.New(`ERROR: duplicate key value violates unique constraint "galleries_name_key" (SQLSTATE 23505)`))
+	assertError(t, rec, http.StatusConflict, "conflict")
 }
 
 func assertError(t *testing.T, rec *httptest.ResponseRecorder, status int, code string) {
