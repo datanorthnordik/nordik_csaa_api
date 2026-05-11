@@ -25,6 +25,7 @@ type GalleryImage struct {
 	FileURL      string    `gorm:"not null;column:file_url" json:"file_url"`
 	MimeType     string    `gorm:"size:255;column:mime_type" json:"mime_type"`
 	FileSize     int64     `gorm:"column:file_size" json:"file_size"`
+	SortOrder    int       `gorm:"not null;default:0;column:sort_order" json:"sort_order"`
 	UploadedBy   *int      `gorm:"column:uploaded_by" json:"uploaded_by,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
@@ -54,8 +55,62 @@ type AddGalleryImagesRequest struct {
 	Images []GalleryUploadInput `json:"images" binding:"required"`
 }
 
+type UpdateGalleryImageRequest struct {
+	Title   string `json:"title"`
+	AltText string `json:"alt_text"`
+}
+
+type ReorderGalleryImagesRequest struct {
+	ImageIDs []int `json:"image_ids" binding:"required"`
+}
+
 type DeleteGalleryImagesRequest struct {
 	StorageURLs []string `json:"storage_urls" binding:"required"`
+}
+
+type GallerySummaryItem struct {
+	ID            int       `json:"id"`
+	Name          string    `json:"name"`
+	Published     bool      `json:"published"`
+	AssetCount    int       `json:"asset_count"`
+	FrontImageURL string    `json:"front_image_url,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+type GalleryListResponse struct {
+	Items []GallerySummaryItem `json:"items"`
+}
+
+type GalleryAssetResponse struct {
+	ID           int       `json:"id"`
+	GalleryID    int       `json:"gallery_id"`
+	Title        string    `json:"title"`
+	AltText      string    `json:"alt_text"`
+	FileName     string    `json:"file_name"`
+	GCPObjectKey string    `json:"gcp_object_key,omitempty"`
+	FileURL      string    `json:"file_url"`
+	StorageURI   string    `json:"storage_uri,omitempty"`
+	MimeType     string    `json:"mime_type"`
+	FileSize     int64     `json:"file_size"`
+	SortOrder    int       `json:"sort_order"`
+	UploadedBy   *int      `json:"uploaded_by,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+type GalleryDetailResponse struct {
+	ID          int                    `json:"id"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Published   bool                   `json:"published"`
+	AssetLimit  int                    `json:"asset_limit"`
+	CoverImage  *GalleryAssetResponse  `json:"cover_image,omitempty"`
+	Images      []GalleryAssetResponse `json:"images"`
+	CreatedBy   *int                   `json:"created_by,omitempty"`
+	UpdatedBy   *int                   `json:"updated_by,omitempty"`
+	CreatedAt   time.Time              `json:"created_at"`
+	UpdatedAt   time.Time              `json:"updated_at"`
 }
 
 type GalleryMutationResponse struct {
@@ -64,8 +119,22 @@ type GalleryMutationResponse struct {
 	Published bool   `json:"published"`
 }
 
+type AddGalleryImagesResponse struct {
+	UploadedCount int `json:"uploadedCount"`
+}
+
 type DeleteGalleryImagesResponse struct {
 	DeletedCount int `json:"deletedCount"`
+}
+
+type ReorderGalleryImagesResponse struct {
+	UpdatedCount int `json:"updatedCount"`
+}
+
+type GalleryMediaContent struct {
+	Content     []byte
+	ContentType string
+	FileName    string
 }
 
 func (Gallery) TableName() string {
