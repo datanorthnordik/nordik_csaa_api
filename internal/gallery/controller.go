@@ -1,12 +1,12 @@
 package gallery
 
 import (
-	"errors"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"nordikcsaaapi/internal/apiresponse"
+	"nordikcsaaapi/internal/httpapi"
 
 	"github.com/gin-gonic/gin"
 )
@@ -118,13 +118,30 @@ func (gc *GalleryController) DeleteGalleryImages(c *gin.Context) {
 }
 
 func writeGalleryError(c *gin.Context, err error) {
+	httpapi.HandleError(c, "gallery", err,
+		httpapi.ServiceUnavailableRule("Gallery service is temporarily unavailable", ErrStoreUnavailable, ErrMediaBucketNotConfigured),
+		httpapi.NotFoundRule(ErrGalleryNotFound, ErrGalleryImageNotFound),
+		httpapi.ConflictRule("Unable to save gallery because a conflicting record already exists"),
+		httpapi.ValidationRule(isClientSafeGalleryError),
+	)
+}
+
+func isClientSafeGalleryError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+
 	switch {
-	case errors.Is(err, ErrStoreUnavailable), errors.Is(err, ErrMediaBucketNotConfigured):
-		apiresponse.WriteServiceUnavailable(c, "Gallery service is temporarily unavailable")
-	case errors.Is(err, ErrGalleryNotFound), errors.Is(err, ErrGalleryImageNotFound):
-		apiresponse.WriteNotFound(c, err.Error())
+	case strings.Contains(message, " is required"),
+		strings.Contains(message, " are required"),
+		strings.Contains(message, "missing both data_base64 and file_url"),
+		strings.Contains(message, "only image uploads are supported"),
+		strings.Contains(message, "at least one "):
+		return true
 	default:
-		apiresponse.WriteValidationError(c, err.Error())
+		return false
 	}
 }
 

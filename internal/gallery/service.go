@@ -253,6 +253,7 @@ func (s *GalleryService) AddGalleryImages(id int, req AddGalleryImagesRequest, u
 
 		row := GalleryImage{
 			GalleryID:    id,
+			Title:        input.Title,
 			AltText:      input.AltText,
 			GCPObjectKey: objectKey,
 			FileURL:      fileURL,
@@ -358,6 +359,7 @@ func normalizeAddGalleryImagesRequest(req AddGalleryImagesRequest) (AddGalleryIm
 }
 
 func sanitizeGalleryUploadInput(value GalleryUploadInput) GalleryUploadInput {
+	value.Title = strings.TrimSpace(value.Title)
 	value.AltText = strings.TrimSpace(value.AltText)
 	value.FileName = strings.TrimSpace(value.FileName)
 	value.MimeType = strings.TrimSpace(value.MimeType)

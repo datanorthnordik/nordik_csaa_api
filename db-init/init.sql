@@ -91,6 +91,7 @@ END $$;
 CREATE TABLE IF NOT EXISTS gallery_images (
     id SERIAL PRIMARY KEY,
     gallery_id INT NOT NULL,
+    title VARCHAR(255),
     alt_text VARCHAR(255),
     gcp_object_key TEXT,
     file_url TEXT NOT NULL,

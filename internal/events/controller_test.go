@@ -774,10 +774,18 @@ func TestWriteEventErrorAndHelpers(t *testing.T) {
 	rec = httptest.NewRecorder()
 	c, _ = gin.CreateTestContext(rec)
 	writeEventError(c, errors.New("bad request"))
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected status 400, got %d", rec.Code)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status 500, got %d", rec.Code)
 	}
-	assertEventAPIError(t, rec, http.StatusBadRequest, "validation_error", "bad request")
+	assertEventAPIError(t, rec, http.StatusInternalServerError, "internal_error", "Internal server error")
+
+	rec = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(rec)
+	writeEventError(c, errors.New(`ERROR: duplicate key value violates unique constraint "events_title_key" (SQLSTATE 23505)`))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected status 409, got %d", rec.Code)
+	}
+	assertEventAPIError(t, rec, http.StatusConflict, "conflict", "Unable to save event because a conflicting record already exists")
 
 	rec = httptest.NewRecorder()
 	c, _ = gin.CreateTestContext(rec)

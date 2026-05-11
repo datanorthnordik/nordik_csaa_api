@@ -19,6 +19,7 @@ type Gallery struct {
 type GalleryImage struct {
 	ID           int       `gorm:"primaryKey;autoIncrement" json:"id"`
 	GalleryID    int       `gorm:"not null;column:gallery_id" json:"gallery_id"`
+	Title        string    `gorm:"size:255;column:title" json:"title"`
 	AltText      string    `gorm:"size:255;column:alt_text" json:"alt_text"`
 	GCPObjectKey string    `gorm:"column:gcp_object_key" json:"gcp_object_key"`
 	FileURL      string    `gorm:"not null;column:file_url" json:"file_url"`
@@ -30,6 +31,7 @@ type GalleryImage struct {
 }
 
 type GalleryUploadInput struct {
+	Title        string `json:"title"`
 	AltText      string `json:"alt_text"`
 	FileName     string `json:"file_name"`
 	MimeType     string `json:"mime_type"`
