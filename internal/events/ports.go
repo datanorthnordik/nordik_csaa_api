@@ -9,9 +9,9 @@ type EventServicePort interface {
 	CreateEvent(req SaveEventRequest) (*EventMutationResponse, error)
 	UpdateEvent(id int, req SaveEventRequest) (*EventMutationResponse, error)
 	DeleteEvent(id int) error
-	DeleteEventDocument(id int, mediaID int) error
-	DeleteAllEventDocuments(id int) (*DeleteAllDocumentsResponse, error)
-	DeleteEventPhoto(id int, mediaID int) error
+	DeleteEventDocument(id int, storageURL string) error
+	DeleteAllEventDocuments(id int, storageURLs []string) (*DeleteAllDocumentsResponse, error)
+	DeleteEventPhoto(id int, storageURL string) error
 }
 
 var _ EventServicePort = (*EventService)(nil)

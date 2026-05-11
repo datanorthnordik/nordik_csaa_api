@@ -46,10 +46,11 @@ type fakeEventService struct {
 	gotUpdateRequest       SaveEventRequest
 	gotDeleteID            int
 	gotDeleteDocumentID    int
-	gotDeleteMediaID       int
+	gotDeleteDocumentURL   string
 	gotDeleteAllID         int
+	gotDeleteAllURLs       []string
 	gotDeletePhotoID       int
-	gotDeletePhotoMedia    int
+	gotDeletePhotoURL      string
 }
 
 func (s *fakeEventService) ListEvents(filter ListEventsFilter) (*EventListResponse, error) {
@@ -134,14 +135,15 @@ func (s *fakeEventService) DeleteEvent(id int) error {
 	return s.deleteErr
 }
 
-func (s *fakeEventService) DeleteEventDocument(id int, mediaID int) error {
+func (s *fakeEventService) DeleteEventDocument(id int, storageURL string) error {
 	s.gotDeleteDocumentID = id
-	s.gotDeleteMediaID = mediaID
+	s.gotDeleteDocumentURL = storageURL
 	return s.deleteDocumentErr
 }
 
-func (s *fakeEventService) DeleteAllEventDocuments(id int) (*DeleteAllDocumentsResponse, error) {
+func (s *fakeEventService) DeleteAllEventDocuments(id int, storageURLs []string) (*DeleteAllDocumentsResponse, error) {
 	s.gotDeleteAllID = id
+	s.gotDeleteAllURLs = storageURLs
 	if s.deleteAllErr != nil {
 		return nil, s.deleteAllErr
 	}
@@ -151,9 +153,9 @@ func (s *fakeEventService) DeleteAllEventDocuments(id int) (*DeleteAllDocumentsR
 	return s.deleteAllResp, nil
 }
 
-func (s *fakeEventService) DeleteEventPhoto(id int, mediaID int) error {
+func (s *fakeEventService) DeleteEventPhoto(id int, storageURL string) error {
 	s.gotDeletePhotoID = id
-	s.gotDeletePhotoMedia = mediaID
+	s.gotDeletePhotoURL = storageURL
 	return s.deletePhotoErr
 }
 
@@ -571,23 +573,23 @@ func TestDeleteEventDocumentEndpoint(t *testing.T) {
 	router := setupProtectedEventRouter(service)
 
 	res := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/api/events/5/documents/9", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/events/5/document?storage_url=https%3A%2F%2Fstorage.googleapis.com%2Fbucket%2Fevents%2F5%2Fagenda.pdf", nil)
 	req.Header.Set("Authorization", "Bearer "+signEventTestToken(t, "test-secret"))
 	router.ServeHTTP(res, req)
 
 	if res.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d: %s", res.Code, res.Body.String())
 	}
-	if service.gotDeleteDocumentID != 5 || service.gotDeleteMediaID != 9 {
-		t.Fatalf("unexpected ids: event=%d media=%d", service.gotDeleteDocumentID, service.gotDeleteMediaID)
+	if service.gotDeleteDocumentID != 5 || service.gotDeleteDocumentURL == "" {
+		t.Fatalf("unexpected delete request: event=%d storage_url=%q", service.gotDeleteDocumentID, service.gotDeleteDocumentURL)
 	}
 }
 
-func TestDeleteEventDocumentEndpointRejectsBadMediaID(t *testing.T) {
+func TestDeleteEventDocumentEndpointRejectsMissingStorageURL(t *testing.T) {
 	router := setupEventRouter(&fakeEventService{})
 
 	res := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/api/events/5/documents/bad", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/events/5/document", nil)
 	req.Header.Set("Authorization", "Bearer "+signEventTestToken(t, "test-secret"))
 	router.ServeHTTP(res, req)
 
@@ -595,10 +597,7 @@ func TestDeleteEventDocumentEndpointRejectsBadMediaID(t *testing.T) {
 		t.Fatalf("expected status 400, got %d", res.Code)
 	}
 
-	payload := assertEventAPIError(t, res, http.StatusBadRequest, "validation_error", "Invalid path parameter")
-	if len(payload.Error.Details) != 1 || payload.Error.Details[0].Field != "mediaId" {
-		t.Fatalf("expected mediaId validation detail, got %#v", payload)
-	}
+	assertEventAPIError(t, res, http.StatusBadRequest, "validation_error", "storage_url is required")
 }
 
 func TestDeleteAllEventDocumentsEndpoint(t *testing.T) {
@@ -623,6 +622,24 @@ func TestDeleteAllEventDocumentsEndpoint(t *testing.T) {
 	}
 }
 
+func TestDeleteSelectedEventDocumentsEndpoint(t *testing.T) {
+	service := &fakeEventService{deleteAllResp: &DeleteAllDocumentsResponse{DeletedCount: 2}}
+	router := setupProtectedEventRouter(service)
+
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/events/5/documents", strings.NewReader(`{"storage_urls":["https://storage.googleapis.com/bucket/events/5/a.pdf","https://storage.googleapis.com/bucket/events/5/b.pdf"]}`))
+	req.Header.Set("Authorization", "Bearer "+signEventTestToken(t, "test-secret"))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", res.Code, res.Body.String())
+	}
+	if len(service.gotDeleteAllURLs) != 2 {
+		t.Fatalf("expected 2 storage urls, got %#v", service.gotDeleteAllURLs)
+	}
+}
+
 func TestDeleteAllEventDocumentsEndpointHandlesError(t *testing.T) {
 	router := setupEventRouter(&fakeEventService{deleteAllErr: ErrStoreUnavailable})
 
@@ -643,15 +660,15 @@ func TestDeleteEventPhotoEndpoint(t *testing.T) {
 	router := setupProtectedEventRouter(service)
 
 	res := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/api/events/5/photos/8", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/events/5/photo?storage_url=https%3A%2F%2Fstorage.googleapis.com%2Fbucket%2Fevents%2F5%2Fbanner.png", nil)
 	req.Header.Set("Authorization", "Bearer "+signEventTestToken(t, "test-secret"))
 	router.ServeHTTP(res, req)
 
 	if res.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d: %s", res.Code, res.Body.String())
 	}
-	if service.gotDeletePhotoID != 5 || service.gotDeletePhotoMedia != 8 {
-		t.Fatalf("unexpected ids: event=%d media=%d", service.gotDeletePhotoID, service.gotDeletePhotoMedia)
+	if service.gotDeletePhotoID != 5 || service.gotDeletePhotoURL == "" {
+		t.Fatalf("unexpected delete request: event=%d storage_url=%q", service.gotDeletePhotoID, service.gotDeletePhotoURL)
 	}
 }
 
@@ -659,7 +676,7 @@ func TestDeleteEventPhotoEndpointHandlesError(t *testing.T) {
 	router := setupEventRouter(&fakeEventService{deletePhotoErr: ErrEventMediaNotFound})
 
 	res := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/api/events/5/photos/8", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/events/5/photo?storage_url=https%3A%2F%2Fstorage.googleapis.com%2Fbucket%2Fevents%2F5%2Fbanner.png", nil)
 	req.Header.Set("Authorization", "Bearer "+signEventTestToken(t, "test-secret"))
 	router.ServeHTTP(res, req)
 
@@ -719,9 +736,9 @@ func TestProtectedWriteEndpointsRequireAuth(t *testing.T) {
 		{method: http.MethodPost, path: "/api/events", body: `{"title":"Spring Fair"}`},
 		{method: http.MethodPut, path: "/api/events/12", body: `{"title":"Spring Fair"}`},
 		{method: http.MethodDelete, path: "/api/events/12"},
-		{method: http.MethodDelete, path: "/api/events/12/documents/4"},
+		{method: http.MethodDelete, path: "/api/events/12/document?storage_url=https%3A%2F%2Fstorage.googleapis.com%2Fbucket%2Fevents%2F12%2Fa.pdf"},
 		{method: http.MethodDelete, path: "/api/events/12/documents"},
-		{method: http.MethodDelete, path: "/api/events/12/photos/7"},
+		{method: http.MethodDelete, path: "/api/events/12/photo?storage_url=https%3A%2F%2Fstorage.googleapis.com%2Fbucket%2Fevents%2F12%2Fbanner.png"},
 	}
 
 	for _, tc := range tests {
@@ -768,6 +785,12 @@ func TestWriteEventErrorAndHelpers(t *testing.T) {
 	eventID, mediaID, ok := pathEventAndMediaIDs(c)
 	if !ok || eventID != 10 || mediaID != 11 {
 		t.Fatalf("expected path ids 10 and 11, got %d and %d ok=%v", eventID, mediaID, ok)
+	}
+
+	c.Request = httptest.NewRequest(http.MethodDelete, "/api/events/10/document?storage_url=https://storage.googleapis.com/bucket/events/10/a.pdf", nil)
+	storageURL, storageOK := storageURLFromQuery(c)
+	if !storageOK || storageURL == "" {
+		t.Fatalf("expected storage url helper to succeed, got %q ok=%v", storageURL, storageOK)
 	}
 
 	dateVal, err := parseOptionalDate("2026-05-01")

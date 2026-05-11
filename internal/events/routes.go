@@ -24,9 +24,9 @@ func RegisterRoutes(r *gin.Engine, es EventServicePort, protected ...gin.Handler
 		publicGroup.POST("", postHandlers...)
 		publicGroup.PUT("/:id", putHandlers...)
 		publicGroup.DELETE("/:id", deleteHandlers...)
-		publicGroup.DELETE("/:id/documents/:mediaId", deleteDocumentHandlers...)
+		publicGroup.DELETE("/:id/document", deleteDocumentHandlers...)
 		publicGroup.DELETE("/:id/documents", deleteAllDocumentHandlers...)
-		publicGroup.DELETE("/:id/photos/:mediaId", deletePhotoHandlers...)
+		publicGroup.DELETE("/:id/photo", deletePhotoHandlers...)
 	}
 }
 
