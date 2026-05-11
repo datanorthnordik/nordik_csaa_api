@@ -12,6 +12,8 @@ import (
 	"gorm.io/gorm"
 )
 
+const defaultGalleryAssetLimit = 20
+
 var (
 	ErrStoreUnavailable         = errors.New("gallery store unavailable")
 	ErrGalleryNotFound          = errors.New("gallery not found")
@@ -24,6 +26,9 @@ var (
 	uploadBase64ToGCSHook = func(base64Data, bucketName, objectName, contentType string) (string, int64, error) {
 		return util.UploadBase64ToGCS(base64Data, bucketName, objectName, contentType)
 	}
+	downloadGCSObjectHook = func(bucketName, objectName string) ([]byte, string, error) {
+		return util.ReadGCSObject(bucketName, objectName)
+	}
 	deleteGCSObjectHook = func(bucketName, objectName string) error {
 		return util.DeleteGCSObject(bucketName, objectName)
 	}
@@ -33,6 +38,204 @@ type GalleryService struct {
 	DB           *gorm.DB
 	BucketName   string
 	BucketPrefix string
+}
+
+func (s *GalleryService) ListGalleries() (*GalleryListResponse, error) {
+	if s.DB == nil {
+		return nil, ErrStoreUnavailable
+	}
+
+	var rows []Gallery
+	if err := s.DB.
+		Order("LOWER(name) ASC").
+		Order("id ASC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	items := make([]GallerySummaryItem, 0, len(rows))
+	if len(rows) == 0 {
+		return &GalleryListResponse{Items: items}, nil
+	}
+
+	galleryIDs := make([]int, 0, len(rows))
+	for _, row := range rows {
+		galleryIDs = append(galleryIDs, row.ID)
+	}
+
+	type galleryCountRow struct {
+		GalleryID int
+		Count     int64
+	}
+	var countRows []galleryCountRow
+	if err := s.DB.
+		Model(&GalleryImage{}).
+		Select("gallery_id, COUNT(*) AS count").
+		Where("gallery_id IN ?", galleryIDs).
+		Group("gallery_id").
+		Scan(&countRows).Error; err != nil {
+		return nil, err
+	}
+
+	assetCountByGallery := make(map[int]int, len(countRows))
+	for _, row := range countRows {
+		assetCountByGallery[row.GalleryID] = int(row.Count)
+	}
+
+	var imageRows []GalleryImage
+	if err := s.DB.
+		Where("gallery_id IN ?", galleryIDs).
+		Order("gallery_id ASC").
+		Order("sort_order ASC").
+		Order("id ASC").
+		Find(&imageRows).Error; err != nil {
+		return nil, err
+	}
+
+	firstImageByGallery := make(map[int]GalleryImage, len(imageRows))
+	for _, row := range imageRows {
+		if _, exists := firstImageByGallery[row.GalleryID]; !exists {
+			firstImageByGallery[row.GalleryID] = row
+		}
+	}
+
+	for _, row := range rows {
+		frontImageURL := ""
+		switch {
+		case strings.TrimSpace(row.CoverImageURL) != "" || strings.TrimSpace(row.CoverImageObjectKey) != "":
+			frontImageURL = buildGalleryCoverFetchURL(row.ID)
+		default:
+			if image, ok := firstImageByGallery[row.ID]; ok {
+				frontImageURL = buildGalleryImageFetchURL(row.ID, image.ID)
+			}
+		}
+
+		items = append(items, GallerySummaryItem{
+			ID:            row.ID,
+			Name:          row.Name,
+			Published:     row.Published,
+			AssetCount:    assetCountByGallery[row.ID],
+			FrontImageURL: frontImageURL,
+			CreatedAt:     row.CreatedAt,
+			UpdatedAt:     row.UpdatedAt,
+		})
+	}
+
+	return &GalleryListResponse{Items: items}, nil
+}
+
+func (s *GalleryService) GetGallery(id int) (*GalleryDetailResponse, error) {
+	if s.DB == nil {
+		return nil, ErrStoreUnavailable
+	}
+
+	var row Gallery
+	if err := s.DB.First(&row, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrGalleryNotFound
+		}
+		return nil, err
+	}
+
+	var images []GalleryImage
+	if err := s.DB.
+		Where("gallery_id = ?", id).
+		Order("sort_order ASC").
+		Order("id ASC").
+		Find(&images).Error; err != nil {
+		return nil, err
+	}
+
+	items := make([]GalleryAssetResponse, 0, len(images))
+	for _, image := range images {
+		items = append(items, mapGalleryAssetResponse(image))
+	}
+
+	return &GalleryDetailResponse{
+		ID:          row.ID,
+		Name:        row.Name,
+		Description: row.Description,
+		Published:   row.Published,
+		AssetLimit:  defaultGalleryAssetLimit,
+		CoverImage:  mapGalleryCoverResponse(row),
+		Images:      items,
+		CreatedBy:   row.CreatedBy,
+		UpdatedBy:   row.UpdatedBy,
+		CreatedAt:   row.CreatedAt,
+		UpdatedAt:   row.UpdatedAt,
+	}, nil
+}
+
+func (s *GalleryService) GetGalleryCoverContent(id int) (*GalleryMediaContent, error) {
+	if s.DB == nil {
+		return nil, ErrStoreUnavailable
+	}
+
+	var row Gallery
+	if err := s.DB.First(&row, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrGalleryNotFound
+		}
+		return nil, err
+	}
+
+	if strings.TrimSpace(row.CoverImageObjectKey) == "" && strings.TrimSpace(row.CoverImageURL) == "" {
+		return nil, ErrGalleryImageNotFound
+	}
+
+	content, contentType, err := s.downloadStoredObject(galleryStoredObject{
+		ObjectKey:  row.CoverImageObjectKey,
+		StorageURL: row.CoverImageURL,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &GalleryMediaContent{
+		Content:     content,
+		ContentType: contentType,
+		FileName: buildGalleryContentFileName(
+			row.CoverImageAltText,
+			row.CoverImageObjectKey,
+			row.CoverImageURL,
+			contentType,
+			"gallery-cover",
+		),
+	}, nil
+}
+
+func (s *GalleryService) GetGalleryImageContent(id int, imageID int) (*GalleryMediaContent, error) {
+	if s.DB == nil {
+		return nil, ErrStoreUnavailable
+	}
+
+	var row GalleryImage
+	if err := s.DB.Where("gallery_id = ? AND id = ?", id, imageID).First(&row).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrGalleryImageNotFound
+		}
+		return nil, err
+	}
+
+	content, contentType, err := s.downloadStoredObject(galleryStoredObject{
+		ObjectKey:  row.GCPObjectKey,
+		StorageURL: row.FileURL,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &GalleryMediaContent{
+		Content:     content,
+		ContentType: contentType,
+		FileName: buildGalleryContentFileName(
+			row.Title,
+			row.GCPObjectKey,
+			row.FileURL,
+			contentType,
+			"gallery-image",
+		),
+	}, nil
 }
 
 func (s *GalleryService) CreateGallery(req SaveGalleryRequest, userID *int) (*GalleryMutationResponse, error) {
@@ -214,7 +417,7 @@ func (s *GalleryService) DeleteGallery(id int) error {
 	return s.cleanupStoredObjects(toCleanup)
 }
 
-func (s *GalleryService) AddGalleryImages(id int, req AddGalleryImagesRequest, userID *int) (*DeleteGalleryImagesResponse, error) {
+func (s *GalleryService) AddGalleryImages(id int, req AddGalleryImagesRequest, userID *int) (*AddGalleryImagesResponse, error) {
 	if s.DB == nil {
 		return nil, ErrStoreUnavailable
 	}
@@ -239,6 +442,12 @@ func (s *GalleryService) AddGalleryImages(id int, req AddGalleryImagesRequest, u
 		return nil, err
 	}
 
+	startSortOrder, err := s.nextGalleryImageSortOrder(tx, id)
+	if err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+
 	uploadedObjects := make([]string, 0, len(req.Images))
 	for idx, input := range req.Images {
 		fileURL, objectKey, fileSize, uploadedObject, err := s.storeGalleryImage(id, "images", idx, input)
@@ -259,6 +468,7 @@ func (s *GalleryService) AddGalleryImages(id int, req AddGalleryImagesRequest, u
 			FileURL:      fileURL,
 			MimeType:     input.MimeType,
 			FileSize:     fileSize,
+			SortOrder:    startSortOrder + idx,
 			UploadedBy:   userID,
 		}
 		if err := tx.Create(&row).Error; err != nil {
@@ -268,12 +478,130 @@ func (s *GalleryService) AddGalleryImages(id int, req AddGalleryImagesRequest, u
 		}
 	}
 
+	if err := s.touchGalleryUpdatedAt(tx, id); err != nil {
+		tx.Rollback()
+		s.cleanupObjects(uploadedObjects)
+		return nil, err
+	}
+
 	if err := tx.Commit().Error; err != nil {
 		s.cleanupObjects(uploadedObjects)
 		return nil, err
 	}
 
-	return &DeleteGalleryImagesResponse{DeletedCount: len(req.Images)}, nil
+	return &AddGalleryImagesResponse{UploadedCount: len(req.Images)}, nil
+}
+
+func (s *GalleryService) UpdateGalleryImage(id int, imageID int, req UpdateGalleryImageRequest) (*GalleryAssetResponse, error) {
+	if s.DB == nil {
+		return nil, ErrStoreUnavailable
+	}
+
+	req, err := normalizeUpdateGalleryImageRequest(req)
+	if err != nil {
+		return nil, err
+	}
+
+	tx := s.DB.Begin()
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
+	defer rollbackOnPanic(tx)
+
+	var row GalleryImage
+	if err := tx.Where("gallery_id = ? AND id = ?", id, imageID).First(&row).Error; err != nil {
+		tx.Rollback()
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrGalleryImageNotFound
+		}
+		return nil, err
+	}
+
+	row.Title = req.Title
+	row.AltText = req.AltText
+
+	if err := tx.Save(&row).Error; err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+
+	if err := s.touchGalleryUpdatedAt(tx, id); err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		return nil, err
+	}
+
+	resp := mapGalleryAssetResponse(row)
+	return &resp, nil
+}
+
+func (s *GalleryService) ReorderGalleryImages(id int, imageIDs []int) (*ReorderGalleryImagesResponse, error) {
+	if s.DB == nil {
+		return nil, ErrStoreUnavailable
+	}
+
+	imageIDs, err := normalizeGalleryImageOrder(imageIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	tx := s.DB.Begin()
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
+	defer rollbackOnPanic(tx)
+
+	var rows []GalleryImage
+	if err := tx.
+		Where("gallery_id = ?", id).
+		Order("sort_order ASC").
+		Order("id ASC").
+		Find(&rows).Error; err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	if len(rows) == 0 {
+		tx.Rollback()
+		return nil, ErrGalleryImageNotFound
+	}
+	if len(rows) != len(imageIDs) {
+		tx.Rollback()
+		return nil, errors.New("image_ids must include every gallery image exactly once")
+	}
+
+	available := make(map[int]struct{}, len(rows))
+	for _, row := range rows {
+		available[row.ID] = struct{}{}
+	}
+	for _, imageID := range imageIDs {
+		if _, ok := available[imageID]; !ok {
+			tx.Rollback()
+			return nil, errors.New("image_ids must include every gallery image exactly once")
+		}
+	}
+
+	for idx, imageID := range imageIDs {
+		if err := tx.Model(&GalleryImage{}).
+			Where("gallery_id = ? AND id = ?", id, imageID).
+			Update("sort_order", idx).Error; err != nil {
+			tx.Rollback()
+			return nil, err
+		}
+	}
+
+	if err := s.touchGalleryUpdatedAt(tx, id); err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		return nil, err
+	}
+
+	return &ReorderGalleryImagesResponse{UpdatedCount: len(imageIDs)}, nil
 }
 
 func (s *GalleryService) DeleteGalleryImages(id int, storageURLs []string) (*DeleteGalleryImagesResponse, error) {
@@ -303,6 +631,14 @@ func (s *GalleryService) DeleteGalleryImages(id int, storageURLs []string) (*Del
 	}
 
 	if err := tx.Delete(&rows).Error; err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	if err := s.resequenceGalleryImages(tx, id); err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	if err := s.touchGalleryUpdatedAt(tx, id); err != nil {
 		tx.Rollback()
 		return nil, err
 	}
@@ -358,6 +694,36 @@ func normalizeAddGalleryImagesRequest(req AddGalleryImagesRequest) (AddGalleryIm
 	return req, nil
 }
 
+func normalizeUpdateGalleryImageRequest(req UpdateGalleryImageRequest) (UpdateGalleryImageRequest, error) {
+	req.Title = strings.TrimSpace(req.Title)
+	req.AltText = strings.TrimSpace(req.AltText)
+	if req.Title == "" {
+		return req, errors.New("title is required")
+	}
+	return req, nil
+}
+
+func normalizeGalleryImageOrder(imageIDs []int) ([]int, error) {
+	if len(imageIDs) == 0 {
+		return nil, errors.New("image_ids are required")
+	}
+
+	cleaned := make([]int, 0, len(imageIDs))
+	seen := make(map[int]struct{}, len(imageIDs))
+	for _, imageID := range imageIDs {
+		if imageID <= 0 {
+			return nil, errors.New("image_ids must be positive integers")
+		}
+		if _, exists := seen[imageID]; exists {
+			return nil, errors.New("image_ids must not contain duplicates")
+		}
+		seen[imageID] = struct{}{}
+		cleaned = append(cleaned, imageID)
+	}
+
+	return cleaned, nil
+}
+
 func sanitizeGalleryUploadInput(value GalleryUploadInput) GalleryUploadInput {
 	value.Title = strings.TrimSpace(value.Title)
 	value.AltText = strings.TrimSpace(value.AltText)
@@ -390,6 +756,47 @@ func validateGalleryUploadInput(value GalleryUploadInput) error {
 		}
 	}
 	return nil
+}
+
+func mapGalleryAssetResponse(row GalleryImage) GalleryAssetResponse {
+	return GalleryAssetResponse{
+		ID:           row.ID,
+		GalleryID:    row.GalleryID,
+		Title:        row.Title,
+		AltText:      row.AltText,
+		FileName:     buildGalleryContentFileName(row.Title, row.GCPObjectKey, row.FileURL, row.MimeType, "gallery-image"),
+		GCPObjectKey: row.GCPObjectKey,
+		FileURL:      buildGalleryImageFetchURL(row.GalleryID, row.ID),
+		StorageURI:   row.FileURL,
+		MimeType:     row.MimeType,
+		FileSize:     row.FileSize,
+		SortOrder:    row.SortOrder,
+		UploadedBy:   row.UploadedBy,
+		CreatedAt:    row.CreatedAt,
+		UpdatedAt:    row.UpdatedAt,
+	}
+}
+
+func mapGalleryCoverResponse(row Gallery) *GalleryAssetResponse {
+	if strings.TrimSpace(row.CoverImageObjectKey) == "" && strings.TrimSpace(row.CoverImageURL) == "" {
+		return nil
+	}
+
+	return &GalleryAssetResponse{
+		ID:           0,
+		GalleryID:    row.ID,
+		Title:        row.CoverImageAltText,
+		AltText:      row.CoverImageAltText,
+		FileName:     buildGalleryContentFileName(row.CoverImageAltText, row.CoverImageObjectKey, row.CoverImageURL, "", "gallery-cover"),
+		GCPObjectKey: row.CoverImageObjectKey,
+		FileURL:      buildGalleryCoverFetchURL(row.ID),
+		StorageURI:   row.CoverImageURL,
+		MimeType:     "",
+		FileSize:     0,
+		SortOrder:    0,
+		CreatedAt:    row.UpdatedAt,
+		UpdatedAt:    row.UpdatedAt,
+	}
 }
 
 func (s *GalleryService) storeGalleryImage(galleryID int, folder string, idx int, input GalleryUploadInput) (string, string, int64, string, error) {
@@ -475,6 +882,21 @@ func (s *GalleryService) resolveObjectReference(item galleryStoredObject) (strin
 	return bucketName, objectName, nil
 }
 
+func (s *GalleryService) downloadStoredObject(item galleryStoredObject) ([]byte, string, error) {
+	bucketName, objectName, err := s.resolveObjectReference(item)
+	if err != nil {
+		return nil, "", err
+	}
+	content, contentType, err := downloadGCSObjectHook(bucketName, objectName)
+	if err != nil {
+		if errors.Is(err, util.ErrObjectNotFound) {
+			return nil, "", ErrGalleryImageNotFound
+		}
+		return nil, "", err
+	}
+	return content, contentType, nil
+}
+
 func (s *GalleryService) cleanupObjects(objectNames []string) {
 	for _, objectName := range objectNames {
 		if strings.TrimSpace(objectName) == "" || strings.TrimSpace(s.BucketName) == "" {
@@ -523,6 +945,101 @@ func (s *GalleryService) relativeObjectKey(objectKey string) string {
 		return strings.TrimPrefix(objectKey, prefix+"/")
 	}
 	return objectKey
+}
+
+func (s *GalleryService) nextGalleryImageSortOrder(tx *gorm.DB, galleryID int) (int, error) {
+	type maxSortOrderRow struct {
+		MaxSortOrder int `gorm:"column:max_sort_order"`
+	}
+
+	var row maxSortOrderRow
+	if err := tx.Model(&GalleryImage{}).
+		Select("COALESCE(MAX(sort_order), -1) AS max_sort_order").
+		Where("gallery_id = ?", galleryID).
+		Scan(&row).Error; err != nil {
+		return 0, err
+	}
+
+	return row.MaxSortOrder + 1, nil
+}
+
+func (s *GalleryService) resequenceGalleryImages(tx *gorm.DB, galleryID int) error {
+	var rows []GalleryImage
+	if err := tx.
+		Where("gallery_id = ?", galleryID).
+		Order("sort_order ASC").
+		Order("id ASC").
+		Find(&rows).Error; err != nil {
+		return err
+	}
+
+	for idx, row := range rows {
+		if row.SortOrder == idx {
+			continue
+		}
+		if err := tx.Model(&GalleryImage{}).
+			Where("gallery_id = ? AND id = ?", galleryID, row.ID).
+			Update("sort_order", idx).Error; err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (s *GalleryService) touchGalleryUpdatedAt(tx *gorm.DB, galleryID int) error {
+	return tx.Model(&Gallery{}).
+		Where("id = ?", galleryID).
+		Update("updated_at", nowFunc()).Error
+}
+
+func buildGalleryCoverFetchURL(galleryID int) string {
+	return fmt.Sprintf("/api/galleries/%d/cover/content", galleryID)
+}
+
+func buildGalleryImageFetchURL(galleryID int, imageID int) string {
+	return fmt.Sprintf("/api/galleries/%d/images/%d/content", galleryID, imageID)
+}
+
+func buildGalleryContentFileName(title string, objectKey string, storageURL string, mimeType string, fallbackBase string) string {
+	ext := path.Ext(strings.TrimSpace(objectKey))
+	if ext == "" && strings.TrimSpace(storageURL) != "" {
+		if _, parsedObjectKey, err := util.ParseGCSObjectReference("", storageURL); err == nil {
+			ext = path.Ext(parsedObjectKey)
+		}
+	}
+	if ext == "" {
+		ext = util.ExtFromFilenameOrMime("", mimeType)
+	}
+
+	trimmedTitle := strings.TrimSpace(title)
+	if trimmedTitle != "" {
+		base := util.SanitizePart(trimmedTitle)
+		if base != "unknown" {
+			return base + ext
+		}
+	}
+
+	if strings.TrimSpace(objectKey) != "" {
+		baseName := path.Base(strings.TrimSpace(objectKey))
+		if baseName != "." && baseName != "/" && baseName != "" {
+			return baseName
+		}
+	}
+
+	if strings.TrimSpace(storageURL) != "" {
+		if _, parsedObjectKey, err := util.ParseGCSObjectReference("", storageURL); err == nil {
+			baseName := path.Base(parsedObjectKey)
+			if baseName != "." && baseName != "/" && baseName != "" {
+				return baseName
+			}
+		}
+	}
+
+	if strings.TrimSpace(fallbackBase) == "" {
+		fallbackBase = "gallery-asset"
+	}
+	return fallbackBase + ext
 }
 
 func sanitizeStringSlice(values []string) []string {

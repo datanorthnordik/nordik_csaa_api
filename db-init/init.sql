@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS gallery_images (
     file_url TEXT NOT NULL,
     mime_type VARCHAR(255),
     file_size BIGINT,
+    sort_order INT NOT NULL DEFAULT 0,
     uploaded_by INT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -115,8 +116,27 @@ CREATE TABLE IF NOT EXISTS gallery_images (
         CHECK (btrim(file_url) <> ''),
 
     CONSTRAINT chk_gallery_images_file_size
-        CHECK (file_size IS NULL OR file_size >= 0)
+        CHECK (file_size IS NULL OR file_size >= 0),
+
+    CONSTRAINT chk_gallery_images_sort_order
+        CHECK (sort_order >= 0)
 );
+
+ALTER TABLE gallery_images
+    ADD COLUMN IF NOT EXISTS sort_order INT NOT NULL DEFAULT 0;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_gallery_images_sort_order'
+    ) THEN
+        ALTER TABLE gallery_images
+            ADD CONSTRAINT chk_gallery_images_sort_order
+            CHECK (sort_order >= 0);
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS events (
     id SERIAL PRIMARY KEY,
@@ -351,6 +371,7 @@ CREATE INDEX IF NOT EXISTS idx_galleries_updated_by ON galleries(updated_by);
 CREATE INDEX IF NOT EXISTS idx_gallery_images_gallery_id ON gallery_images(gallery_id);
 CREATE INDEX IF NOT EXISTS idx_gallery_images_uploaded_by ON gallery_images(uploaded_by);
 CREATE INDEX IF NOT EXISTS idx_gallery_images_file_url ON gallery_images(file_url);
+CREATE INDEX IF NOT EXISTS idx_gallery_images_gallery_sort ON gallery_images(gallery_id, sort_order, id);
 
 CREATE INDEX IF NOT EXISTS idx_events_created_by ON events(created_by);
 CREATE INDEX IF NOT EXISTS idx_events_address_id ON events(address_id);

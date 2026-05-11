@@ -18,23 +18,89 @@ import (
 )
 
 type fakeGalleryService struct {
-	createResp       *GalleryMutationResponse
-	updateResp       *GalleryMutationResponse
-	deleteImagesResp *DeleteGalleryImagesResponse
-	createErr        error
-	updateErr        error
-	deleteErr        error
-	addImagesErr     error
-	deleteImagesErr  error
-	gotCreateReq     SaveGalleryRequest
-	gotUpdateID      int
-	gotUpdateReq     SaveGalleryRequest
-	gotDeleteID      int
-	gotAddID         int
-	gotAddReq        AddGalleryImagesRequest
-	gotDeleteImgID   int
-	gotDeleteURLs    []string
-	gotUserID        *int
+	listResp               *GalleryListResponse
+	detailResp             *GalleryDetailResponse
+	imageResp              *GalleryAssetResponse
+	createResp             *GalleryMutationResponse
+	updateResp             *GalleryMutationResponse
+	addImagesResp          *AddGalleryImagesResponse
+	deleteImagesResp       *DeleteGalleryImagesResponse
+	reorderResp            *ReorderGalleryImagesResponse
+	mediaResp              *GalleryMediaContent
+	listErr                error
+	detailErr              error
+	imageErr               error
+	createErr              error
+	updateErr              error
+	deleteErr              error
+	addImagesErr           error
+	reorderErr             error
+	deleteImagesErr        error
+	coverErr               error
+	imageContentErr        error
+	gotList                bool
+	gotDetailID            int
+	gotCreateReq           SaveGalleryRequest
+	gotUpdateID            int
+	gotUpdateReq           SaveGalleryRequest
+	gotDeleteID            int
+	gotAddID               int
+	gotAddReq              AddGalleryImagesRequest
+	gotUpdateImgID         int
+	gotUpdateImgReq        UpdateGalleryImageRequest
+	gotReorderID           int
+	gotReorderIDs          []int
+	gotCoverID             int
+	gotImageContentID      int
+	gotImageContentImageID int
+	gotDeleteImgID         int
+	gotDeleteURLs          []string
+	gotUserID              *int
+}
+
+func (f *fakeGalleryService) ListGalleries() (*GalleryListResponse, error) {
+	f.gotList = true
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	if f.listResp == nil {
+		return &GalleryListResponse{}, nil
+	}
+	return f.listResp, nil
+}
+
+func (f *fakeGalleryService) GetGallery(id int) (*GalleryDetailResponse, error) {
+	f.gotDetailID = id
+	if f.detailErr != nil {
+		return nil, f.detailErr
+	}
+	if f.detailResp == nil {
+		return &GalleryDetailResponse{ID: id, AssetLimit: 20}, nil
+	}
+	return f.detailResp, nil
+}
+
+func (f *fakeGalleryService) GetGalleryCoverContent(id int) (*GalleryMediaContent, error) {
+	f.gotCoverID = id
+	if f.coverErr != nil {
+		return nil, f.coverErr
+	}
+	if f.mediaResp == nil {
+		return &GalleryMediaContent{Content: []byte("cover"), ContentType: "image/png", FileName: "cover.png"}, nil
+	}
+	return f.mediaResp, nil
+}
+
+func (f *fakeGalleryService) GetGalleryImageContent(id int, imageID int) (*GalleryMediaContent, error) {
+	f.gotImageContentID = id
+	f.gotImageContentImageID = imageID
+	if f.imageContentErr != nil {
+		return nil, f.imageContentErr
+	}
+	if f.mediaResp == nil {
+		return &GalleryMediaContent{Content: []byte("image"), ContentType: "image/png", FileName: "image.png"}, nil
+	}
+	return f.mediaResp, nil
 }
 
 func (f *fakeGalleryService) CreateGallery(req SaveGalleryRequest, userID *int) (*GalleryMutationResponse, error) {
@@ -67,14 +133,42 @@ func (f *fakeGalleryService) DeleteGallery(id int) error {
 	return f.deleteErr
 }
 
-func (f *fakeGalleryService) AddGalleryImages(id int, req AddGalleryImagesRequest, userID *int) (*DeleteGalleryImagesResponse, error) {
+func (f *fakeGalleryService) AddGalleryImages(id int, req AddGalleryImagesRequest, userID *int) (*AddGalleryImagesResponse, error) {
 	f.gotAddID = id
 	f.gotAddReq = req
 	f.gotUserID = userID
 	if f.addImagesErr != nil {
 		return nil, f.addImagesErr
 	}
-	return &DeleteGalleryImagesResponse{DeletedCount: len(req.Images)}, nil
+	if f.addImagesResp == nil {
+		return &AddGalleryImagesResponse{UploadedCount: len(req.Images)}, nil
+	}
+	return f.addImagesResp, nil
+}
+
+func (f *fakeGalleryService) UpdateGalleryImage(id int, imageID int, req UpdateGalleryImageRequest) (*GalleryAssetResponse, error) {
+	f.gotUpdateID = id
+	f.gotUpdateImgID = imageID
+	f.gotUpdateImgReq = req
+	if f.imageErr != nil {
+		return nil, f.imageErr
+	}
+	if f.imageResp == nil {
+		return &GalleryAssetResponse{ID: imageID, GalleryID: id, Title: req.Title, AltText: req.AltText}, nil
+	}
+	return f.imageResp, nil
+}
+
+func (f *fakeGalleryService) ReorderGalleryImages(id int, imageIDs []int) (*ReorderGalleryImagesResponse, error) {
+	f.gotReorderID = id
+	f.gotReorderIDs = imageIDs
+	if f.reorderErr != nil {
+		return nil, f.reorderErr
+	}
+	if f.reorderResp == nil {
+		return &ReorderGalleryImagesResponse{UpdatedCount: len(imageIDs)}, nil
+	}
+	return f.reorderResp, nil
 }
 
 func (f *fakeGalleryService) DeleteGalleryImages(id int, storageURLs []string) (*DeleteGalleryImagesResponse, error) {
@@ -114,6 +208,32 @@ func TestCreateGalleryEndpoint(t *testing.T) {
 	}
 }
 
+func TestListAndGetGalleryEndpoints(t *testing.T) {
+	service := &fakeGalleryService{
+		listResp: &GalleryListResponse{
+			Items: []GallerySummaryItem{{ID: 4, Name: "Homepage", AssetCount: 2}},
+		},
+		detailResp: &GalleryDetailResponse{ID: 4, Name: "Homepage", AssetLimit: 20},
+	}
+	router := setupProtectedRouter(service)
+
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/galleries", nil)
+	req.Header.Set("Authorization", "Bearer "+signToken(t))
+	router.ServeHTTP(res, req)
+	if res.Code != http.StatusOK || !service.gotList {
+		t.Fatalf("unexpected list result: status=%d gotList=%v", res.Code, service.gotList)
+	}
+
+	res = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/galleries/4", nil)
+	req.Header.Set("Authorization", "Bearer "+signToken(t))
+	router.ServeHTTP(res, req)
+	if res.Code != http.StatusOK || service.gotDetailID != 4 {
+		t.Fatalf("unexpected detail result: status=%d id=%d", res.Code, service.gotDetailID)
+	}
+}
+
 func TestUpdateGalleryEndpoint(t *testing.T) {
 	service := &fakeGalleryService{}
 	router := setupProtectedRouter(service)
@@ -143,6 +263,32 @@ func TestDeleteGalleryEndpoint(t *testing.T) {
 	}
 }
 
+func TestGalleryContentEndpoints(t *testing.T) {
+	service := &fakeGalleryService{}
+	router := setupProtectedRouter(service)
+
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/galleries/4/cover/content", nil)
+	req.Header.Set("Authorization", "Bearer "+signToken(t))
+	router.ServeHTTP(res, req)
+	if res.Code != http.StatusOK || service.gotCoverID != 4 {
+		t.Fatalf("unexpected cover result: status=%d id=%d", res.Code, service.gotCoverID)
+	}
+
+	res = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/galleries/4/images/12/content", nil)
+	req.Header.Set("Authorization", "Bearer "+signToken(t))
+	router.ServeHTTP(res, req)
+	if res.Code != http.StatusOK || service.gotImageContentID != 4 || service.gotImageContentImageID != 12 {
+		t.Fatalf(
+			"unexpected image content result: status=%d gallery=%d image=%d",
+			res.Code,
+			service.gotImageContentID,
+			service.gotImageContentImageID,
+		)
+	}
+}
+
 func TestAddAndDeleteGalleryImagesEndpoints(t *testing.T) {
 	service := &fakeGalleryService{}
 	router := setupProtectedRouter(service)
@@ -165,6 +311,39 @@ func TestAddAndDeleteGalleryImagesEndpoints(t *testing.T) {
 	router.ServeHTTP(res, req)
 	if res.Code != http.StatusOK || len(service.gotDeleteURLs) != 2 {
 		t.Fatalf("unexpected delete image result: status=%d urls=%#v", res.Code, service.gotDeleteURLs)
+	}
+}
+
+func TestUpdateAndReorderGalleryImagesEndpoints(t *testing.T) {
+	service := &fakeGalleryService{}
+	router := setupProtectedRouter(service)
+
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/api/galleries/4/images/12", strings.NewReader(`{"title":"Opening banner","alt_text":"Banner details"}`))
+	req.Header.Set("Authorization", "Bearer "+signToken(t))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(res, req)
+	if res.Code != http.StatusOK || service.gotUpdateID != 4 || service.gotUpdateImgID != 12 {
+		t.Fatalf(
+			"unexpected update image result: status=%d gallery=%d image=%d",
+			res.Code,
+			service.gotUpdateID,
+			service.gotUpdateImgID,
+		)
+	}
+
+	res = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPut, "/api/galleries/4/images/order", strings.NewReader(`{"image_ids":[12,10,11]}`))
+	req.Header.Set("Authorization", "Bearer "+signToken(t))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(res, req)
+	if res.Code != http.StatusOK || service.gotReorderID != 4 || len(service.gotReorderIDs) != 3 {
+		t.Fatalf(
+			"unexpected reorder result: status=%d gallery=%d ids=%#v",
+			res.Code,
+			service.gotReorderID,
+			service.gotReorderIDs,
+		)
 	}
 }
 

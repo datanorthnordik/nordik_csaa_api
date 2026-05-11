@@ -15,6 +15,81 @@ type GalleryController struct {
 	GalleryService GalleryServicePort
 }
 
+func (gc *GalleryController) ListGalleries(c *gin.Context) {
+	resp, err := gc.GalleryService.ListGalleries()
+	if err != nil {
+		writeGalleryError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
+func (gc *GalleryController) GetGallery(c *gin.Context) {
+	id, ok := pathInt(c, "id")
+	if !ok {
+		return
+	}
+
+	resp, err := gc.GalleryService.GetGallery(id)
+	if err != nil {
+		writeGalleryError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
+func (gc *GalleryController) GetGalleryCoverContent(c *gin.Context) {
+	id, ok := pathInt(c, "id")
+	if !ok {
+		return
+	}
+
+	resp, err := gc.GalleryService.GetGalleryCoverContent(id)
+	if err != nil {
+		writeGalleryError(c, err)
+		return
+	}
+
+	contentType := strings.TrimSpace(resp.ContentType)
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	if fileName := sanitizeContentDispositionFilename(resp.FileName); fileName != "" {
+		c.Header("Content-Disposition", "inline; filename="+strconv.Quote(fileName))
+	}
+
+	c.Data(http.StatusOK, contentType, resp.Content)
+}
+
+func (gc *GalleryController) GetGalleryImageContent(c *gin.Context) {
+	id, ok := pathInt(c, "id")
+	if !ok {
+		return
+	}
+	imageID, ok := pathInt(c, "imageId")
+	if !ok {
+		return
+	}
+
+	resp, err := gc.GalleryService.GetGalleryImageContent(id, imageID)
+	if err != nil {
+		writeGalleryError(c, err)
+		return
+	}
+
+	contentType := strings.TrimSpace(resp.ContentType)
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	if fileName := sanitizeContentDispositionFilename(resp.FileName); fileName != "" {
+		c.Header("Content-Disposition", "inline; filename="+strconv.Quote(fileName))
+	}
+
+	c.Data(http.StatusOK, contentType, resp.Content)
+}
+
 func (gc *GalleryController) CreateGallery(c *gin.Context) {
 	var req SaveGalleryRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -84,7 +159,49 @@ func (gc *GalleryController) AddGalleryImages(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"message": "Gallery images uploaded successfully", "uploadedCount": resp.DeletedCount})
+	c.JSON(http.StatusCreated, gin.H{"message": "Gallery images uploaded successfully", "uploadedCount": resp.UploadedCount})
+}
+
+func (gc *GalleryController) UpdateGalleryImage(c *gin.Context) {
+	id, imageID, ok := pathGalleryAndImageIDs(c)
+	if !ok {
+		return
+	}
+
+	var req UpdateGalleryImageRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		apiresponse.WriteBindingError(c, err, req)
+		return
+	}
+
+	resp, err := gc.GalleryService.UpdateGalleryImage(id, imageID, req)
+	if err != nil {
+		writeGalleryError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Gallery image updated successfully", "image": resp})
+}
+
+func (gc *GalleryController) ReorderGalleryImages(c *gin.Context) {
+	id, ok := pathInt(c, "id")
+	if !ok {
+		return
+	}
+
+	var req ReorderGalleryImagesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		apiresponse.WriteBindingError(c, err, req)
+		return
+	}
+
+	resp, err := gc.GalleryService.ReorderGalleryImages(id, req.ImageIDs)
+	if err != nil {
+		writeGalleryError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Gallery images reordered successfully", "updatedCount": resp.UpdatedCount})
 }
 
 func (gc *GalleryController) DeleteGalleryImages(c *gin.Context) {
@@ -176,6 +293,18 @@ func authUserID(c *gin.Context) *int {
 	}
 }
 
+func pathGalleryAndImageIDs(c *gin.Context) (int, int, bool) {
+	id, ok := pathInt(c, "id")
+	if !ok {
+		return 0, 0, false
+	}
+	imageID, ok := pathInt(c, "imageId")
+	if !ok {
+		return 0, 0, false
+	}
+	return id, imageID, true
+}
+
 func splitQueryValues(values ...string) []string {
 	parts := make([]string, 0, len(values))
 	for _, value := range values {
@@ -187,4 +316,11 @@ func splitQueryValues(values ...string) []string {
 		}
 	}
 	return parts
+}
+
+func sanitizeContentDispositionFilename(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.ReplaceAll(value, "\r", "")
+	value = strings.ReplaceAll(value, "\n", "")
+	return value
 }
