@@ -148,12 +148,17 @@ func (ec *EventController) DeleteEvent(c *gin.Context) {
 }
 
 func (ec *EventController) DeleteEventDocument(c *gin.Context) {
-	id, mediaID, ok := pathEventAndMediaIDs(c)
+	id, ok := pathInt(c, "id")
 	if !ok {
 		return
 	}
 
-	if err := ec.EventService.DeleteEventDocument(id, mediaID); err != nil {
+	storageURL, ok := storageURLFromQuery(c)
+	if !ok {
+		return
+	}
+
+	if err := ec.EventService.DeleteEventDocument(id, storageURL); err != nil {
 		writeEventError(c, err)
 		return
 	}
@@ -167,7 +172,15 @@ func (ec *EventController) DeleteAllEventDocuments(c *gin.Context) {
 		return
 	}
 
-	resp, err := ec.EventService.DeleteAllEventDocuments(id)
+	var req DeleteEventMediaBatchRequest
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			apiresponse.WriteBindingError(c, err, req)
+			return
+		}
+	}
+
+	resp, err := ec.EventService.DeleteAllEventDocuments(id, req.StorageURLs)
 	if err != nil {
 		writeEventError(c, err)
 		return
@@ -180,12 +193,17 @@ func (ec *EventController) DeleteAllEventDocuments(c *gin.Context) {
 }
 
 func (ec *EventController) DeleteEventPhoto(c *gin.Context) {
-	id, mediaID, ok := pathEventAndMediaIDs(c)
+	id, ok := pathInt(c, "id")
 	if !ok {
 		return
 	}
 
-	if err := ec.EventService.DeleteEventPhoto(id, mediaID); err != nil {
+	storageURL, ok := storageURLFromQuery(c)
+	if !ok {
+		return
+	}
+
+	if err := ec.EventService.DeleteEventPhoto(id, storageURL); err != nil {
 		writeEventError(c, err)
 		return
 	}
@@ -214,6 +232,15 @@ func pathEventAndMediaIDs(c *gin.Context) (int, int, bool) {
 		return 0, 0, false
 	}
 	return id, mediaID, true
+}
+
+func storageURLFromQuery(c *gin.Context) (string, bool) {
+	value := strings.TrimSpace(c.Query("storage_url"))
+	if value == "" {
+		apiresponse.WriteValidationError(c, "storage_url is required")
+		return "", false
+	}
+	return value, true
 }
 
 func pathInt(c *gin.Context, key string) (int, bool) {

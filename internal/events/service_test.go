@@ -59,13 +59,13 @@ func TestEventServiceReturnsStoreUnavailableWithoutDB(t *testing.T) {
 	if err := service.DeleteEvent(1); !errors.Is(err, ErrStoreUnavailable) {
 		t.Fatalf("expected DeleteEvent to return ErrStoreUnavailable, got %v", err)
 	}
-	if err := service.DeleteEventDocument(1, 2); !errors.Is(err, ErrStoreUnavailable) {
+	if err := service.DeleteEventDocument(1, "gs://drive-bucket/events/1/file.pdf"); !errors.Is(err, ErrStoreUnavailable) {
 		t.Fatalf("expected DeleteEventDocument to return ErrStoreUnavailable, got %v", err)
 	}
-	if _, err := service.DeleteAllEventDocuments(1); !errors.Is(err, ErrStoreUnavailable) {
+	if _, err := service.DeleteAllEventDocuments(1, nil); !errors.Is(err, ErrStoreUnavailable) {
 		t.Fatalf("expected DeleteAllEventDocuments to return ErrStoreUnavailable, got %v", err)
 	}
-	if err := service.DeleteEventPhoto(1, 2); !errors.Is(err, ErrStoreUnavailable) {
+	if err := service.DeleteEventPhoto(1, "gs://drive-bucket/events/1/file.png"); !errors.Is(err, ErrStoreUnavailable) {
 		t.Fatalf("expected DeleteEventPhoto to return ErrStoreUnavailable, got %v", err)
 	}
 }
@@ -571,8 +571,8 @@ func TestDeleteEventAndMediaFlows(t *testing.T) {
 	}
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "event_media" WHERE event_id = $1 AND id = $2 ORDER BY "event_media"."id" LIMIT $3`)).
-		WithArgs(12, 2, 1).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "event_media" WHERE event_id = $1 AND file_url = $2 ORDER BY "event_media"."id" LIMIT $3`)).
+		WithArgs(12, "gs://drive-bucket/events/12/agenda.pdf", 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "event_id", "media_role", "display_name", "gcp_object_key", "file_url", "mime_type", "file_size", "sort_order", "created_at", "updated_at"}).
 			AddRow(2, 12, MediaRoleAttachment, "Agenda", "events/12/agenda.pdf", "gs://drive-bucket/events/12/agenda.pdf", "application/pdf", 20, 0, now, now))
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM "event_media" WHERE "event_media"."id" = $1`)).
@@ -580,7 +580,7 @@ func TestDeleteEventAndMediaFlows(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	if err := service.DeleteEventDocument(12, 2); err != nil {
+	if err := service.DeleteEventDocument(12, "gs://drive-bucket/events/12/agenda.pdf"); err != nil {
 		t.Fatalf("DeleteEventDocument returned error: %v", err)
 	}
 
@@ -589,12 +589,12 @@ func TestDeleteEventAndMediaFlows(t *testing.T) {
 		WithArgs(12, MediaRoleAttachment).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "event_id", "media_role", "display_name", "gcp_object_key", "file_url", "mime_type", "file_size", "sort_order", "created_at", "updated_at"}).
 			AddRow(2, 12, MediaRoleAttachment, "Agenda", "events/12/agenda.pdf", "gs://drive-bucket/events/12/agenda.pdf", "application/pdf", 20, 0, now, now))
-	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM "event_media" WHERE event_id = $1 AND media_role = $2`)).
-		WithArgs(12, MediaRoleAttachment).
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM "event_media" WHERE "event_media"."id" = $1`)).
+		WithArgs(2).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	resp, err := service.DeleteAllEventDocuments(12)
+	resp, err := service.DeleteAllEventDocuments(12, nil)
 	if err != nil {
 		t.Fatalf("DeleteAllEventDocuments returned error: %v", err)
 	}
@@ -603,8 +603,8 @@ func TestDeleteEventAndMediaFlows(t *testing.T) {
 	}
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "event_media" WHERE event_id = $1 AND id = $2 ORDER BY "event_media"."id" LIMIT $3`)).
-		WithArgs(12, 1, 1).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "event_media" WHERE event_id = $1 AND file_url = $2 ORDER BY "event_media"."id" LIMIT $3`)).
+		WithArgs(12, "gs://drive-bucket/events/12/banner.png", 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "event_id", "media_role", "display_name", "gcp_object_key", "file_url", "mime_type", "file_size", "sort_order", "created_at", "updated_at"}).
 			AddRow(1, 12, MediaRoleDisplayImage, "Banner", "events/12/banner.png", "gs://drive-bucket/events/12/banner.png", "image/png", 10, 0, now, now))
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM "event_media" WHERE "event_media"."id" = $1`)).
@@ -612,7 +612,7 @@ func TestDeleteEventAndMediaFlows(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	if err := service.DeleteEventPhoto(12, 1); err != nil {
+	if err := service.DeleteEventPhoto(12, "gs://drive-bucket/events/12/banner.png"); err != nil {
 		t.Fatalf("DeleteEventPhoto returned error: %v", err)
 	}
 }
@@ -639,13 +639,13 @@ func TestDeleteEventErrorsAndHelpers(t *testing.T) {
 	}
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "event_media" WHERE event_id = $1 AND id = $2 ORDER BY "event_media"."id" LIMIT $3`)).
-		WithArgs(12, 2, 1).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "event_media" WHERE event_id = $1 AND file_url = $2 ORDER BY "event_media"."id" LIMIT $3`)).
+		WithArgs(12, "gs://drive-bucket/events/12/agenda.pdf", 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "event_id", "media_role", "display_name", "gcp_object_key", "file_url", "mime_type", "file_size", "sort_order", "created_at", "updated_at"}).
 			AddRow(2, 12, MediaRoleDisplayImage, "Banner", "events/12/banner.png", "gs://drive-bucket/events/12/banner.png", "image/png", 10, 0, time.Now(), time.Now()))
 	mock.ExpectRollback()
 
-	if err := service.DeleteEventDocument(12, 2); !errors.Is(err, ErrEventMediaNotFound) {
+	if err := service.DeleteEventDocument(12, "gs://drive-bucket/events/12/agenda.pdf"); !errors.Is(err, ErrEventMediaNotFound) {
 		t.Fatalf("expected ErrEventMediaNotFound, got %v", err)
 	}
 
@@ -735,11 +735,11 @@ func TestServiceAdditionalErrorBranches(t *testing.T) {
 
 	req = validSaveEventRequest()
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "event_media" WHERE event_id = $1 AND id = $2 ORDER BY "event_media"."id" LIMIT $3`)).
-		WithArgs(1, 1, 1).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "event_media" WHERE event_id = $1 AND file_url = $2 ORDER BY "event_media"."id" LIMIT $3`)).
+		WithArgs(1, "gs://drive-bucket/events/1/banner.png", 1).
 		WillReturnError(gorm.ErrRecordNotFound)
 	mock.ExpectRollback()
-	if err := service.DeleteEventPhoto(1, 1); !errors.Is(err, ErrEventMediaNotFound) {
+	if err := service.DeleteEventPhoto(1, "gs://drive-bucket/events/1/banner.png"); !errors.Is(err, ErrEventMediaNotFound) {
 		t.Fatalf("expected ErrEventMediaNotFound, got %v", err)
 	}
 
@@ -748,7 +748,7 @@ func TestServiceAdditionalErrorBranches(t *testing.T) {
 		WithArgs(1, MediaRoleAttachment).
 		WillReturnError(errors.New("find failed"))
 	mock.ExpectRollback()
-	if _, err := service.DeleteAllEventDocuments(1); err == nil {
+	if _, err := service.DeleteAllEventDocuments(1, nil); err == nil {
 		t.Fatal("expected delete-all find error")
 	}
 
@@ -1227,20 +1227,17 @@ func TestDeleteHelpersAndPanicRollback(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "event_media" WHERE event_id = $1 AND media_role = $2`)).
 		WithArgs(12, MediaRoleAttachment).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "event_id", "media_role", "display_name", "gcp_object_key", "file_url", "mime_type", "file_size", "sort_order", "created_at", "updated_at"}))
-	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM "event_media" WHERE event_id = $1 AND media_role = $2`)).
-		WithArgs(12, MediaRoleAttachment).
-		WillReturnError(errors.New("delete failed"))
 	mock.ExpectRollback()
-	if _, err := service.DeleteAllEventDocuments(12); err == nil {
+	if _, err := service.DeleteAllEventDocuments(12, nil); err == nil {
 		t.Fatal("expected delete all documents error")
 	}
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "event_media" WHERE event_id = $1 AND id = $2 ORDER BY "event_media"."id" LIMIT $3`)).
-		WithArgs(12, 8, 1).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "event_media" WHERE event_id = $1 AND file_url = $2 ORDER BY "event_media"."id" LIMIT $3`)).
+		WithArgs(12, "gs://drive-bucket/events/12/banner.png", 1).
 		WillReturnError(gorm.ErrRecordNotFound)
 	mock.ExpectRollback()
-	if err := service.DeleteEventPhoto(12, 8); !errors.Is(err, ErrEventMediaNotFound) {
+	if err := service.DeleteEventPhoto(12, "gs://drive-bucket/events/12/banner.png"); !errors.Is(err, ErrEventMediaNotFound) {
 		t.Fatalf("expected ErrEventMediaNotFound, got %v", err)
 	}
 

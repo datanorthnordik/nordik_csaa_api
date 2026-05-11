@@ -178,6 +178,14 @@ type DeleteAllDocumentsResponse struct {
 	DeletedCount int `json:"deletedCount"`
 }
 
+type DeleteEventMediaRequest struct {
+	StorageURL string `json:"storage_url"`
+}
+
+type DeleteEventMediaBatchRequest struct {
+	StorageURLs []string `json:"storage_urls"`
+}
+
 type SavedLocationListResponse struct {
 	Items []Address `json:"items"`
 }

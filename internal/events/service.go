@@ -464,11 +464,11 @@ func (s *EventService) DeleteEvent(id int) error {
 	return s.cleanupMediaObjects(media)
 }
 
-func (s *EventService) DeleteEventDocument(id int, mediaID int) error {
-	return s.deleteEventMedia(id, mediaID, MediaRoleAttachment)
+func (s *EventService) DeleteEventDocument(id int, storageURL string) error {
+	return s.deleteEventMediaByStorageURL(id, storageURL, MediaRoleAttachment)
 }
 
-func (s *EventService) DeleteAllEventDocuments(id int) (*DeleteAllDocumentsResponse, error) {
+func (s *EventService) DeleteAllEventDocuments(id int, storageURLs []string) (*DeleteAllDocumentsResponse, error) {
 	if s.DB == nil {
 		return nil, ErrStoreUnavailable
 	}
@@ -480,12 +480,23 @@ func (s *EventService) DeleteAllEventDocuments(id int) (*DeleteAllDocumentsRespo
 	defer rollbackOnPanic(tx)
 
 	var media []EventMedia
-	if err := tx.Where("event_id = ? AND media_role = ?", id, MediaRoleAttachment).Find(&media).Error; err != nil {
+	query := tx.Where("event_id = ? AND media_role = ?", id, MediaRoleAttachment)
+	storageURLs = sanitizeStringSlice(storageURLs)
+	if len(storageURLs) > 0 {
+		query = query.Where("file_url IN ?", storageURLs)
+	}
+
+	if err := query.Find(&media).Error; err != nil {
 		tx.Rollback()
 		return nil, err
 	}
 
-	if err := tx.Where("event_id = ? AND media_role = ?", id, MediaRoleAttachment).Delete(&EventMedia{}).Error; err != nil {
+	if len(media) == 0 {
+		tx.Rollback()
+		return nil, ErrEventMediaNotFound
+	}
+
+	if err := tx.Delete(&media).Error; err != nil {
 		tx.Rollback()
 		return nil, err
 	}
@@ -501,13 +512,18 @@ func (s *EventService) DeleteAllEventDocuments(id int) (*DeleteAllDocumentsRespo
 	return &DeleteAllDocumentsResponse{DeletedCount: len(media)}, nil
 }
 
-func (s *EventService) DeleteEventPhoto(id int, mediaID int) error {
-	return s.deleteEventMedia(id, mediaID, MediaRoleDisplayImage)
+func (s *EventService) DeleteEventPhoto(id int, storageURL string) error {
+	return s.deleteEventMediaByStorageURL(id, storageURL, MediaRoleDisplayImage)
 }
 
-func (s *EventService) deleteEventMedia(eventID int, mediaID int, allowedRole string) error {
+func (s *EventService) deleteEventMediaByStorageURL(eventID int, storageURL string, allowedRole string) error {
 	if s.DB == nil {
 		return ErrStoreUnavailable
+	}
+
+	storageURL = strings.TrimSpace(storageURL)
+	if storageURL == "" {
+		return errors.New("storage_url is required")
 	}
 
 	tx := s.DB.Begin()
@@ -517,7 +533,7 @@ func (s *EventService) deleteEventMedia(eventID int, mediaID int, allowedRole st
 	defer rollbackOnPanic(tx)
 
 	var media EventMedia
-	if err := tx.Where("event_id = ? AND id = ?", eventID, mediaID).First(&media).Error; err != nil {
+	if err := tx.Where("event_id = ? AND file_url = ?", eventID, storageURL).First(&media).Error; err != nil {
 		tx.Rollback()
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrEventMediaNotFound
