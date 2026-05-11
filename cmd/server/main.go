@@ -7,6 +7,7 @@ import (
 	"nordikcsaaapi/internal/auth"
 	"nordikcsaaapi/internal/config"
 	"nordikcsaaapi/internal/events"
+	"nordikcsaaapi/internal/gallery"
 	"os"
 
 	"github.com/gin-contrib/cors"
@@ -62,6 +63,8 @@ func main() {
 	auth.RegisterRoutes(r, userService, &cfg)
 	eventService := &events.EventService{DB: db, BucketName: cfg.DriveBucketName, BucketPrefix: cfg.DriveBucketPrefix}
 	events.RegisterRoutes(r, eventService, auth.RequireBearerAuth(&cfg))
+	galleryService := &gallery.GalleryService{DB: db, BucketName: cfg.DriveBucketName, BucketPrefix: cfg.DriveBucketPrefix}
+	gallery.RegisterRoutes(r, galleryService, auth.RequireBearerAuth(&cfg))
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})

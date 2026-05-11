@@ -49,6 +49,74 @@ CREATE TABLE IF NOT EXISTS galleries (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+ALTER TABLE galleries
+    ADD COLUMN IF NOT EXISTS description TEXT,
+    ADD COLUMN IF NOT EXISTS cover_image_url TEXT,
+    ADD COLUMN IF NOT EXISTS cover_image_object_key TEXT,
+    ADD COLUMN IF NOT EXISTS cover_image_alt_text VARCHAR(255),
+    ADD COLUMN IF NOT EXISTS published BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS created_by INT NULL,
+    ADD COLUMN IF NOT EXISTS updated_by INT NULL;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'fk_galleries_created_by'
+    ) THEN
+        ALTER TABLE galleries
+            ADD CONSTRAINT fk_galleries_created_by
+            FOREIGN KEY (created_by) REFERENCES users(id)
+            ON UPDATE CASCADE
+            ON DELETE SET NULL;
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'fk_galleries_updated_by'
+    ) THEN
+        ALTER TABLE galleries
+            ADD CONSTRAINT fk_galleries_updated_by
+            FOREIGN KEY (updated_by) REFERENCES users(id)
+            ON UPDATE CASCADE
+            ON DELETE SET NULL;
+    END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS gallery_images (
+    id SERIAL PRIMARY KEY,
+    gallery_id INT NOT NULL,
+    alt_text VARCHAR(255),
+    gcp_object_key TEXT,
+    file_url TEXT NOT NULL,
+    mime_type VARCHAR(255),
+    file_size BIGINT,
+    uploaded_by INT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_gallery_images_gallery
+        FOREIGN KEY (gallery_id) REFERENCES galleries(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_gallery_images_uploaded_by
+        FOREIGN KEY (uploaded_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT chk_gallery_images_url_not_blank
+        CHECK (btrim(file_url) <> ''),
+
+    CONSTRAINT chk_gallery_images_file_size
+        CHECK (file_size IS NULL OR file_size >= 0)
+);
+
 CREATE TABLE IF NOT EXISTS events (
     id SERIAL PRIMARY KEY,
     title VARCHAR(255) NOT NULL,
@@ -275,6 +343,13 @@ CREATE INDEX IF NOT EXISTS idx_addresses_city ON addresses(city);
 CREATE INDEX IF NOT EXISTS idx_addresses_is_saved ON addresses(is_saved);
 
 CREATE INDEX IF NOT EXISTS idx_galleries_name ON galleries(name);
+CREATE INDEX IF NOT EXISTS idx_galleries_published ON galleries(published);
+CREATE INDEX IF NOT EXISTS idx_galleries_created_by ON galleries(created_by);
+CREATE INDEX IF NOT EXISTS idx_galleries_updated_by ON galleries(updated_by);
+
+CREATE INDEX IF NOT EXISTS idx_gallery_images_gallery_id ON gallery_images(gallery_id);
+CREATE INDEX IF NOT EXISTS idx_gallery_images_uploaded_by ON gallery_images(uploaded_by);
+CREATE INDEX IF NOT EXISTS idx_gallery_images_file_url ON gallery_images(file_url);
 
 CREATE INDEX IF NOT EXISTS idx_events_created_by ON events(created_by);
 CREATE INDEX IF NOT EXISTS idx_events_address_id ON events(address_id);
@@ -325,6 +400,12 @@ EXECUTE FUNCTION set_updated_at();
 DROP TRIGGER IF EXISTS trg_event_occurrences_set_updated_at ON event_occurrences;
 CREATE TRIGGER trg_event_occurrences_set_updated_at
 BEFORE UPDATE ON event_occurrences
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_gallery_images_set_updated_at ON gallery_images;
+CREATE TRIGGER trg_gallery_images_set_updated_at
+BEFORE UPDATE ON gallery_images
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
