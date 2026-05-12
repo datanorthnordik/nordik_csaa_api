@@ -61,10 +61,10 @@ func TestListPagesSuccessAndValidation(t *testing.T) {
 
 	service := &PageService{DB: db}
 
-	mock.ExpectQuery(`SELECT count\(\*\) FROM "pages" WHERE .*LOWER\(page_title\) LIKE \$1 OR LOWER\(url_slug\) LIKE \$2.*status = \$3`).
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "pages" WHERE .*LOWER\(pages\.page_title\) LIKE \$1 OR LOWER\(pages\.url_slug\) LIKE \$2.*pages\.status = \$3`).
 		WithArgs("%home%", "%home%", "published").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(12))
-	mock.ExpectQuery(`SELECT .* FROM "pages" LEFT JOIN users AS modified_users ON modified_users.id = pages.modified_by LEFT JOIN pages AS parent_pages ON parent_pages.id = pages.parent_id WHERE .*LOWER\(page_title\) LIKE \$1 OR LOWER\(url_slug\) LIKE \$2.*status = \$3 ORDER BY last_modified DESC LIMIT \$4 OFFSET \$5`).
+	mock.ExpectQuery(`SELECT .* FROM "pages" LEFT JOIN users AS modified_users ON modified_users.id = pages.modified_by LEFT JOIN pages AS parent_pages ON parent_pages.id = pages.parent_id WHERE .*LOWER\(pages\.page_title\) LIKE \$1 OR LOWER\(pages\.url_slug\) LIKE \$2.*pages\.status = \$3 ORDER BY pages\.last_modified DESC LIMIT \$4 OFFSET \$5`).
 		WithArgs("%home%", "%home%", "published", 5, 5).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "page_title", "url_slug", "parent_id", "parent_page_title", "parent_page_url_slug", "status", "last_modified", "modified_by", "modified_by_name", "created_at", "updated_at",
@@ -115,7 +115,7 @@ func TestListPagesReturnsEmptyArrayWhenNoRowsMatch(t *testing.T) {
 
 	mock.ExpectQuery(`SELECT count\(\*\) FROM "pages"`).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
-	mock.ExpectQuery(`SELECT .* FROM "pages" LEFT JOIN users AS modified_users ON modified_users.id = pages.modified_by LEFT JOIN pages AS parent_pages ON parent_pages.id = pages.parent_id ORDER BY last_modified DESC`).
+	mock.ExpectQuery(`SELECT .* FROM "pages" LEFT JOIN users AS modified_users ON modified_users.id = pages.modified_by LEFT JOIN pages AS parent_pages ON parent_pages.id = pages.parent_id ORDER BY pages\.last_modified DESC`).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "page_title", "url_slug", "parent_id", "parent_page_title", "parent_page_url_slug", "status", "last_modified", "modified_by", "modified_by_name", "created_at", "updated_at",
 		}))
