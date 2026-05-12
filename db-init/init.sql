@@ -403,6 +403,80 @@ CREATE TABLE IF NOT EXISTS events (
         )
 );
 
+CREATE TABLE IF NOT EXISTS menus (
+    id SERIAL PRIMARY KEY,
+    menu_key VARCHAR(100) NOT NULL UNIQUE,
+    name VARCHAR(255) NOT NULL,
+    created_by INT NULL,
+    updated_by INT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_menus_created_by
+        FOREIGN KEY (created_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT fk_menus_updated_by
+        FOREIGN KEY (updated_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT chk_menus_key_not_blank
+        CHECK (btrim(menu_key) <> ''),
+
+    CONSTRAINT chk_menus_name_not_blank
+        CHECK (btrim(name) <> '')
+);
+
+CREATE TABLE IF NOT EXISTS menu_items (
+    id SERIAL PRIMARY KEY,
+    menu_id INT NOT NULL,
+    parent_id INT NULL,
+    label VARCHAR(255) NOT NULL,
+    navigation_type VARCHAR(30) NOT NULL,
+    page_id INT NULL,
+    external_url TEXT,
+    open_in_new_tab BOOLEAN NOT NULL DEFAULT FALSE,
+    sort_order INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_menu_items_menu
+        FOREIGN KEY (menu_id) REFERENCES menus(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_menu_items_parent
+        FOREIGN KEY (parent_id) REFERENCES menu_items(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_menu_items_page
+        FOREIGN KEY (page_id) REFERENCES pages(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT chk_menu_items_label_not_blank
+        CHECK (btrim(label) <> ''),
+
+    CONSTRAINT chk_menu_items_navigation_type
+        CHECK (navigation_type IN ('pages', 'external_link')),
+
+    CONSTRAINT chk_menu_items_parent_not_self
+        CHECK (parent_id IS NULL OR parent_id <> id),
+
+    CONSTRAINT chk_menu_items_sort_order
+        CHECK (sort_order >= 0),
+
+    CONSTRAINT chk_menu_items_target
+        CHECK (
+            (navigation_type = 'pages' AND page_id IS NOT NULL AND btrim(COALESCE(external_url, '')) = '')
+            OR
+            (navigation_type = 'external_link' AND page_id IS NULL AND btrim(COALESCE(external_url, '')) <> '')
+        )
+);
+
 CREATE TABLE IF NOT EXISTS event_media (
     id SERIAL PRIMARY KEY,
     event_id INT NOT NULL,
@@ -480,6 +554,18 @@ CREATE INDEX IF NOT EXISTS idx_pages_created_by ON pages(created_by);
 CREATE INDEX IF NOT EXISTS idx_pages_modified_by ON pages(modified_by);
 CREATE INDEX IF NOT EXISTS idx_pages_last_modified ON pages(last_modified);
 
+CREATE INDEX IF NOT EXISTS idx_menus_key ON menus(menu_key);
+CREATE INDEX IF NOT EXISTS idx_menus_created_by ON menus(created_by);
+CREATE INDEX IF NOT EXISTS idx_menus_updated_by ON menus(updated_by);
+
+CREATE INDEX IF NOT EXISTS idx_menu_items_menu_id ON menu_items(menu_id);
+CREATE INDEX IF NOT EXISTS idx_menu_items_parent_id ON menu_items(parent_id);
+CREATE INDEX IF NOT EXISTS idx_menu_items_page_id ON menu_items(page_id);
+CREATE INDEX IF NOT EXISTS idx_menu_items_menu_sort ON menu_items(menu_id, parent_id, sort_order, id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_menu_items_page_per_menu
+    ON menu_items(menu_id, page_id)
+    WHERE page_id IS NOT NULL;
+
 CREATE INDEX IF NOT EXISTS idx_events_created_by ON events(created_by);
 CREATE INDEX IF NOT EXISTS idx_events_address_id ON events(address_id);
 CREATE INDEX IF NOT EXISTS idx_events_gallery_id ON events(gallery_id);
@@ -535,6 +621,18 @@ BEFORE UPDATE ON events
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_menus_set_updated_at ON menus;
+CREATE TRIGGER trg_menus_set_updated_at
+BEFORE UPDATE ON menus
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_menu_items_set_updated_at ON menu_items;
+CREATE TRIGGER trg_menu_items_set_updated_at
+BEFORE UPDATE ON menu_items
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
 DROP TRIGGER IF EXISTS trg_event_media_set_updated_at ON event_media;
 CREATE TRIGGER trg_event_media_set_updated_at
 BEFORE UPDATE ON event_media
@@ -565,4 +663,10 @@ VALUES
     ('User', 2)
 ON CONFLICT (role) DO UPDATE
 SET priority = EXCLUDED.priority,
+    updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO menus (menu_key, name)
+VALUES ('main', 'Main Website Navigation')
+ON CONFLICT (menu_key) DO UPDATE
+SET name = EXCLUDED.name,
     updated_at = CURRENT_TIMESTAMP;
