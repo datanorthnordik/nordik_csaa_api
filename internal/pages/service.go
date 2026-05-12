@@ -466,11 +466,11 @@ func normalizeListPagesFilter(filter PageListFilters) (PageListFilters, error) {
 func applyPageListFilters(query *gorm.DB, filter PageListFilters) *gorm.DB {
 	if filter.SearchTerm != "" {
 		search := "%" + strings.ToLower(filter.SearchTerm) + "%"
-		query = query.Where("(LOWER(page_title) LIKE ? OR LOWER(url_slug) LIKE ?)", search, search)
+		query = query.Where("(LOWER(pages.page_title) LIKE ? OR LOWER(pages.url_slug) LIKE ?)", search, search)
 	}
 
 	if filter.Status != "" {
-		query = query.Where("status = ?", filter.Status)
+		query = query.Where("pages.status = ?", filter.Status)
 	}
 
 	return query
@@ -478,16 +478,16 @@ func applyPageListFilters(query *gorm.DB, filter PageListFilters) *gorm.DB {
 
 func buildPageSortClause(sortBy string, sortOrder string) string {
 	allowedColumns := map[string]string{
-		"page_title":    "page_title",
-		"url_slug":      "url_slug",
-		"status":        "status",
-		"last_modified": "last_modified",
-		"created_at":    "created_at",
-		"updated_at":    "updated_at",
+		"page_title":    "pages.page_title",
+		"url_slug":      "pages.url_slug",
+		"status":        "pages.status",
+		"last_modified": "pages.last_modified",
+		"created_at":    "pages.created_at",
+		"updated_at":    "pages.updated_at",
 	}
 	column, ok := allowedColumns[sortBy]
 	if !ok {
-		column = "last_modified"
+		column = "pages.last_modified"
 	}
 	if sortOrder != "asc" {
 		sortOrder = "desc"
