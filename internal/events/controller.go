@@ -92,9 +92,8 @@ func (ec *EventController) ListGalleries(c *gin.Context) {
 }
 
 func (ec *EventController) CreateEvent(c *gin.Context) {
-	var req SaveEventRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		apiresponse.WriteBindingError(c, err, req)
+	req, ok := bindSaveEventRequest(c)
+	if !ok {
 		return
 	}
 
@@ -116,9 +115,8 @@ func (ec *EventController) UpdateEvent(c *gin.Context) {
 		return
 	}
 
-	var req SaveEventRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		apiresponse.WriteBindingError(c, err, req)
+	req, ok := bindSaveEventRequest(c)
+	if !ok {
 		return
 	}
 
@@ -236,7 +234,8 @@ func isClientSafeEventError(err error) bool {
 		strings.Contains(message, " must be omitted "),
 		strings.Contains(message, " must be empty "),
 		strings.Contains(message, "invalid "),
-		strings.Contains(message, "missing both data_base64 and file_url"),
+		strings.Contains(message, "missing both uploaded file and file_url"),
+		strings.Contains(message, "use multipart/form-data"),
 		strings.Contains(message, "at least one "),
 		strings.Contains(message, "cannot be true when "),
 		strings.Contains(message, "must be valid json"),

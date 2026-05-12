@@ -132,6 +132,18 @@ func (r gcsReaderFuncs) ContentType() string {
 }
 
 func UploadBase64ToGCS(base64Data, bucketName, objectName, contentType string) (string, int64, error) {
+	data, err := decodeBase64Payload(base64Data)
+	if err != nil {
+		return "", 0, err
+	}
+	return uploadToGCS(data, bucketName, objectName, contentType)
+}
+
+func UploadBytesToGCS(data []byte, bucketName, objectName, contentType string) (string, int64, error) {
+	return uploadToGCS(data, bucketName, objectName, contentType)
+}
+
+func uploadToGCS(data []byte, bucketName, objectName, contentType string) (string, int64, error) {
 	if strings.TrimSpace(bucketName) == "" {
 		return "", 0, ErrBucketNameRequired
 	}
@@ -145,11 +157,6 @@ func UploadBase64ToGCS(base64Data, bucketName, objectName, contentType string) (
 		return "", 0, err
 	}
 	defer client.Close()
-
-	data, err := decodeBase64Payload(base64Data)
-	if err != nil {
-		return "", 0, err
-	}
 
 	if strings.TrimSpace(contentType) == "" {
 		contentType = http.DetectContentType(data)

@@ -1,8 +1,10 @@
 package gallery
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -208,6 +210,29 @@ func TestCreateGalleryEndpoint(t *testing.T) {
 	}
 }
 
+func TestCreateGalleryEndpointAcceptsMultipartCoverUpload(t *testing.T) {
+	service := &fakeGalleryService{}
+	router := setupProtectedRouter(service)
+
+	req := newGalleryMultipartRequest(t, http.MethodPost, "/api/galleries", `{"name":"Homepage","description":"Hero gallery","published":true}`, map[string]multipartUploadTestFile{
+		"cover_image_file": {Filename: "cover.png", Data: []byte("hello")},
+	})
+	req.Header.Set("Authorization", "Bearer "+signToken(t))
+
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", res.Code, res.Body.String())
+	}
+	if service.gotCreateReq.CoverImage == nil {
+		t.Fatalf("expected cover image in request, got %#v", service.gotCreateReq)
+	}
+	if string(service.gotCreateReq.CoverImage.Content) != "hello" {
+		t.Fatalf("expected uploaded cover bytes, got %#v", service.gotCreateReq.CoverImage)
+	}
+}
+
 func TestListAndGetGalleryEndpoints(t *testing.T) {
 	service := &fakeGalleryService{
 		listResp: &GalleryListResponse{
@@ -294,15 +319,19 @@ func TestAddAndDeleteGalleryImagesEndpoints(t *testing.T) {
 	router := setupProtectedRouter(service)
 
 	res := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/galleries/4/images", strings.NewReader(`{"images":[{"title":"Opening banner","alt_text":"Banner","file_name":"banner.png","mime_type":"image/png","data_base64":"aGVsbG8="}]}`))
+	req := newGalleryMultipartRequest(t, http.MethodPost, "/api/galleries/4/images", `{"images":[{"title":"Opening banner","alt_text":"Banner","mime_type":"image/png"}]}`, map[string]multipartUploadTestFile{
+		"images[0].file": {Filename: "banner.png", Data: []byte("hello")},
+	})
 	req.Header.Set("Authorization", "Bearer "+signToken(t))
-	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(res, req)
 	if res.Code != http.StatusCreated || service.gotAddID != 4 || len(service.gotAddReq.Images) != 1 {
 		t.Fatalf("unexpected add image result: status=%d req=%#v", res.Code, service.gotAddReq)
 	}
 	if service.gotAddReq.Images[0].Title != "Opening banner" {
 		t.Fatalf("expected image title to be forwarded, got %#v", service.gotAddReq.Images[0])
+	}
+	if string(service.gotAddReq.Images[0].Content) != "hello" {
+		t.Fatalf("expected uploaded image bytes, got %#v", service.gotAddReq.Images[0])
 	}
 
 	res = httptest.NewRecorder()
@@ -391,6 +420,18 @@ func TestGalleryControllerErrors(t *testing.T) {
 	assertError(t, rec, http.StatusConflict, "conflict")
 }
 
+func TestGalleryUploadEndpointsRejectBase64Payload(t *testing.T) {
+	router := setupProtectedRouter(&fakeGalleryService{})
+
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/galleries/4/images", strings.NewReader(`{"images":[{"title":"Opening banner","alt_text":"Banner","file_name":"banner.png","mime_type":"image/png","data_base64":"aGVsbG8="}]}`))
+	req.Header.Set("Authorization", "Bearer "+signToken(t))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(res, req)
+
+	assertError(t, res, http.StatusBadRequest, "validation_error")
+}
+
 func assertError(t *testing.T, rec *httptest.ResponseRecorder, status int, code string) {
 	t.Helper()
 	if rec.Code != status {
@@ -418,4 +459,35 @@ func signToken(t *testing.T) string {
 		t.Fatalf("sign token: %v", err)
 	}
 	return signed
+}
+
+type multipartUploadTestFile struct {
+	Filename string
+	Data     []byte
+}
+
+func newGalleryMultipartRequest(t *testing.T, method string, target string, payload string, files map[string]multipartUploadTestFile) *http.Request {
+	t.Helper()
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	if err := writer.WriteField("payload", payload); err != nil {
+		t.Fatalf("WriteField payload: %v", err)
+	}
+	for field, file := range files {
+		part, err := writer.CreateFormFile(field, file.Filename)
+		if err != nil {
+			t.Fatalf("CreateFormFile(%s): %v", field, err)
+		}
+		if _, err := part.Write(file.Data); err != nil {
+			t.Fatalf("part.Write(%s): %v", field, err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("writer.Close: %v", err)
+	}
+
+	req := httptest.NewRequest(method, target, body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	return req
 }

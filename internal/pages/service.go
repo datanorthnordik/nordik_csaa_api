@@ -21,9 +21,12 @@ var (
 )
 
 var (
-	pagesNowFunc = time.Now
+	pagesNowFunc          = time.Now
 	uploadBase64ToGCSHook = func(base64Data, bucketName, objectName, contentType string) (string, int64, error) {
 		return util.UploadBase64ToGCS(base64Data, bucketName, objectName, contentType)
+	}
+	uploadBytesToGCSHook = func(data []byte, bucketName, objectName, contentType string) (string, int64, error) {
+		return util.UploadBytesToGCS(data, bucketName, objectName, contentType)
 	}
 	downloadGCSObjectHook = func(bucketName, objectName string) ([]byte, string, error) {
 		return util.ReadGCSObject(bucketName, objectName)
@@ -83,6 +86,9 @@ func (s *PageService) ListPages(filter PageListFilters) (*PageListResponse, erro
 		Limit(normalized.PageSize).
 		Scan(&items).Error; err != nil {
 		return nil, err
+	}
+	if items == nil {
+		items = make([]PageListItem, 0)
 	}
 
 	totalPages := 0
@@ -516,9 +522,9 @@ func (s *PageService) buildHeroImageFields(pageID int, input PageUploadInput) (s
 		objectKey = strings.TrimSpace(input.GCPObjectKey)
 	}
 
-	if strings.TrimSpace(input.DataBase64) == "" {
+	if len(input.Content) == 0 && strings.TrimSpace(input.DataBase64) == "" {
 		if referenceURL == "" {
-			return "", "", "", errors.New("hero_image is missing both data_base64 and file_url")
+			return "", "", "", errors.New("hero_image is missing both uploaded file and file_url")
 		}
 		if objectKey == "" {
 			_, parsedObjectKey, err := util.ParseGCSObjectReference(strings.TrimSpace(s.BucketName), referenceURL)
@@ -535,12 +541,25 @@ func (s *PageService) buildHeroImageFields(pageID int, input PageUploadInput) (s
 
 	objectName := s.heroImageObjectName(pageID, input.FileName, input.MimeType)
 	storageObjectName := s.storageObjectName(objectName)
-	fileURL, _, err := uploadBase64ToGCSHook(
-		input.DataBase64,
-		s.BucketName,
-		storageObjectName,
-		strings.TrimSpace(input.MimeType),
+	var (
+		fileURL string
+		err     error
 	)
+	if len(input.Content) > 0 {
+		fileURL, _, err = uploadBytesToGCSHook(
+			input.Content,
+			s.BucketName,
+			storageObjectName,
+			strings.TrimSpace(input.MimeType),
+		)
+	} else {
+		fileURL, _, err = uploadBase64ToGCSHook(
+			input.DataBase64,
+			s.BucketName,
+			storageObjectName,
+			strings.TrimSpace(input.MimeType),
+		)
+	}
 	if err != nil {
 		return "", "", "", err
 	}

@@ -103,6 +103,32 @@ func TestListPagesSuccessAndValidation(t *testing.T) {
 	}
 }
 
+func TestListPagesReturnsEmptyArrayWhenNoRowsMatch(t *testing.T) {
+	db, mock, cleanup := setupMockDB(t)
+	defer cleanup()
+
+	service := &PageService{DB: db}
+
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "pages"`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery(`SELECT .* FROM "pages" LEFT JOIN users AS modified_users ON modified_users.id = pages.modified_by ORDER BY last_modified DESC LIMIT \$1`).
+		WithArgs(10).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "page_title", "url_slug", "status", "last_modified", "modified_by", "modified_by_name", "created_at", "updated_at",
+		}))
+
+	resp, err := service.ListPages(PageListFilters{})
+	if err != nil {
+		t.Fatalf("ListPages returned error: %v", err)
+	}
+	if resp.Items == nil {
+		t.Fatal("expected empty items slice, got nil")
+	}
+	if len(resp.Items) != 0 {
+		t.Fatalf("expected no items, got %#v", resp.Items)
+	}
+}
+
 func TestGetPageSuccessAndNotFound(t *testing.T) {
 	db, mock, cleanup := setupMockDB(t)
 	defer cleanup()
@@ -275,9 +301,9 @@ func TestPageValidationAndHelpers(t *testing.T) {
 	defer restore()
 
 	url, objectKey, uploadedObject, err := service.buildHeroImageFields(5, PageUploadInput{
-		FileName:   "Banner.png",
-		MimeType:   "image/png",
-		DataBase64: "aGVsbG8=",
+		FileName: "Banner.png",
+		MimeType: "image/png",
+		Content:  []byte("hello"),
 	})
 	if err != nil {
 		t.Fatalf("buildHeroImageFields returned error: %v", err)
@@ -313,12 +339,16 @@ func validSavePageRequest() SavePageRequest {
 
 func stubPageMediaHooks() func() {
 	prevUpload := uploadBase64ToGCSHook
+	prevUploadBytes := uploadBytesToGCSHook
 	prevDownload := downloadGCSObjectHook
 	prevDelete := deleteGCSObjectHook
 	prevNow := pagesNowFunc
 
 	uploadBase64ToGCSHook = func(base64Data, bucketName, objectName, contentType string) (string, int64, error) {
 		return "gs://" + bucketName + "/" + objectName, int64(len(base64Data)), nil
+	}
+	uploadBytesToGCSHook = func(data []byte, bucketName, objectName, contentType string) (string, int64, error) {
+		return "gs://" + bucketName + "/" + objectName, int64(len(data)), nil
 	}
 	downloadGCSObjectHook = func(bucketName, objectName string) ([]byte, string, error) {
 		return []byte("downloaded:" + bucketName + "/" + objectName), "image/png", nil
@@ -332,6 +362,7 @@ func stubPageMediaHooks() func() {
 
 	return func() {
 		uploadBase64ToGCSHook = prevUpload
+		uploadBytesToGCSHook = prevUploadBytes
 		downloadGCSObjectHook = prevDownload
 		deleteGCSObjectHook = prevDelete
 		pagesNowFunc = prevNow

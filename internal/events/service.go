@@ -27,6 +27,9 @@ var (
 	uploadBase64ToGCSHook = func(base64Data, bucketName, objectName, contentType string) (string, int64, error) {
 		return util.UploadBase64ToGCS(base64Data, bucketName, objectName, contentType)
 	}
+	uploadBytesToGCSHook = func(data []byte, bucketName, objectName, contentType string) (string, int64, error) {
+		return util.UploadBytesToGCS(data, bucketName, objectName, contentType)
+	}
 	downloadGCSObjectHook = func(bucketName, objectName string) ([]byte, string, error) {
 		return util.ReadGCSObject(bucketName, objectName)
 	}
@@ -836,9 +839,9 @@ func (s *EventService) buildMediaRecord(eventID int, role string, idx int, input
 		objectKey = strings.TrimSpace(input.GCPObjectKey)
 	}
 
-	if strings.TrimSpace(input.DataBase64) == "" {
+	if len(input.Content) == 0 && strings.TrimSpace(input.DataBase64) == "" {
 		if referenceURL == "" {
-			return EventMedia{}, "", fmt.Errorf("%s upload %d is missing both data_base64 and file_url", role, idx+1)
+			return EventMedia{}, "", fmt.Errorf("%s upload %d is missing both uploaded file and file_url", role, idx+1)
 		}
 		media.FileURL = referenceURL
 		media.GCPObjectKey = objectKey
@@ -857,7 +860,16 @@ func (s *EventService) buildMediaRecord(eventID int, role string, idx int, input
 
 	objectName := s.mediaObjectName(eventID, role, idx, input.FileName, input.MimeType)
 	storageObjectName := s.storageObjectName(objectName)
-	fileURL, sizeBytes, err := uploadBase64ToGCSHook(input.DataBase64, s.BucketName, storageObjectName, strings.TrimSpace(input.MimeType))
+	var (
+		fileURL   string
+		sizeBytes int64
+		err       error
+	)
+	if len(input.Content) > 0 {
+		fileURL, sizeBytes, err = uploadBytesToGCSHook(input.Content, s.BucketName, storageObjectName, strings.TrimSpace(input.MimeType))
+	} else {
+		fileURL, sizeBytes, err = uploadBase64ToGCSHook(input.DataBase64, s.BucketName, storageObjectName, strings.TrimSpace(input.MimeType))
+	}
 	if err != nil {
 		return EventMedia{}, "", err
 	}

@@ -1,8 +1,10 @@
 package pages
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -209,6 +211,45 @@ func TestCreateAndUpdatePageEndpointsInjectAuthUser(t *testing.T) {
 	}
 }
 
+func TestCreatePageEndpointAcceptsMultipartHeroUpload(t *testing.T) {
+	service := &fakePageService{}
+	router := setupProtectedPageRouter(service)
+
+	req := newPageMultipartRequest(t, http.MethodPost, "/api/pages", `{"page_title":"Homepage","url_slug":"/home","status":"draft","hero_image_enabled":true}`, map[string]multipartUploadTestFile{
+		"hero_image_file": {Filename: "hero.png", Data: []byte("hello")},
+	})
+	req.Header.Set("Authorization", "Bearer "+signPageTestToken(t, "test-secret"))
+
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusCreated {
+		t.Fatalf("expected status 201, got %d: %s", res.Code, res.Body.String())
+	}
+	if service.gotCreateReq.HeroImage == nil {
+		t.Fatalf("expected hero image to be forwarded, got %#v", service.gotCreateReq)
+	}
+	if string(service.gotCreateReq.HeroImage.Content) != "hello" {
+		t.Fatalf("expected multipart file bytes to be forwarded, got %#v", service.gotCreateReq.HeroImage)
+	}
+	if service.gotCreateReq.HeroImage.FileName != "hero.png" {
+		t.Fatalf("expected uploaded filename hero.png, got %#v", service.gotCreateReq.HeroImage)
+	}
+}
+
+func TestCreatePageEndpointRejectsBase64UploadPayload(t *testing.T) {
+	service := &fakePageService{}
+	router := setupProtectedPageRouter(service)
+
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/pages", strings.NewReader(`{"page_title":"Homepage","url_slug":"/home","status":"draft","hero_image_enabled":true,"hero_image":{"file_name":"hero.png","mime_type":"image/png","data_base64":"aGVsbG8="}}`))
+	req.Header.Set("Authorization", "Bearer "+signPageTestToken(t, "test-secret"))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(res, req)
+
+	assertPageAPIError(t, res, http.StatusBadRequest, "validation_error", "use multipart/form-data with a payload field for file uploads")
+}
+
 func TestDeletePageEndpoint(t *testing.T) {
 	service := &fakePageService{}
 	router := setupProtectedPageRouter(service)
@@ -317,4 +358,35 @@ func signPageTestToken(t *testing.T, secret string) string {
 		t.Fatalf("sign test token: %v", err)
 	}
 	return signed
+}
+
+type multipartUploadTestFile struct {
+	Filename string
+	Data     []byte
+}
+
+func newPageMultipartRequest(t *testing.T, method string, target string, payload string, files map[string]multipartUploadTestFile) *http.Request {
+	t.Helper()
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	if err := writer.WriteField("payload", payload); err != nil {
+		t.Fatalf("WriteField payload: %v", err)
+	}
+	for field, file := range files {
+		part, err := writer.CreateFormFile(field, file.Filename)
+		if err != nil {
+			t.Fatalf("CreateFormFile(%s): %v", field, err)
+		}
+		if _, err := part.Write(file.Data); err != nil {
+			t.Fatalf("part.Write(%s): %v", field, err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("writer.Close: %v", err)
+	}
+
+	req := httptest.NewRequest(method, target, body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	return req
 }

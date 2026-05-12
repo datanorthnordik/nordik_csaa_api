@@ -122,6 +122,30 @@ func TestUploadBase64ToGCS(t *testing.T) {
 	}
 }
 
+func TestUploadBytesToGCS(t *testing.T) {
+	writer := &fakeGCSWriter{}
+	client := &fakeGCSClient{writer: writer}
+	restore := stubGCSClient(client, nil)
+	defer restore()
+
+	url, size, err := UploadBytesToGCS([]byte("hello"), "bucket", "path/file.txt", "")
+	if err != nil {
+		t.Fatalf("UploadBytesToGCS returned error: %v", err)
+	}
+	if url != "gs://bucket/path/file.txt" {
+		t.Fatalf("unexpected url: %q", url)
+	}
+	if size != 5 {
+		t.Fatalf("expected size 5, got %d", size)
+	}
+	if string(writer.gotData) != "hello" {
+		t.Fatalf("expected uploaded payload hello, got %q", string(writer.gotData))
+	}
+	if client.gotContentType == "" {
+		t.Fatal("expected content type to be detected")
+	}
+}
+
 func TestUploadBase64ToGCSErrors(t *testing.T) {
 	if _, _, err := UploadBase64ToGCS("aGVsbG8=", "", "obj", ""); !errors.Is(err, ErrBucketNameRequired) {
 		t.Fatalf("expected ErrBucketNameRequired, got %v", err)
@@ -165,6 +189,15 @@ func TestUploadBase64ToGCSErrors(t *testing.T) {
 
 	if _, _, err := UploadBase64ToGCS("not-base64", "bucket", "obj", ""); err == nil {
 		t.Fatal("expected base64 decode error")
+	}
+}
+
+func TestUploadBytesToGCSErrors(t *testing.T) {
+	if _, _, err := UploadBytesToGCS([]byte("hello"), "", "obj", ""); !errors.Is(err, ErrBucketNameRequired) {
+		t.Fatalf("expected ErrBucketNameRequired, got %v", err)
+	}
+	if _, _, err := UploadBytesToGCS([]byte("hello"), "bucket", "", ""); !errors.Is(err, ErrObjectNameRequired) {
+		t.Fatalf("expected ErrObjectNameRequired, got %v", err)
 	}
 }
 

@@ -28,6 +28,7 @@ type PageUploadInput struct {
 	FileName     string `json:"file_name"`
 	MimeType     string `json:"mime_type"`
 	DataBase64   string `json:"data_base64"`
+	Content      []byte `json:"-"`
 	FileURL      string `json:"file_url"`
 	StorageURI   string `json:"storage_uri"`
 	ObjectKey    string `json:"object_key"`

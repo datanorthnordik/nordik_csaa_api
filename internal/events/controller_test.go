@@ -1,8 +1,10 @@
 package events
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -343,6 +345,33 @@ func TestCreateEventEndpoint(t *testing.T) {
 	}
 }
 
+func TestCreateEventEndpointAcceptsMultipartUploads(t *testing.T) {
+	service := &fakeEventService{}
+	router := setupEventRouter(service)
+
+	req := newEventMultipartRequest(t, http.MethodPost, "/api/events", `{"title":"Spring Fair","show_title":true,"categories":["Events"],"event_type":"single_day_all_day","start_at":"2026-05-01T10:00:00Z","privacy_type":"public","teaser":"Welcome!","display_image":{"display_name":"Poster","mime_type":"image/png"},"attachments":[{"display_name":"Agenda","mime_type":"application/pdf"}]}`, map[string]multipartUploadTestFile{
+		"display_image_file":  {Filename: "poster.png", Data: []byte("poster")},
+		"attachments[0].file": {Filename: "agenda.pdf", Data: []byte("agenda")},
+	})
+	req.Header.Set("Authorization", "Bearer "+signEventTestToken(t, "test-secret"))
+
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusCreated {
+		t.Fatalf("expected status 201, got %d: %s", res.Code, res.Body.String())
+	}
+	if service.gotCreateRequest.DisplayImage == nil {
+		t.Fatalf("expected display image to be forwarded, got %#v", service.gotCreateRequest)
+	}
+	if string(service.gotCreateRequest.DisplayImage.Content) != "poster" {
+		t.Fatalf("expected display image bytes, got %#v", service.gotCreateRequest.DisplayImage)
+	}
+	if len(service.gotCreateRequest.Attachments) != 1 || string(service.gotCreateRequest.Attachments[0].Content) != "agenda" {
+		t.Fatalf("expected attachment bytes, got %#v", service.gotCreateRequest.Attachments)
+	}
+}
+
 func TestCreateEventEndpointAllowsMissingTeaser(t *testing.T) {
 	service := &fakeEventService{}
 	router := setupEventRouter(service)
@@ -463,6 +492,19 @@ func TestCreateEventEndpointHandlesServiceUnavailable(t *testing.T) {
 	}
 
 	assertEventAPIError(t, res, http.StatusServiceUnavailable, "service_unavailable", "Event service is temporarily unavailable")
+}
+
+func TestCreateEventEndpointRejectsBase64UploadPayload(t *testing.T) {
+	router := setupEventRouter(&fakeEventService{})
+
+	body := `{"title":"Spring Fair","show_title":true,"categories":["Events"],"event_type":"single_day_all_day","start_at":"2026-05-01T10:00:00Z","privacy_type":"public","teaser":"Welcome!","display_image":{"display_name":"Poster","mime_type":"image/png","data_base64":"aGVsbG8="}}`
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/events", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+signEventTestToken(t, "test-secret"))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(res, req)
+
+	assertEventAPIError(t, res, http.StatusBadRequest, "validation_error", "use multipart/form-data with a payload field for file uploads")
 }
 
 func TestUpdateEventEndpoint(t *testing.T) {
@@ -884,4 +926,35 @@ func signEventTestToken(t *testing.T, secret string) string {
 		t.Fatalf("sign test token: %v", err)
 	}
 	return signed
+}
+
+type multipartUploadTestFile struct {
+	Filename string
+	Data     []byte
+}
+
+func newEventMultipartRequest(t *testing.T, method string, target string, payload string, files map[string]multipartUploadTestFile) *http.Request {
+	t.Helper()
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	if err := writer.WriteField("payload", payload); err != nil {
+		t.Fatalf("WriteField payload: %v", err)
+	}
+	for field, file := range files {
+		part, err := writer.CreateFormFile(field, file.Filename)
+		if err != nil {
+			t.Fatalf("CreateFormFile(%s): %v", field, err)
+		}
+		if _, err := part.Write(file.Data); err != nil {
+			t.Fatalf("part.Write(%s): %v", field, err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("writer.Close: %v", err)
+	}
+
+	req := httptest.NewRequest(method, target, body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	return req
 }

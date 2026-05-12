@@ -91,9 +91,8 @@ func (gc *GalleryController) GetGalleryImageContent(c *gin.Context) {
 }
 
 func (gc *GalleryController) CreateGallery(c *gin.Context) {
-	var req SaveGalleryRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		apiresponse.WriteBindingError(c, err, req)
+	req, ok := bindSaveGalleryRequest(c)
+	if !ok {
 		return
 	}
 
@@ -112,9 +111,8 @@ func (gc *GalleryController) UpdateGallery(c *gin.Context) {
 		return
 	}
 
-	var req SaveGalleryRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		apiresponse.WriteBindingError(c, err, req)
+	req, ok := bindSaveGalleryRequest(c)
+	if !ok {
 		return
 	}
 
@@ -147,9 +145,8 @@ func (gc *GalleryController) AddGalleryImages(c *gin.Context) {
 		return
 	}
 
-	var req AddGalleryImagesRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		apiresponse.WriteBindingError(c, err, req)
+	req, ok := bindAddGalleryImagesRequest(c)
+	if !ok {
 		return
 	}
 
@@ -253,7 +250,8 @@ func isClientSafeGalleryError(err error) bool {
 	switch {
 	case strings.Contains(message, " is required"),
 		strings.Contains(message, " are required"),
-		strings.Contains(message, "missing both data_base64 and file_url"),
+		strings.Contains(message, "missing both uploaded file and file_url"),
+		strings.Contains(message, "use multipart/form-data"),
 		strings.Contains(message, "only image uploads are supported"),
 		strings.Contains(message, "at least one "):
 		return true

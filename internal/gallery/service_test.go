@@ -195,13 +195,44 @@ func TestGalleryValidationAndErrors(t *testing.T) {
 	}
 }
 
+func TestStoreGalleryImageFromMultipartContent(t *testing.T) {
+	svc := &GalleryService{BucketName: "drive-bucket", BucketPrefix: "main-folder"}
+	restore := stubHooks()
+	defer restore()
+
+	fileURL, objectKey, fileSize, uploadedObject, err := svc.storeGalleryImage(5, "images", 0, GalleryUploadInput{
+		FileName: "banner.png",
+		MimeType: "image/png",
+		Content:  []byte("hello"),
+	})
+	if err != nil {
+		t.Fatalf("storeGalleryImage returned error: %v", err)
+	}
+	if uploadedObject != "main-folder/galleries/5/images/20260511142521_1_banner.png" {
+		t.Fatalf("unexpected uploaded object: %q", uploadedObject)
+	}
+	if objectKey != "galleries/5/images/20260511142521_1_banner.png" {
+		t.Fatalf("unexpected object key: %q", objectKey)
+	}
+	if fileURL != "gs://drive-bucket/main-folder/galleries/5/images/20260511142521_1_banner.png" {
+		t.Fatalf("unexpected file url: %q", fileURL)
+	}
+	if fileSize != 5 {
+		t.Fatalf("expected file size 5, got %d", fileSize)
+	}
+}
+
 func stubHooks() func() {
 	prevUpload := uploadBase64ToGCSHook
+	prevUploadBytes := uploadBytesToGCSHook
 	prevDownload := downloadGCSObjectHook
 	prevDelete := deleteGCSObjectHook
 	prevNow := nowFunc
 	uploadBase64ToGCSHook = func(base64Data, bucketName, objectName, contentType string) (string, int64, error) {
 		return "gs://" + bucketName + "/" + objectName, int64(len(base64Data)), nil
+	}
+	uploadBytesToGCSHook = func(data []byte, bucketName, objectName, contentType string) (string, int64, error) {
+		return "gs://" + bucketName + "/" + objectName, int64(len(data)), nil
 	}
 	downloadGCSObjectHook = func(bucketName, objectName string) ([]byte, string, error) {
 		return []byte("file"), "image/png", nil
@@ -210,6 +241,7 @@ func stubHooks() func() {
 	nowFunc = func() time.Time { return time.Date(2026, 5, 11, 14, 25, 21, 0, time.UTC) }
 	return func() {
 		uploadBase64ToGCSHook = prevUpload
+		uploadBytesToGCSHook = prevUploadBytes
 		downloadGCSObjectHook = prevDownload
 		deleteGCSObjectHook = prevDelete
 		nowFunc = prevNow
