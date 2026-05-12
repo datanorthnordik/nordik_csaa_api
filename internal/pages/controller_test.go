@@ -79,7 +79,7 @@ func (s *fakePageService) CreatePage(req SavePageRequest) (*PageMutationResponse
 		return nil, s.createErr
 	}
 	if s.createResp == nil {
-		return &PageMutationResponse{ID: 1, PageTitle: req.PageTitle, URLSlug: req.URLSlug, Status: req.Status}, nil
+		return &PageMutationResponse{ID: 1, PageTitle: req.PageTitle, URLSlug: req.URLSlug, ParentID: req.ParentID, Status: req.Status}, nil
 	}
 	return s.createResp, nil
 }
@@ -91,7 +91,7 @@ func (s *fakePageService) UpdatePage(id int, req SavePageRequest) (*PageMutation
 		return nil, s.updateErr
 	}
 	if s.updateResp == nil {
-		return &PageMutationResponse{ID: id, PageTitle: req.PageTitle, URLSlug: req.URLSlug, Status: req.Status}, nil
+		return &PageMutationResponse{ID: id, PageTitle: req.PageTitle, URLSlug: req.URLSlug, ParentID: req.ParentID, Status: req.Status}, nil
 	}
 	return s.updateResp, nil
 }
@@ -135,6 +135,35 @@ func TestListPagesEndpoint(t *testing.T) {
 	if service.gotListFilter.Page != 2 || service.gotListFilter.PageSize != 5 || service.gotListFilter.SearchTerm != "home" {
 		t.Fatalf("unexpected list filter: %#v", service.gotListFilter)
 	}
+	if !service.gotListFilter.UsePagination {
+		t.Fatalf("expected pagination to be enabled when page params are provided, got %#v", service.gotListFilter)
+	}
+}
+
+func TestListPagesEndpointWithoutPaginationParamsReturnsAllPages(t *testing.T) {
+	service := &fakePageService{
+		listResp: &PageListResponse{
+			Items: []PageListItem{
+				{ID: 9, PageTitle: "Homepage", URLSlug: "/home", Status: PageStatusPublished},
+				{ID: 10, PageTitle: "About", URLSlug: "/about", Status: PageStatusDraft},
+			},
+		},
+	}
+	router := setupPageRouter(service)
+
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/pages?sort_by=last_modified&sort_order=desc", nil)
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", res.Code, res.Body.String())
+	}
+	if service.gotListFilter.UsePagination {
+		t.Fatalf("expected pagination to be disabled when page params are omitted, got %#v", service.gotListFilter)
+	}
+	if service.gotListFilter.Page != 0 || service.gotListFilter.PageSize != 0 {
+		t.Fatalf("expected omitted page params to stay unset, got %#v", service.gotListFilter)
+	}
 }
 
 func TestGetPageAndHeroEndpoints(t *testing.T) {
@@ -176,7 +205,7 @@ func TestCreateAndUpdatePageEndpointsInjectAuthUser(t *testing.T) {
 	service := &fakePageService{}
 	router := setupProtectedPageRouter(service)
 
-	createBody := `{"page_title":"Homepage","url_slug":"/home","status":"draft","hero_image_enabled":false}`
+	createBody := `{"page_title":"Homepage","url_slug":"/home","parent_id":3,"status":"draft","hero_image_enabled":false}`
 	res := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/pages", strings.NewReader(createBody))
 	req.Header.Set("Authorization", "Bearer "+signPageTestToken(t, "test-secret"))
@@ -192,8 +221,11 @@ func TestCreateAndUpdatePageEndpointsInjectAuthUser(t *testing.T) {
 	if service.gotCreateReq.ModifiedBy == nil || *service.gotCreateReq.ModifiedBy != 7 {
 		t.Fatalf("expected create request modified_by=7, got %#v", service.gotCreateReq)
 	}
+	if service.gotCreateReq.ParentID == nil || *service.gotCreateReq.ParentID != 3 {
+		t.Fatalf("expected create request parent_id=3, got %#v", service.gotCreateReq)
+	}
 
-	updateBody := `{"page_title":"Homepage","url_slug":"/home","status":"published","hero_image_enabled":true}`
+	updateBody := `{"page_title":"Homepage","url_slug":"/home/updated","parent_id":4,"status":"published","hero_image_enabled":true}`
 	res = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPut, "/api/pages/12", strings.NewReader(updateBody))
 	req.Header.Set("Authorization", "Bearer "+signPageTestToken(t, "test-secret"))
@@ -208,6 +240,9 @@ func TestCreateAndUpdatePageEndpointsInjectAuthUser(t *testing.T) {
 	}
 	if service.gotUpdateReq.ModifiedBy == nil || *service.gotUpdateReq.ModifiedBy != 7 {
 		t.Fatalf("expected update request modified_by=7, got %#v", service.gotUpdateReq)
+	}
+	if service.gotUpdateReq.ParentID == nil || *service.gotUpdateReq.ParentID != 4 {
+		t.Fatalf("expected update request parent_id=4, got %#v", service.gotUpdateReq)
 	}
 }
 
@@ -304,6 +339,11 @@ func TestWritePageErrorAndHelpers(t *testing.T) {
 	c, _ = gin.CreateTestContext(rec)
 	writePageError(c, errors.New("page_title is required"))
 	assertPageAPIError(t, rec, http.StatusBadRequest, "validation_error", "page_title is required")
+
+	rec = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(rec)
+	writePageError(c, errors.New(`url_slug must be prefixed with parent page slug "/about"`))
+	assertPageAPIError(t, rec, http.StatusBadRequest, "validation_error", `url_slug must be prefixed with parent page slug "/about"`)
 
 	rec = httptest.NewRecorder()
 	c, _ = gin.CreateTestContext(rec)

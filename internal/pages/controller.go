@@ -16,13 +16,17 @@ type PageController struct {
 }
 
 func (pc *PageController) ListPages(c *gin.Context) {
+	pageValue, hasPage := c.GetQuery("page")
+	pageSizeValue, hasPageSize := c.GetQuery("page_size")
+
 	filter := PageListFilters{
-		Page:       parseQueryInt(c.Query("page")),
-		PageSize:   parseQueryInt(c.Query("page_size")),
-		SearchTerm: c.Query("search"),
-		Status:     c.Query("status"),
-		SortBy:     c.DefaultQuery("sort_by", "last_modified"),
-		SortOrder:  c.DefaultQuery("sort_order", "desc"),
+		Page:          parseQueryInt(pageValue),
+		PageSize:      parseQueryInt(pageSizeValue),
+		SearchTerm:    c.Query("search"),
+		Status:        c.Query("status"),
+		SortBy:        c.DefaultQuery("sort_by", "last_modified"),
+		SortOrder:     c.DefaultQuery("sort_order", "desc"),
+		UsePagination: hasPage || hasPageSize,
 	}
 
 	resp, err := pc.PageService.ListPages(filter)
@@ -155,7 +159,9 @@ func isClientSafePageError(err error) bool {
 	case strings.Contains(message, " is required"),
 		strings.Contains(message, "invalid "),
 		strings.Contains(message, "must be a valid"),
-		strings.Contains(message, "missing both uploaded file and file_url"):
+		strings.Contains(message, "missing both uploaded file and file_url"),
+		strings.Contains(message, "parent_id"),
+		strings.Contains(message, "parent page slug"):
 		return true
 	default:
 		return false

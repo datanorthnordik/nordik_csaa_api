@@ -11,6 +11,7 @@ type Page struct {
 	ID                 int       `gorm:"primaryKey;autoIncrement" json:"id"`
 	PageTitle          string    `gorm:"size:255;not null;column:page_title" json:"page_title"`
 	URLSlug            string    `gorm:"size:255;not null;uniqueIndex;column:url_slug" json:"url_slug"`
+	ParentID           *int      `gorm:"column:parent_id" json:"parent_id,omitempty"`
 	Status             string    `gorm:"size:20;not null;default:draft" json:"status"`
 	HeroImageEnabled   bool      `gorm:"not null;default:false;column:hero_image_enabled" json:"hero_image_enabled"`
 	HeroImageURL       string    `gorm:"column:hero_image_url" json:"hero_image_url"`
@@ -38,6 +39,7 @@ type PageUploadInput struct {
 type SavePageRequest struct {
 	PageTitle          string           `json:"page_title"`
 	URLSlug            string           `json:"url_slug"`
+	ParentID           *int             `json:"parent_id"`
 	Status             string           `json:"status"`
 	HeroImageEnabled   bool             `json:"hero_image_enabled"`
 	HeroImage          *PageUploadInput `json:"hero_image"`
@@ -52,28 +54,33 @@ type PageMutationResponse struct {
 	ID        int    `json:"id"`
 	PageTitle string `json:"page_title"`
 	URLSlug   string `json:"url_slug"`
+	ParentID  *int   `json:"parent_id"`
 	Status    string `json:"status"`
 }
 
 type PageListFilters struct {
-	Page       int    `json:"page"`
-	PageSize   int    `json:"page_size"`
-	SearchTerm string `json:"search_term"`
-	Status     string `json:"status"`
-	SortBy     string `json:"sort_by"`
-	SortOrder  string `json:"sort_order"`
+	Page          int    `json:"page"`
+	PageSize      int    `json:"page_size"`
+	SearchTerm    string `json:"search_term"`
+	Status        string `json:"status"`
+	SortBy        string `json:"sort_by"`
+	SortOrder     string `json:"sort_order"`
+	UsePagination bool   `json:"-"`
 }
 
 type PageListItem struct {
-	ID             int       `json:"id"`
-	PageTitle      string    `json:"page_title"`
-	URLSlug        string    `json:"url_slug"`
-	Status         string    `json:"status"`
-	LastModified   time.Time `json:"last_modified"`
-	ModifiedBy     *int      `json:"modified_by,omitempty"`
-	ModifiedByName string    `json:"modified_by_name"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID                int       `json:"id"`
+	PageTitle         string    `json:"page_title"`
+	URLSlug           string    `json:"url_slug"`
+	ParentID          *int      `json:"parent_id,omitempty"`
+	ParentPageTitle   string    `json:"parent_page_title"`
+	ParentPageURLSlug string    `json:"parent_page_url_slug"`
+	Status            string    `json:"status"`
+	LastModified      time.Time `json:"last_modified"`
+	ModifiedBy        *int      `json:"modified_by,omitempty"`
+	ModifiedByName    string    `json:"modified_by_name"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 type PageListPageMeta struct {
@@ -95,6 +102,9 @@ type PageDetailResponse struct {
 	ID                 int       `json:"id"`
 	PageTitle          string    `json:"page_title"`
 	URLSlug            string    `json:"url_slug"`
+	ParentID           *int      `json:"parent_id,omitempty"`
+	ParentPageTitle    string    `json:"parent_page_title"`
+	ParentPageURLSlug  string    `json:"parent_page_url_slug"`
 	Status             string    `json:"status"`
 	HeroImageEnabled   bool      `json:"hero_image_enabled"`
 	HeroImageURL       string    `json:"hero_image_url"`
