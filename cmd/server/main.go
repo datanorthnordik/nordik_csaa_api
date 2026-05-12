@@ -8,6 +8,7 @@ import (
 	"nordikcsaaapi/internal/config"
 	"nordikcsaaapi/internal/events"
 	"nordikcsaaapi/internal/gallery"
+	"nordikcsaaapi/internal/menus"
 	"nordikcsaaapi/internal/pages"
 	"os"
 
@@ -68,6 +69,8 @@ func main() {
 	gallery.RegisterRoutes(r, galleryService, auth.RequireBearerAuth(&cfg))
 	pageService := &pages.PageService{DB: db, BucketName: cfg.DriveBucketName, BucketPrefix: cfg.DriveBucketPrefix}
 	pages.RegisterRoutes(r, pageService, auth.RequireBearerAuth(&cfg))
+	menuService := &menus.MenuService{DB: db}
+	menus.RegisterRoutes(r, menuService, auth.RequireBearerAuth(&cfg))
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
