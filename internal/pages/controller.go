@@ -73,9 +73,8 @@ func (pc *PageController) GetPageHeroImageContent(c *gin.Context) {
 }
 
 func (pc *PageController) CreatePage(c *gin.Context) {
-	var req SavePageRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		apiresponse.WriteBindingError(c, err, req)
+	req, ok := bindSavePageRequest(c)
+	if !ok {
 		return
 	}
 
@@ -102,9 +101,8 @@ func (pc *PageController) UpdatePage(c *gin.Context) {
 		return
 	}
 
-	var req SavePageRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		apiresponse.WriteBindingError(c, err, req)
+	req, ok := bindSavePageRequest(c)
+	if !ok {
 		return
 	}
 
@@ -157,7 +155,7 @@ func isClientSafePageError(err error) bool {
 	case strings.Contains(message, " is required"),
 		strings.Contains(message, "invalid "),
 		strings.Contains(message, "must be a valid"),
-		strings.Contains(message, "missing both data_base64 and file_url"):
+		strings.Contains(message, "missing both uploaded file and file_url"):
 		return true
 	default:
 		return false

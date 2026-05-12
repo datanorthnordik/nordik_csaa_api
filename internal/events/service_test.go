@@ -1273,12 +1273,41 @@ func validSaveEventRequest() SaveEventRequest {
 	}
 }
 
+func TestBuildMediaRecordFromMultipartContent(t *testing.T) {
+	svc := &EventService{BucketName: "drive-bucket", BucketPrefix: "main-folder"}
+	restore := stubMediaHooks()
+	defer restore()
+
+	media, uploadedObject, err := svc.buildMediaRecord(12, MediaRoleDisplayImage, 0, EventUploadInput{
+		DisplayName: "Poster",
+		FileName:    "poster.png",
+		MimeType:    "image/png",
+		Content:     []byte("hello"),
+	})
+	if err != nil {
+		t.Fatalf("buildMediaRecord returned error: %v", err)
+	}
+	if uploadedObject != "main-folder/events/12/display_image_20260501100000_1_poster.png" {
+		t.Fatalf("unexpected uploaded object: %q", uploadedObject)
+	}
+	if media.GCPObjectKey != "events/12/display_image_20260501100000_1_poster.png" {
+		t.Fatalf("unexpected object key: %q", media.GCPObjectKey)
+	}
+	if media.FileURL != "gs://drive-bucket/main-folder/events/12/display_image_20260501100000_1_poster.png" {
+		t.Fatalf("unexpected file url: %q", media.FileURL)
+	}
+	if media.FileSize != 5 {
+		t.Fatalf("expected file size 5, got %d", media.FileSize)
+	}
+}
+
 func stubMediaHooks() func() {
 	return stubMediaHooksWithError(nil, nil)
 }
 
 func stubMediaHooksWithError(uploadErr, deleteErr error) func() {
 	prevUpload := uploadBase64ToGCSHook
+	prevUploadBytes := uploadBytesToGCSHook
 	prevDownload := downloadGCSObjectHook
 	prevDelete := deleteGCSObjectHook
 	prevNow := nowFunc
@@ -1287,6 +1316,12 @@ func stubMediaHooksWithError(uploadErr, deleteErr error) func() {
 			return "", 0, uploadErr
 		}
 		return "gs://" + bucketName + "/" + objectName, int64(len(base64Data)), nil
+	}
+	uploadBytesToGCSHook = func(data []byte, bucketName, objectName, contentType string) (string, int64, error) {
+		if uploadErr != nil {
+			return "", 0, uploadErr
+		}
+		return "gs://" + bucketName + "/" + objectName, int64(len(data)), nil
 	}
 	downloadGCSObjectHook = func(bucketName, objectName string) ([]byte, string, error) {
 		return []byte("downloaded:" + bucketName + "/" + objectName), "application/pdf", nil
@@ -1299,6 +1334,7 @@ func stubMediaHooksWithError(uploadErr, deleteErr error) func() {
 	}
 	return func() {
 		uploadBase64ToGCSHook = prevUpload
+		uploadBytesToGCSHook = prevUploadBytes
 		downloadGCSObjectHook = prevDownload
 		deleteGCSObjectHook = prevDelete
 		nowFunc = prevNow

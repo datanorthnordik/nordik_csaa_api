@@ -26,6 +26,9 @@ var (
 	uploadBase64ToGCSHook = func(base64Data, bucketName, objectName, contentType string) (string, int64, error) {
 		return util.UploadBase64ToGCS(base64Data, bucketName, objectName, contentType)
 	}
+	uploadBytesToGCSHook = func(data []byte, bucketName, objectName, contentType string) (string, int64, error) {
+		return util.UploadBytesToGCS(data, bucketName, objectName, contentType)
+	}
 	downloadGCSObjectHook = func(bucketName, objectName string) ([]byte, string, error) {
 		return util.ReadGCSObject(bucketName, objectName)
 	}
@@ -738,8 +741,8 @@ func sanitizeGalleryUploadInput(value GalleryUploadInput) GalleryUploadInput {
 }
 
 func validateGalleryUploadInput(value GalleryUploadInput) error {
-	if strings.TrimSpace(value.DataBase64) == "" && strings.TrimSpace(value.StorageURI) == "" && strings.TrimSpace(value.FileURL) == "" {
-		return errors.New("image upload is missing both data_base64 and file_url")
+	if len(value.Content) == 0 && strings.TrimSpace(value.DataBase64) == "" && strings.TrimSpace(value.StorageURI) == "" && strings.TrimSpace(value.FileURL) == "" {
+		return errors.New("image upload is missing both uploaded file and file_url")
 	}
 	mimeType := strings.ToLower(strings.TrimSpace(value.MimeType))
 	if mimeType != "" && !strings.HasPrefix(mimeType, "image/") {
@@ -809,9 +812,9 @@ func (s *GalleryService) storeGalleryImage(galleryID int, folder string, idx int
 		objectKey = strings.TrimSpace(input.GCPObjectKey)
 	}
 
-	if strings.TrimSpace(input.DataBase64) == "" {
+	if len(input.Content) == 0 && strings.TrimSpace(input.DataBase64) == "" {
 		if referenceURL == "" {
-			return "", "", 0, "", errors.New("image upload is missing both data_base64 and file_url")
+			return "", "", 0, "", errors.New("image upload is missing both uploaded file and file_url")
 		}
 		if objectKey == "" {
 			_, resolvedObjectKey, err := util.ParseGCSObjectReference(s.BucketName, referenceURL)
@@ -828,7 +831,16 @@ func (s *GalleryService) storeGalleryImage(galleryID int, folder string, idx int
 
 	objectName := s.galleryObjectName(galleryID, folder, idx, input.FileName, input.MimeType)
 	storageObjectName := s.storageObjectName(objectName)
-	fileURL, fileSize, err := uploadBase64ToGCSHook(input.DataBase64, s.BucketName, storageObjectName, input.MimeType)
+	var (
+		fileURL  string
+		fileSize int64
+		err      error
+	)
+	if len(input.Content) > 0 {
+		fileURL, fileSize, err = uploadBytesToGCSHook(input.Content, s.BucketName, storageObjectName, input.MimeType)
+	} else {
+		fileURL, fileSize, err = uploadBase64ToGCSHook(input.DataBase64, s.BucketName, storageObjectName, input.MimeType)
+	}
 	if err != nil {
 		return "", "", 0, "", err
 	}
