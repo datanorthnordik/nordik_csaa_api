@@ -62,14 +62,15 @@ func (s *PageService) ListPages(filter PageListFilters) (*PageListResponse, erro
 		return nil, err
 	}
 
-	offset := (normalized.Page - 1) * normalized.PageSize
-
 	var items []PageListItem
 	query := s.DB.Model(&Page{}).
 		Select(`
 			pages.id,
 			pages.page_title,
 			pages.url_slug,
+			pages.parent_id,
+			COALESCE(parent_pages.page_title, '') AS parent_page_title,
+			COALESCE(parent_pages.url_slug, '') AS parent_page_url_slug,
 			pages.status,
 			pages.last_modified,
 			pages.modified_by,
@@ -77,36 +78,48 @@ func (s *PageService) ListPages(filter PageListFilters) (*PageListResponse, erro
 			pages.updated_at,
 			COALESCE(NULLIF(TRIM(modified_users.firstname || ' ' || modified_users.lastname), ''), modified_users.email, '') AS modified_by_name
 		`).
-		Joins(`LEFT JOIN users AS modified_users ON modified_users.id = pages.modified_by`)
+		Joins(`LEFT JOIN users AS modified_users ON modified_users.id = pages.modified_by`).
+		Joins(`LEFT JOIN pages AS parent_pages ON parent_pages.id = pages.parent_id`)
 	query = applyPageListFilters(query, normalized)
 
-	if err := query.
-		Order(buildPageSortClause(normalized.SortBy, normalized.SortOrder)).
-		Offset(offset).
-		Limit(normalized.PageSize).
-		Scan(&items).Error; err != nil {
+	query = query.Order(buildPageSortClause(normalized.SortBy, normalized.SortOrder))
+	if normalized.UsePagination {
+		offset := (normalized.Page - 1) * normalized.PageSize
+		query = query.Offset(offset).Limit(normalized.PageSize)
+	}
+
+	if err := query.Scan(&items).Error; err != nil {
 		return nil, err
 	}
 	if items == nil {
 		items = make([]PageListItem, 0)
 	}
 
-	totalPages := 0
-	if totalItems > 0 {
-		totalPages = int((totalItems + int64(normalized.PageSize) - 1) / int64(normalized.PageSize))
+	pagination := PageListPageMeta{
+		TotalItems: totalItems,
+	}
+	if normalized.UsePagination {
+		totalPages := 0
+		if totalItems > 0 {
+			totalPages = int((totalItems + int64(normalized.PageSize) - 1) / int64(normalized.PageSize))
+		}
+		pagination.Page = normalized.Page
+		pagination.PageSize = normalized.PageSize
+		pagination.TotalPages = totalPages
+		pagination.HasNext = normalized.Page < totalPages
+		pagination.HasPrev = normalized.Page > 1
+	} else {
+		pagination.Page = 1
+		pagination.PageSize = len(items)
+		if totalItems > 0 {
+			pagination.TotalPages = 1
+		}
 	}
 
 	return &PageListResponse{
-		Items: items,
-		Pagination: PageListPageMeta{
-			Page:       normalized.Page,
-			PageSize:   normalized.PageSize,
-			TotalItems: totalItems,
-			TotalPages: totalPages,
-			HasNext:    normalized.Page < totalPages,
-			HasPrev:    normalized.Page > 1,
-		},
-		Applied: normalized,
+		Items:      items,
+		Pagination: pagination,
+		Applied:    normalized,
 	}, nil
 }
 
@@ -121,6 +134,9 @@ func (s *PageService) GetPage(id int) (*PageDetailResponse, error) {
 			pages.id,
 			pages.page_title,
 			pages.url_slug,
+			pages.parent_id,
+			COALESCE(parent_pages.page_title, '') AS parent_page_title,
+			COALESCE(parent_pages.url_slug, '') AS parent_page_url_slug,
 			pages.status,
 			pages.hero_image_enabled,
 			pages.hero_image_url,
@@ -137,6 +153,7 @@ func (s *PageService) GetPage(id int) (*PageDetailResponse, error) {
 		`).
 		Joins(`LEFT JOIN users AS created_users ON created_users.id = pages.created_by`).
 		Joins(`LEFT JOIN users AS modified_users ON modified_users.id = pages.modified_by`).
+		Joins(`LEFT JOIN pages AS parent_pages ON parent_pages.id = pages.parent_id`).
 		Where("pages.id = ?", id).
 		Take(&item).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -207,6 +224,11 @@ func (s *PageService) CreatePage(req SavePageRequest) (*PageMutationResponse, er
 
 	uploadedObjects := make([]string, 0, 1)
 
+	if err := s.validateParentPage(tx, 0, normalized); err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+
 	page := buildPageModel(normalized)
 	if page.ModifiedBy == nil {
 		page.ModifiedBy = normalized.CreatedBy
@@ -248,6 +270,7 @@ func (s *PageService) CreatePage(req SavePageRequest) (*PageMutationResponse, er
 		ID:        page.ID,
 		PageTitle: page.PageTitle,
 		URLSlug:   page.URLSlug,
+		ParentID:  page.ParentID,
 		Status:    page.Status,
 	}, nil
 }
@@ -276,6 +299,11 @@ func (s *PageService) UpdatePage(id int, req SavePageRequest) (*PageMutationResp
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrPageNotFound
 		}
+		return nil, err
+	}
+
+	if err := s.validateParentPage(tx, id, normalized); err != nil {
+		tx.Rollback()
 		return nil, err
 	}
 
@@ -322,6 +350,7 @@ func (s *PageService) UpdatePage(id int, req SavePageRequest) (*PageMutationResp
 		ID:        page.ID,
 		PageTitle: page.PageTitle,
 		URLSlug:   page.URLSlug,
+		ParentID:  page.ParentID,
 		Status:    page.Status,
 	}, nil
 }
@@ -383,6 +412,9 @@ func normalizeSavePageRequest(req SavePageRequest) (SavePageRequest, error) {
 	if !slugPattern.MatchString(req.URLSlug) {
 		return req, errors.New("url_slug must be a valid slash-prefixed slug")
 	}
+	if req.ParentID != nil && *req.ParentID <= 0 {
+		return req, errors.New("parent_id must be a positive integer")
+	}
 	if !isAllowed(req.Status, PageStatusDraft, PageStatusPublished) {
 		return req, errors.New("invalid status")
 	}
@@ -401,14 +433,16 @@ func normalizeListPagesFilter(filter PageListFilters) (PageListFilters, error) {
 	filter.SortBy = strings.ToLower(strings.TrimSpace(filter.SortBy))
 	filter.SortOrder = strings.ToLower(strings.TrimSpace(filter.SortOrder))
 
-	if filter.Page <= 0 {
-		filter.Page = 1
-	}
-	if filter.PageSize <= 0 {
-		filter.PageSize = 10
-	}
-	if filter.PageSize > 100 {
-		filter.PageSize = 100
+	if filter.UsePagination {
+		if filter.Page <= 0 {
+			filter.Page = 1
+		}
+		if filter.PageSize <= 0 {
+			filter.PageSize = 10
+		}
+		if filter.PageSize > 100 {
+			filter.PageSize = 100
+		}
 	}
 	if filter.SortBy == "" {
 		filter.SortBy = "last_modified"
@@ -465,6 +499,7 @@ func buildPageModel(req SavePageRequest) Page {
 	return Page{
 		PageTitle:          req.PageTitle,
 		URLSlug:            req.URLSlug,
+		ParentID:           req.ParentID,
 		Status:             req.Status,
 		HeroImageEnabled:   req.HeroImageEnabled,
 		SEOPageTitle:       req.SEOPageTitle,
@@ -477,6 +512,7 @@ func buildPageModel(req SavePageRequest) Page {
 func applyPageRequest(page *Page, req SavePageRequest) {
 	page.PageTitle = req.PageTitle
 	page.URLSlug = req.URLSlug
+	page.ParentID = req.ParentID
 	page.Status = req.Status
 	page.HeroImageEnabled = req.HeroImageEnabled
 	page.SEOPageTitle = req.SEOPageTitle
@@ -510,6 +546,48 @@ func normalizeURLSlug(value string) string {
 		return "/"
 	}
 	return "/" + value
+}
+
+func (s *PageService) validateParentPage(tx *gorm.DB, pageID int, req SavePageRequest) error {
+	if req.ParentID == nil {
+		return nil
+	}
+
+	parentID := *req.ParentID
+	if parentID <= 0 {
+		return errors.New("parent_id must be a positive integer")
+	}
+	if pageID > 0 && parentID == pageID {
+		return errors.New("parent_id cannot reference the page itself")
+	}
+
+	var parent Page
+	if err := tx.Model(&Page{}).
+		Select("id", "url_slug").
+		Take(&parent, parentID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return errors.New("parent_id references a page that does not exist")
+		}
+		return err
+	}
+
+	return validatePageSlugParentPrefix(req.URLSlug, parent.URLSlug)
+}
+
+func validatePageSlugParentPrefix(pageSlug string, parentSlug string) error {
+	parentSlug = normalizeURLSlug(parentSlug)
+	if parentSlug == "/" {
+		if pageSlug == "/" {
+			return fmt.Errorf("url_slug must be prefixed with parent page slug %q", parentSlug)
+		}
+		return nil
+	}
+
+	if !strings.HasPrefix(pageSlug, parentSlug+"/") {
+		return fmt.Errorf("url_slug must be prefixed with parent page slug %q", parentSlug)
+	}
+
+	return nil
 }
 
 func (s *PageService) buildHeroImageFields(pageID int, input PageUploadInput) (string, string, string, error) {

@@ -142,6 +142,7 @@ CREATE TABLE IF NOT EXISTS pages (
     id SERIAL PRIMARY KEY,
     page_title VARCHAR(255) NOT NULL,
     url_slug VARCHAR(255) NOT NULL UNIQUE,
+    parent_id INT NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'draft',
     hero_image_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     hero_image_url TEXT,
@@ -179,6 +180,62 @@ CREATE TABLE IF NOT EXISTS pages (
     CONSTRAINT chk_pages_status
         CHECK (status IN ('draft', 'published'))
 );
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'pages'
+          AND column_name = 'parent_page_id'
+    ) AND NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'pages'
+          AND column_name = 'parent_id'
+    ) THEN
+        ALTER TABLE pages RENAME COLUMN parent_page_id TO parent_id;
+    END IF;
+END $$;
+
+ALTER TABLE pages
+    ADD COLUMN IF NOT EXISTS parent_id INT NULL;
+
+ALTER TABLE pages
+    DROP CONSTRAINT IF EXISTS fk_pages_parent_page;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'fk_pages_parent'
+    ) THEN
+        ALTER TABLE pages
+            ADD CONSTRAINT fk_pages_parent
+            FOREIGN KEY (parent_id) REFERENCES pages(id)
+            ON UPDATE CASCADE
+            ON DELETE SET NULL;
+    END IF;
+END $$;
+
+ALTER TABLE pages
+    DROP CONSTRAINT IF EXISTS chk_pages_parent_not_self;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_pages_parent_not_self'
+    ) THEN
+        ALTER TABLE pages
+            ADD CONSTRAINT chk_pages_parent_not_self
+            CHECK (parent_id IS NULL OR parent_id <> id);
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS events (
     id SERIAL PRIMARY KEY,
@@ -417,6 +474,8 @@ CREATE INDEX IF NOT EXISTS idx_gallery_images_gallery_sort ON gallery_images(gal
 
 CREATE INDEX IF NOT EXISTS idx_pages_status ON pages(status);
 CREATE INDEX IF NOT EXISTS idx_pages_slug ON pages(url_slug);
+DROP INDEX IF EXISTS idx_pages_parent_page_id;
+CREATE INDEX IF NOT EXISTS idx_pages_parent_id ON pages(parent_id);
 CREATE INDEX IF NOT EXISTS idx_pages_created_by ON pages(created_by);
 CREATE INDEX IF NOT EXISTS idx_pages_modified_by ON pages(modified_by);
 CREATE INDEX IF NOT EXISTS idx_pages_last_modified ON pages(last_modified);
