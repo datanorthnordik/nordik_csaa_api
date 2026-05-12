@@ -138,6 +138,48 @@ BEGIN
     END IF;
 END $$;
 
+CREATE TABLE IF NOT EXISTS pages (
+    id SERIAL PRIMARY KEY,
+    page_title VARCHAR(255) NOT NULL,
+    url_slug VARCHAR(255) NOT NULL UNIQUE,
+    status VARCHAR(20) NOT NULL DEFAULT 'draft',
+    hero_image_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    hero_image_url TEXT,
+    hero_image_object_key TEXT,
+    seo_page_title VARCHAR(255),
+    seo_page_description TEXT,
+    created_by INT NULL,
+    modified_by INT NULL,
+    last_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_pages_created_by
+        FOREIGN KEY (created_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT fk_pages_modified_by
+        FOREIGN KEY (modified_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT chk_pages_title_not_blank
+        CHECK (btrim(page_title) <> ''),
+
+    CONSTRAINT chk_pages_slug_not_blank
+        CHECK (btrim(url_slug) <> ''),
+
+    CONSTRAINT chk_pages_slug_format
+        CHECK (
+            url_slug = '/'
+            OR url_slug ~ '^/[a-z0-9]+(?:/[a-z0-9]+|-[a-z0-9]+)*$'
+        ),
+
+    CONSTRAINT chk_pages_status
+        CHECK (status IN ('draft', 'published'))
+);
+
 CREATE TABLE IF NOT EXISTS events (
     id SERIAL PRIMARY KEY,
     title VARCHAR(255) NOT NULL,
@@ -373,6 +415,12 @@ CREATE INDEX IF NOT EXISTS idx_gallery_images_uploaded_by ON gallery_images(uplo
 CREATE INDEX IF NOT EXISTS idx_gallery_images_file_url ON gallery_images(file_url);
 CREATE INDEX IF NOT EXISTS idx_gallery_images_gallery_sort ON gallery_images(gallery_id, sort_order, id);
 
+CREATE INDEX IF NOT EXISTS idx_pages_status ON pages(status);
+CREATE INDEX IF NOT EXISTS idx_pages_slug ON pages(url_slug);
+CREATE INDEX IF NOT EXISTS idx_pages_created_by ON pages(created_by);
+CREATE INDEX IF NOT EXISTS idx_pages_modified_by ON pages(modified_by);
+CREATE INDEX IF NOT EXISTS idx_pages_last_modified ON pages(last_modified);
+
 CREATE INDEX IF NOT EXISTS idx_events_created_by ON events(created_by);
 CREATE INDEX IF NOT EXISTS idx_events_address_id ON events(address_id);
 CREATE INDEX IF NOT EXISTS idx_events_gallery_id ON events(gallery_id);
@@ -406,6 +454,21 @@ CREATE TRIGGER trg_galleries_set_updated_at
 BEFORE UPDATE ON galleries
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
+
+CREATE OR REPLACE FUNCTION set_pages_timestamps()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    NEW.last_modified = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_pages_set_timestamps ON pages;
+CREATE TRIGGER trg_pages_set_timestamps
+BEFORE UPDATE ON pages
+FOR EACH ROW
+EXECUTE FUNCTION set_pages_timestamps();
 
 DROP TRIGGER IF EXISTS trg_events_set_updated_at ON events;
 CREATE TRIGGER trg_events_set_updated_at
