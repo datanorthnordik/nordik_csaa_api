@@ -7,12 +7,14 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"nordikcsaaapi/internal/apiresponse"
 	authpkg "nordikcsaaapi/internal/auth"
 	"nordikcsaaapi/internal/config"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 type fakeMenuService struct {
@@ -70,7 +72,7 @@ func setupMenuRouter(service MenuServicePort) *gin.Engine {
 func setupProtectedMenuRouter(service MenuServicePort) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	RegisterRoutes(r, service, authpkg.RequireAPIKey(&config.Config{APIKey: "test-api-key"}))
+	RegisterRoutes(r, service, authpkg.RequireBearerAuth(&config.Config{JWTSecret: "test-secret"}))
 	return r
 }
 
@@ -146,7 +148,7 @@ func TestListMenuPageOptionsAndSaveMenuEndpoints(t *testing.T) {
 	body := `{"name":"Main Website Navigation","items":[{"label":"About","navigation_type":"pages","page_id":10,"children":[]}]}`
 	res = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPut, "/api/menus/main", strings.NewReader(body))
-	req.Header.Set("X-API-Key", "test-api-key")
+	req.Header.Set("Authorization", "Bearer "+signedMenuTestToken(t, "test-secret", 7))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(res, req)
 
@@ -156,8 +158,8 @@ func TestListMenuPageOptionsAndSaveMenuEndpoints(t *testing.T) {
 	if service.gotSaveKey != "main" {
 		t.Fatalf("expected save key main, got %q", service.gotSaveKey)
 	}
-	if service.gotSaveReq.UpdatedBy != nil {
-		t.Fatalf("expected API key writes to omit updated_by, got %#v", service.gotSaveReq)
+	if service.gotSaveReq.UpdatedBy == nil || *service.gotSaveReq.UpdatedBy != 7 {
+		t.Fatalf("expected bearer-authenticated save request to include updated_by, got %#v", service.gotSaveReq)
 	}
 	if len(service.gotSaveReq.Items) != 1 || service.gotSaveReq.Items[0].PageID == nil || *service.gotSaveReq.Items[0].PageID != 10 {
 		t.Fatalf("unexpected save payload: %#v", service.gotSaveReq)
@@ -177,7 +179,7 @@ func TestMenuEndpointErrorsAndProtection(t *testing.T) {
 	req = httptest.NewRequest(http.MethodPut, "/api/menus/main", strings.NewReader(`{"name":"Main Website Navigation","items":[]}`))
 	req.Header.Set("Content-Type", "application/json")
 	protected.ServeHTTP(res, req)
-	assertMenuAPIError(t, res, http.StatusUnauthorized, "missing_api_key", "Missing API key")
+	assertMenuAPIError(t, res, http.StatusUnauthorized, "missing_bearer_token", "Missing bearer token")
 }
 
 func TestMenuEndpointAdditionalErrorsAndHelpers(t *testing.T) {
@@ -201,7 +203,7 @@ func TestMenuEndpointAdditionalErrorsAndHelpers(t *testing.T) {
 		router := setupProtectedMenuRouter(&fakeMenuService{})
 		res := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPut, "/api/menus/main", strings.NewReader(`{"name":`))
-		req.Header.Set("X-API-Key", "test-api-key")
+		req.Header.Set("Authorization", "Bearer "+signedMenuTestToken(t, "test-secret", 7))
 		req.Header.Set("Content-Type", "application/json")
 		router.ServeHTTP(res, req)
 		assertMenuAPIError(t, res, http.StatusBadRequest, "validation_error", "Invalid request payload")
@@ -211,7 +213,7 @@ func TestMenuEndpointAdditionalErrorsAndHelpers(t *testing.T) {
 		router := setupProtectedMenuRouter(&fakeMenuService{saveErr: errors.New("page_id is required when navigation_type is pages")})
 		res := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPut, "/api/menus/main", strings.NewReader(`{"name":"Main","items":[]}`))
-		req.Header.Set("X-API-Key", "test-api-key")
+		req.Header.Set("Authorization", "Bearer "+signedMenuTestToken(t, "test-secret", 7))
 		req.Header.Set("Content-Type", "application/json")
 		router.ServeHTTP(res, req)
 		assertMenuAPIError(t, res, http.StatusBadRequest, "validation_error", "page_id is required when navigation_type is pages")
@@ -221,7 +223,7 @@ func TestMenuEndpointAdditionalErrorsAndHelpers(t *testing.T) {
 		router := setupProtectedMenuRouter(&fakeMenuService{saveErr: errors.New(`ERROR: duplicate key value violates unique constraint "uq_menu_items_page_per_menu" (SQLSTATE 23505)`)})
 		res := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPut, "/api/menus/main", strings.NewReader(`{"name":"Main","items":[]}`))
-		req.Header.Set("X-API-Key", "test-api-key")
+		req.Header.Set("Authorization", "Bearer "+signedMenuTestToken(t, "test-secret", 7))
 		req.Header.Set("Content-Type", "application/json")
 		router.ServeHTTP(res, req)
 		assertMenuAPIError(t, res, http.StatusConflict, "conflict", "Unable to save menu because a conflicting record already exists")
@@ -231,7 +233,7 @@ func TestMenuEndpointAdditionalErrorsAndHelpers(t *testing.T) {
 		router := setupProtectedMenuRouter(&fakeMenuService{saveErr: errors.New("database timed out")})
 		res := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPut, "/api/menus/main", strings.NewReader(`{"name":"Main","items":[]}`))
-		req.Header.Set("X-API-Key", "test-api-key")
+		req.Header.Set("Authorization", "Bearer "+signedMenuTestToken(t, "test-secret", 7))
 		req.Header.Set("Content-Type", "application/json")
 		router.ServeHTTP(res, req)
 		assertMenuAPIError(t, res, http.StatusInternalServerError, "internal_error", "Internal server error")
@@ -323,4 +325,22 @@ func assertMenuAPIError(t *testing.T, res *httptest.ResponseRecorder, wantStatus
 		t.Fatalf("expected error message %q, got %#v", wantMessage, payload)
 	}
 	return payload
+}
+
+func signedMenuTestToken(t *testing.T, secret string, userID int) string {
+	t.Helper()
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"user_id": userID,
+		"email":   "tester@example.com",
+		"role":    "admin",
+		"exp":     time.Now().Add(time.Hour).Unix(),
+	})
+
+	tokenString, err := token.SignedString([]byte(secret))
+	if err != nil {
+		t.Fatalf("sign token: %v", err)
+	}
+
+	return tokenString
 }

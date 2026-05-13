@@ -9,12 +9,14 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"nordikcsaaapi/internal/apiresponse"
 	authpkg "nordikcsaaapi/internal/auth"
 	"nordikcsaaapi/internal/config"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 type fakePageService struct {
@@ -109,7 +111,7 @@ func setupPageRouter(service PageServicePort) *gin.Engine {
 func setupProtectedPageRouter(service PageServicePort) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	RegisterRoutes(r, service, authpkg.RequireAPIKey(&config.Config{APIKey: "test-api-key"}))
+	RegisterRoutes(r, service, authpkg.RequireBearerAuth(&config.Config{JWTSecret: "test-secret"}))
 	return r
 }
 
@@ -199,22 +201,22 @@ func TestGetPageAndHeroEndpoints(t *testing.T) {
 	}
 }
 
-func TestCreateAndUpdatePageEndpointsRequireAPIKey(t *testing.T) {
+func TestCreateAndUpdatePageEndpointsRequireBearerAuth(t *testing.T) {
 	service := &fakePageService{}
 	router := setupProtectedPageRouter(service)
 
 	createBody := `{"page_title":"Homepage","url_slug":"/home","parent_id":3,"status":"draft","hero_image_enabled":false}`
 	res := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/pages", strings.NewReader(createBody))
-	req.Header.Set("X-API-Key", "test-api-key")
+	req.Header.Set("Authorization", "Bearer "+signedPageTestToken(t, "test-secret", 7))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(res, req)
 
 	if res.Code != http.StatusCreated {
 		t.Fatalf("expected status 201, got %d: %s", res.Code, res.Body.String())
 	}
-	if service.gotCreateReq.CreatedBy != nil || service.gotCreateReq.ModifiedBy != nil {
-		t.Fatalf("expected API key writes to omit auth user ids, got %#v", service.gotCreateReq)
+	if service.gotCreateReq.CreatedBy == nil || *service.gotCreateReq.CreatedBy != 7 || service.gotCreateReq.ModifiedBy == nil || *service.gotCreateReq.ModifiedBy != 7 {
+		t.Fatalf("expected bearer-authenticated create request to include auth user ids, got %#v", service.gotCreateReq)
 	}
 	if service.gotCreateReq.ParentID == nil || *service.gotCreateReq.ParentID != 3 {
 		t.Fatalf("expected create request parent_id=3, got %#v", service.gotCreateReq)
@@ -223,7 +225,7 @@ func TestCreateAndUpdatePageEndpointsRequireAPIKey(t *testing.T) {
 	updateBody := `{"page_title":"Homepage","url_slug":"/home/updated","parent_id":4,"status":"published","hero_image_enabled":true}`
 	res = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPut, "/api/pages/12", strings.NewReader(updateBody))
-	req.Header.Set("X-API-Key", "test-api-key")
+	req.Header.Set("Authorization", "Bearer "+signedPageTestToken(t, "test-secret", 7))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(res, req)
 
@@ -233,8 +235,8 @@ func TestCreateAndUpdatePageEndpointsRequireAPIKey(t *testing.T) {
 	if service.gotUpdateID != 12 {
 		t.Fatalf("expected update id 12, got %d", service.gotUpdateID)
 	}
-	if service.gotUpdateReq.ModifiedBy != nil {
-		t.Fatalf("expected API key writes to omit modified_by, got %#v", service.gotUpdateReq)
+	if service.gotUpdateReq.ModifiedBy == nil || *service.gotUpdateReq.ModifiedBy != 7 {
+		t.Fatalf("expected bearer-authenticated update request to include modified_by, got %#v", service.gotUpdateReq)
 	}
 	if service.gotUpdateReq.ParentID == nil || *service.gotUpdateReq.ParentID != 4 {
 		t.Fatalf("expected update request parent_id=4, got %#v", service.gotUpdateReq)
@@ -248,7 +250,7 @@ func TestCreatePageEndpointAcceptsMultipartHeroUpload(t *testing.T) {
 	req := newPageMultipartRequest(t, http.MethodPost, "/api/pages", `{"page_title":"Homepage","url_slug":"/home","status":"draft","hero_image_enabled":true}`, map[string]multipartUploadTestFile{
 		"hero_image_file": {Filename: "hero.png", Data: []byte("hello")},
 	})
-	req.Header.Set("X-API-Key", "test-api-key")
+	req.Header.Set("Authorization", "Bearer "+signedPageTestToken(t, "test-secret", 7))
 
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
@@ -273,7 +275,7 @@ func TestCreatePageEndpointRejectsBase64UploadPayload(t *testing.T) {
 
 	res := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/pages", strings.NewReader(`{"page_title":"Homepage","url_slug":"/home","status":"draft","hero_image_enabled":true,"hero_image":{"file_name":"hero.png","mime_type":"image/png","data_base64":"aGVsbG8="}}`))
-	req.Header.Set("X-API-Key", "test-api-key")
+	req.Header.Set("Authorization", "Bearer "+signedPageTestToken(t, "test-secret", 7))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(res, req)
 
@@ -286,7 +288,7 @@ func TestDeletePageEndpoint(t *testing.T) {
 
 	res := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodDelete, "/api/pages/44", nil)
-	req.Header.Set("X-API-Key", "test-api-key")
+	req.Header.Set("Authorization", "Bearer "+signedPageTestToken(t, "test-secret", 7))
 	router.ServeHTTP(res, req)
 
 	if res.Code != http.StatusOK {
@@ -319,12 +321,12 @@ func TestPageEndpointErrorsAndProtection(t *testing.T) {
 	req = httptest.NewRequest(http.MethodPost, "/api/pages", strings.NewReader(`{"page_title":"Homepage"}`))
 	req.Header.Set("Content-Type", "application/json")
 	protected.ServeHTTP(res, req)
-	assertPageAPIError(t, res, http.StatusUnauthorized, "missing_api_key", "Missing API key")
+	assertPageAPIError(t, res, http.StatusUnauthorized, "missing_bearer_token", "Missing bearer token")
 
 	protected = setupProtectedPageRouter(&fakePageService{updateErr: ErrPageModuleManaged})
 	res = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPut, "/api/pages/12", strings.NewReader(`{"page_title":"Events","url_slug":"/events","status":"published","hero_image_enabled":false}`))
-	req.Header.Set("X-API-Key", "test-api-key")
+	req.Header.Set("Authorization", "Bearer "+signedPageTestToken(t, "test-secret", 7))
 	req.Header.Set("Content-Type", "application/json")
 	protected.ServeHTTP(res, req)
 	assertPageAPIError(t, res, http.StatusBadRequest, "validation_error", "module pages are managed elsewhere in the CMS and cannot be edited here")
@@ -332,7 +334,7 @@ func TestPageEndpointErrorsAndProtection(t *testing.T) {
 	protected = setupProtectedPageRouter(&fakePageService{deleteErr: ErrPageModuleManaged})
 	res = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodDelete, "/api/pages/12", nil)
-	req.Header.Set("X-API-Key", "test-api-key")
+	req.Header.Set("Authorization", "Bearer "+signedPageTestToken(t, "test-secret", 7))
 	protected.ServeHTTP(res, req)
 	assertPageAPIError(t, res, http.StatusBadRequest, "validation_error", "module pages are managed elsewhere in the CMS and cannot be edited here")
 }
@@ -423,4 +425,22 @@ func newPageMultipartRequest(t *testing.T, method string, target string, payload
 	req := httptest.NewRequest(method, target, body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	return req
+}
+
+func signedPageTestToken(t *testing.T, secret string, userID int) string {
+	t.Helper()
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"user_id": userID,
+		"email":   "tester@example.com",
+		"role":    "admin",
+		"exp":     time.Now().Add(time.Hour).Unix(),
+	})
+
+	tokenString, err := token.SignedString([]byte(secret))
+	if err != nil {
+		t.Fatalf("sign token: %v", err)
+	}
+
+	return tokenString
 }
