@@ -7,11 +7,10 @@ func RegisterRoutes(r *gin.Engine, ms MenuServicePort, protected ...gin.HandlerF
 
 	publicGroup := r.Group("/api/menus")
 	{
-		getPageOptionsHandlers := withProtected(controller.ListMenuPageOptions, protected...)
 		saveHandlers := withProtected(controller.SaveMenu, protected...)
 
 		publicGroup.GET("/:key", controller.GetMenu)
-		publicGroup.GET("/:key/page-options", getPageOptionsHandlers...)
+		publicGroup.GET("/:key/page-options", controller.ListMenuPageOptions)
 		publicGroup.PUT("/:key", saveHandlers...)
 	}
 }

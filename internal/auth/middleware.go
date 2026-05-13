@@ -11,6 +11,31 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+func RequireAPIKey(cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		expectedKey := ""
+		if cfg != nil {
+			expectedKey = strings.TrimSpace(cfg.APIKey)
+		}
+		if expectedKey == "" {
+			apiresponse.WriteServiceUnavailable(c, "API key authentication is temporarily unavailable")
+			return
+		}
+
+		providedKey := strings.TrimSpace(c.GetHeader("X-API-Key"))
+		if providedKey == "" {
+			apiresponse.WriteUnauthorized(c, "missing_api_key", "Missing API key")
+			return
+		}
+		if providedKey != expectedKey {
+			apiresponse.WriteUnauthorized(c, "invalid_api_key", "Invalid API key")
+			return
+		}
+
+		c.Next()
+	}
+}
+
 func RequireBearerAuth(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenString, err := bearerToken(c.GetHeader("Authorization"))
