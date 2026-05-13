@@ -9,14 +9,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"nordikcsaaapi/internal/apiresponse"
 	authpkg "nordikcsaaapi/internal/auth"
 	"nordikcsaaapi/internal/config"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 )
 
 type fakePageService struct {
@@ -111,7 +109,7 @@ func setupPageRouter(service PageServicePort) *gin.Engine {
 func setupProtectedPageRouter(service PageServicePort) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	RegisterRoutes(r, service, authpkg.RequireBearerAuth(&config.Config{JWTSecret: "test-secret"}))
+	RegisterRoutes(r, service, authpkg.RequireAPIKey(&config.Config{APIKey: "test-api-key"}))
 	return r
 }
 
@@ -201,25 +199,22 @@ func TestGetPageAndHeroEndpoints(t *testing.T) {
 	}
 }
 
-func TestCreateAndUpdatePageEndpointsInjectAuthUser(t *testing.T) {
+func TestCreateAndUpdatePageEndpointsRequireAPIKey(t *testing.T) {
 	service := &fakePageService{}
 	router := setupProtectedPageRouter(service)
 
 	createBody := `{"page_title":"Homepage","url_slug":"/home","parent_id":3,"status":"draft","hero_image_enabled":false}`
 	res := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/pages", strings.NewReader(createBody))
-	req.Header.Set("Authorization", "Bearer "+signPageTestToken(t, "test-secret"))
+	req.Header.Set("X-API-Key", "test-api-key")
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(res, req)
 
 	if res.Code != http.StatusCreated {
 		t.Fatalf("expected status 201, got %d: %s", res.Code, res.Body.String())
 	}
-	if service.gotCreateReq.CreatedBy == nil || *service.gotCreateReq.CreatedBy != 7 {
-		t.Fatalf("expected create request created_by=7, got %#v", service.gotCreateReq)
-	}
-	if service.gotCreateReq.ModifiedBy == nil || *service.gotCreateReq.ModifiedBy != 7 {
-		t.Fatalf("expected create request modified_by=7, got %#v", service.gotCreateReq)
+	if service.gotCreateReq.CreatedBy != nil || service.gotCreateReq.ModifiedBy != nil {
+		t.Fatalf("expected API key writes to omit auth user ids, got %#v", service.gotCreateReq)
 	}
 	if service.gotCreateReq.ParentID == nil || *service.gotCreateReq.ParentID != 3 {
 		t.Fatalf("expected create request parent_id=3, got %#v", service.gotCreateReq)
@@ -228,7 +223,7 @@ func TestCreateAndUpdatePageEndpointsInjectAuthUser(t *testing.T) {
 	updateBody := `{"page_title":"Homepage","url_slug":"/home/updated","parent_id":4,"status":"published","hero_image_enabled":true}`
 	res = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPut, "/api/pages/12", strings.NewReader(updateBody))
-	req.Header.Set("Authorization", "Bearer "+signPageTestToken(t, "test-secret"))
+	req.Header.Set("X-API-Key", "test-api-key")
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(res, req)
 
@@ -238,8 +233,8 @@ func TestCreateAndUpdatePageEndpointsInjectAuthUser(t *testing.T) {
 	if service.gotUpdateID != 12 {
 		t.Fatalf("expected update id 12, got %d", service.gotUpdateID)
 	}
-	if service.gotUpdateReq.ModifiedBy == nil || *service.gotUpdateReq.ModifiedBy != 7 {
-		t.Fatalf("expected update request modified_by=7, got %#v", service.gotUpdateReq)
+	if service.gotUpdateReq.ModifiedBy != nil {
+		t.Fatalf("expected API key writes to omit modified_by, got %#v", service.gotUpdateReq)
 	}
 	if service.gotUpdateReq.ParentID == nil || *service.gotUpdateReq.ParentID != 4 {
 		t.Fatalf("expected update request parent_id=4, got %#v", service.gotUpdateReq)
@@ -253,7 +248,7 @@ func TestCreatePageEndpointAcceptsMultipartHeroUpload(t *testing.T) {
 	req := newPageMultipartRequest(t, http.MethodPost, "/api/pages", `{"page_title":"Homepage","url_slug":"/home","status":"draft","hero_image_enabled":true}`, map[string]multipartUploadTestFile{
 		"hero_image_file": {Filename: "hero.png", Data: []byte("hello")},
 	})
-	req.Header.Set("Authorization", "Bearer "+signPageTestToken(t, "test-secret"))
+	req.Header.Set("X-API-Key", "test-api-key")
 
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
@@ -278,7 +273,7 @@ func TestCreatePageEndpointRejectsBase64UploadPayload(t *testing.T) {
 
 	res := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/pages", strings.NewReader(`{"page_title":"Homepage","url_slug":"/home","status":"draft","hero_image_enabled":true,"hero_image":{"file_name":"hero.png","mime_type":"image/png","data_base64":"aGVsbG8="}}`))
-	req.Header.Set("Authorization", "Bearer "+signPageTestToken(t, "test-secret"))
+	req.Header.Set("X-API-Key", "test-api-key")
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(res, req)
 
@@ -291,7 +286,7 @@ func TestDeletePageEndpoint(t *testing.T) {
 
 	res := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodDelete, "/api/pages/44", nil)
-	req.Header.Set("Authorization", "Bearer "+signPageTestToken(t, "test-secret"))
+	req.Header.Set("X-API-Key", "test-api-key")
 	router.ServeHTTP(res, req)
 
 	if res.Code != http.StatusOK {
@@ -324,7 +319,7 @@ func TestPageEndpointErrorsAndProtection(t *testing.T) {
 	req = httptest.NewRequest(http.MethodPost, "/api/pages", strings.NewReader(`{"page_title":"Homepage"}`))
 	req.Header.Set("Content-Type", "application/json")
 	protected.ServeHTTP(res, req)
-	assertPageAPIError(t, res, http.StatusUnauthorized, "missing_bearer_token", "Missing bearer token")
+	assertPageAPIError(t, res, http.StatusUnauthorized, "missing_api_key", "Missing API key")
 }
 
 func TestWritePageErrorAndHelpers(t *testing.T) {
@@ -382,22 +377,6 @@ func assertPageAPIError(t *testing.T, res *httptest.ResponseRecorder, wantStatus
 		t.Fatalf("expected error message %q, got %#v", wantMessage, payload)
 	}
 	return payload
-}
-
-func signPageTestToken(t *testing.T, secret string) string {
-	t.Helper()
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id": 7,
-		"email":   "ada@example.com",
-		"role":    "Admin",
-		"exp":     time.Now().Add(15 * time.Minute).Unix(),
-	})
-	signed, err := token.SignedString([]byte(secret))
-	if err != nil {
-		t.Fatalf("sign test token: %v", err)
-	}
-	return signed
 }
 
 type multipartUploadTestFile struct {

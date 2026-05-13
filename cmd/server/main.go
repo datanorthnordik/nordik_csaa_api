@@ -55,7 +55,7 @@ func main() {
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"http://localhost:3000", "http://localhost:5173", "https://nordikcsaacms-724838782318.us-west1.run.app", "https://nordikcsaawebsite-724838782318.us-west1.run.app"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "X-API-Key"},
 		AllowCredentials: true,
 	}))
 	r.NoRoute(apiresponse.WriteRouteNotFound)
@@ -68,9 +68,9 @@ func main() {
 	galleryService := &gallery.GalleryService{DB: db, BucketName: cfg.DriveBucketName, BucketPrefix: cfg.DriveBucketPrefix}
 	gallery.RegisterRoutes(r, galleryService, auth.RequireBearerAuth(&cfg))
 	pageService := &pages.PageService{DB: db, BucketName: cfg.DriveBucketName, BucketPrefix: cfg.DriveBucketPrefix}
-	pages.RegisterRoutes(r, pageService, auth.RequireBearerAuth(&cfg))
+	pages.RegisterRoutes(r, pageService, auth.RequireAPIKey(&cfg))
 	menuService := &menus.MenuService{DB: db}
-	menus.RegisterRoutes(r, menuService, auth.RequireBearerAuth(&cfg))
+	menus.RegisterRoutes(r, menuService, auth.RequireAPIKey(&cfg))
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})

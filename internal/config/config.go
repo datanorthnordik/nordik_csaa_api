@@ -13,6 +13,7 @@ type Config struct {
 	DBName            string
 	DBSSLMode         string
 	JWTSecret         string
+	APIKey            string
 	SMTPKey           string
 	GmailUser         string
 	GmailPass         string
@@ -30,6 +31,7 @@ func LoadConfig() Config {
 		DBName:            os.Getenv("DB_NAME"),
 		DBSSLMode:         os.Getenv("DB_SSLMODE"),
 		JWTSecret:         os.Getenv("JWT_SECRET"),
+		APIKey:            os.Getenv("API_KEY"),
 		SMTPKey:           os.Getenv("SMTP_KEY"),
 		GmailUser:         os.Getenv("GMAIL_USER"),
 		GmailPass:         os.Getenv("GMAIL_APP_PASSWORD"),
