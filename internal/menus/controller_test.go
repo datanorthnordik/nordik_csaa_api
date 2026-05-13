@@ -75,12 +75,26 @@ func setupProtectedMenuRouter(service MenuServicePort) *gin.Engine {
 }
 
 func TestGetMenuEndpoint(t *testing.T) {
+	pageID := 10
 	service := &fakeMenuService{
 		getResp: &MenuResponse{
 			ID:      1,
 			MenuKey: "main",
 			Name:    "Main Website Navigation",
-			Items:   []MenuItemResponse{{ID: 10, Label: "About", NavigationType: NavigationTypePage}},
+			Items: []MenuItemResponse{{
+				ID:             10,
+				Label:          "About",
+				NavigationType: NavigationTypePage,
+				PageID:         &pageID,
+				PageType:       "module",
+				Page: &MenuPageReference{
+					ID:        pageID,
+					PageTitle: "Events",
+					URLSlug:   "/events",
+					PageType:  "module",
+					Status:    "published",
+				},
+			}},
 		},
 	}
 	router := setupMenuRouter(service)
@@ -95,12 +109,20 @@ func TestGetMenuEndpoint(t *testing.T) {
 	if service.gotKey != "main" {
 		t.Fatalf("expected key main, got %q", service.gotKey)
 	}
+
+	var payload MenuResponse
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode menu response: %v", err)
+	}
+	if len(payload.Items) != 1 || payload.Items[0].PageType != "module" || payload.Items[0].Page == nil || payload.Items[0].Page.PageType != "module" {
+		t.Fatalf("expected page_type in menu response, got %#v", payload)
+	}
 }
 
 func TestListMenuPageOptionsAndSaveMenuEndpoints(t *testing.T) {
 	service := &fakeMenuService{
 		pageOptionsResp: &MenuPageOptionsResponse{
-			Items: []MenuPageOption{{ID: 10, PageTitle: "About Us", URLSlug: "/about", Status: "published"}},
+			Items: []MenuPageOption{{ID: 10, PageTitle: "About Us", URLSlug: "/about", PageType: "page", Status: "published"}},
 		},
 	}
 	router := setupProtectedMenuRouter(service)
@@ -111,6 +133,14 @@ func TestListMenuPageOptionsAndSaveMenuEndpoints(t *testing.T) {
 
 	if res.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d: %s", res.Code, res.Body.String())
+	}
+
+	var optionsPayload MenuPageOptionsResponse
+	if err := json.NewDecoder(res.Body).Decode(&optionsPayload); err != nil {
+		t.Fatalf("decode page options response: %v", err)
+	}
+	if len(optionsPayload.Items) != 1 || optionsPayload.Items[0].PageType != "page" {
+		t.Fatalf("expected page options payload, got %#v", optionsPayload)
 	}
 
 	body := `{"name":"Main Website Navigation","items":[{"label":"About","navigation_type":"pages","page_id":10,"children":[]}]}`

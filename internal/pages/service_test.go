@@ -67,9 +67,9 @@ func TestListPagesSuccessAndValidation(t *testing.T) {
 	mock.ExpectQuery(`SELECT .* FROM "pages" LEFT JOIN users AS modified_users ON modified_users.id = pages.modified_by LEFT JOIN pages AS parent_pages ON parent_pages.id = pages.parent_id WHERE .*LOWER\(pages\.page_title\) LIKE \$1 OR LOWER\(pages\.url_slug\) LIKE \$2.*pages\.status = \$3 ORDER BY pages\.last_modified DESC LIMIT \$4 OFFSET \$5`).
 		WithArgs("%home%", "%home%", "published", 5, 5).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "page_title", "url_slug", "parent_id", "parent_page_title", "parent_page_url_slug", "status", "last_modified", "modified_by", "modified_by_name", "created_at", "updated_at",
+			"id", "page_title", "url_slug", "parent_id", "page_type", "parent_page_title", "parent_page_url_slug", "status", "last_modified", "modified_by", "modified_by_name", "created_at", "updated_at",
 		}).AddRow(
-			9, "Homepage", "/about/home", 3, "About", "/about", PageStatusPublished, time.Date(2026, 5, 10, 9, 0, 0, 0, time.UTC), 7, "Jane Doe", time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 5, 10, 9, 0, 0, 0, time.UTC),
+			9, "Homepage", "/about/home", 3, PageTypePage, "About", "/about", PageStatusPublished, time.Date(2026, 5, 10, 9, 0, 0, 0, time.UTC), 7, "Jane Doe", time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 5, 10, 9, 0, 0, 0, time.UTC),
 		))
 
 	resp, err := service.ListPages(PageListFilters{
@@ -90,6 +90,9 @@ func TestListPagesSuccessAndValidation(t *testing.T) {
 	}
 	if resp.Items[0].ParentID == nil || *resp.Items[0].ParentID != 3 || resp.Items[0].ParentPageURLSlug != "/about" {
 		t.Fatalf("expected parent page metadata, got %#v", resp.Items[0])
+	}
+	if resp.Items[0].PageType != PageTypePage {
+		t.Fatalf("expected page type %q, got %#v", PageTypePage, resp.Items[0])
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -117,7 +120,7 @@ func TestListPagesReturnsEmptyArrayWhenNoRowsMatch(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectQuery(`SELECT .* FROM "pages" LEFT JOIN users AS modified_users ON modified_users.id = pages.modified_by LEFT JOIN pages AS parent_pages ON parent_pages.id = pages.parent_id ORDER BY pages\.last_modified DESC`).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "page_title", "url_slug", "parent_id", "parent_page_title", "parent_page_url_slug", "status", "last_modified", "modified_by", "modified_by_name", "created_at", "updated_at",
+			"id", "page_title", "url_slug", "parent_id", "page_type", "parent_page_title", "parent_page_url_slug", "status", "last_modified", "modified_by", "modified_by_name", "created_at", "updated_at",
 		}))
 
 	resp, err := service.ListPages(PageListFilters{})
@@ -144,11 +147,11 @@ func TestGetPageSuccessAndNotFound(t *testing.T) {
 	mock.ExpectQuery(`SELECT .* FROM "pages" LEFT JOIN users AS created_users ON created_users.id = pages.created_by LEFT JOIN users AS modified_users ON modified_users.id = pages.modified_by LEFT JOIN pages AS parent_pages ON parent_pages.id = pages.parent_id WHERE pages.id = \$1 LIMIT \$2`).
 		WithArgs(12, 1).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "page_title", "url_slug", "parent_id", "parent_page_title", "parent_page_url_slug", "status", "hero_image_enabled", "hero_image_url", "hero_image_object_key",
+			"id", "page_title", "url_slug", "parent_id", "page_type", "parent_page_title", "parent_page_url_slug", "status", "hero_image_enabled", "hero_image_url", "hero_image_object_key",
 			"seo_page_title", "seo_page_description", "created_by", "modified_by", "last_modified", "created_at", "updated_at",
 			"created_by_name", "modified_by_name",
 		}).AddRow(
-			12, "About Us", "/about/about-us", 3, "About", "/about", PageStatusDraft, true, "gs://drive-bucket/pages/12/hero.png", "pages/12/hero.png",
+			12, "About Us", "/about/about-us", 3, PageTypeModule, "About", "/about", PageStatusDraft, true, "gs://drive-bucket/pages/12/hero.png", "pages/12/hero.png",
 			"About CSAA", "Page description", 3, 7, time.Date(2026, 5, 10, 9, 0, 0, 0, time.UTC), time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 5, 10, 9, 0, 0, 0, time.UTC),
 			"Alex Rivera", "Jane Doe",
 		))
@@ -162,6 +165,9 @@ func TestGetPageSuccessAndNotFound(t *testing.T) {
 	}
 	if resp.ParentID == nil || *resp.ParentID != 3 || resp.ParentPageURLSlug != "/about" {
 		t.Fatalf("expected parent page metadata, got %#v", resp)
+	}
+	if resp.PageType != PageTypeModule {
+		t.Fatalf("expected module page type, got %#v", resp)
 	}
 
 	mock.ExpectQuery(`SELECT .* FROM "pages" LEFT JOIN users AS created_users ON created_users.id = pages.created_by LEFT JOIN users AS modified_users ON modified_users.id = pages.modified_by LEFT JOIN pages AS parent_pages ON parent_pages.id = pages.parent_id WHERE pages.id = \$1 LIMIT \$2`).
@@ -230,6 +236,9 @@ func TestCreateUpdateAndDeletePageSuccess(t *testing.T) {
 	if createResp.ID != 11 || createResp.Status != PageStatusDraft {
 		t.Fatalf("unexpected create response: %#v", createResp)
 	}
+	if createResp.PageType != PageTypePage {
+		t.Fatalf("expected created page type %q, got %#v", PageTypePage, createResp)
+	}
 
 	updateReq := validSavePageRequest()
 	updateReq.Status = PageStatusPublished
@@ -243,10 +252,10 @@ func TestCreateUpdateAndDeletePageSuccess(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "pages" WHERE "pages"."id" = $1 ORDER BY "pages"."id" LIMIT $2`)).
 		WithArgs(11, 1).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "page_title", "url_slug", "status", "hero_image_enabled", "hero_image_url", "hero_image_object_key",
+			"id", "page_title", "url_slug", "page_type", "status", "hero_image_enabled", "hero_image_url", "hero_image_object_key",
 			"seo_page_title", "seo_page_description", "created_by", "modified_by", "parent_id", "last_modified", "created_at", "updated_at",
 		}).AddRow(
-			11, "Homepage", "/home", PageStatusDraft, true, "gs://drive-bucket/pages/11/hero_20260501100000_old.png", "pages/11/hero_20260501100000_old.png",
+			11, "Homepage", "/home", PageTypePage, PageStatusDraft, true, "gs://drive-bucket/pages/11/hero_20260501100000_old.png", "pages/11/hero_20260501100000_old.png",
 			"Homepage SEO", "Desc", 7, 7, nil, time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
 		))
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE "pages" SET`)).
@@ -260,15 +269,18 @@ func TestCreateUpdateAndDeletePageSuccess(t *testing.T) {
 	if updateResp.Status != PageStatusPublished {
 		t.Fatalf("unexpected update response: %#v", updateResp)
 	}
+	if updateResp.PageType != PageTypePage {
+		t.Fatalf("expected updated page type %q, got %#v", PageTypePage, updateResp)
+	}
 
 	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "pages" WHERE "pages"."id" = $1 ORDER BY "pages"."id" LIMIT $2`)).
 		WithArgs(11, 1).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "page_title", "url_slug", "status", "hero_image_enabled", "hero_image_url", "hero_image_object_key",
+			"id", "page_title", "url_slug", "page_type", "status", "hero_image_enabled", "hero_image_url", "hero_image_object_key",
 			"seo_page_title", "seo_page_description", "created_by", "modified_by", "parent_id", "last_modified", "created_at", "updated_at",
 		}).AddRow(
-			11, "Homepage", "/home", PageStatusPublished, true, "gs://drive-bucket/pages/11/hero_20260501100000_new-banner.png", "pages/11/hero_20260501100000_new-banner.png",
+			11, "Homepage", "/home", PageTypePage, PageStatusPublished, true, "gs://drive-bucket/pages/11/hero_20260501100000_new-banner.png", "pages/11/hero_20260501100000_new-banner.png",
 			"Homepage SEO", "Desc", 7, 7, nil, time.Date(2026, 5, 10, 0, 0, 0, 0, time.UTC), time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 5, 10, 0, 0, 0, 0, time.UTC),
 		))
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM "pages" WHERE "pages"."id" = $1`)).
@@ -317,10 +329,10 @@ func TestUpdatePageRejectsSelfParentPage(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "pages" WHERE "pages"."id" = $1 ORDER BY "pages"."id" LIMIT $2`)).
 		WithArgs(pageID, 1).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "page_title", "url_slug", "status", "hero_image_enabled", "hero_image_url", "hero_image_object_key",
+			"id", "page_title", "url_slug", "page_type", "status", "hero_image_enabled", "hero_image_url", "hero_image_object_key",
 			"seo_page_title", "seo_page_description", "created_by", "modified_by", "parent_id", "last_modified", "created_at", "updated_at",
 		}).AddRow(
-			pageID, "Homepage", "/home", PageStatusDraft, false, "", "",
+			pageID, "Homepage", "/home", PageTypePage, PageStatusDraft, false, "", "",
 			"Homepage SEO", "Desc", 7, 7, nil, time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
 		))
 	mock.ExpectRollback()
@@ -393,6 +405,46 @@ func TestPageValidationAndHelpers(t *testing.T) {
 
 	if (Page{}).TableName() != "pages" {
 		t.Fatal("unexpected pages table name")
+	}
+}
+
+func TestModulePagesCannotBeUpdatedOrDeleted(t *testing.T) {
+	db, mock, cleanup := setupMockDB(t)
+	defer cleanup()
+
+	service := &PageService{DB: db}
+	req := validSavePageRequest()
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "pages" WHERE "pages"."id" = $1 ORDER BY "pages"."id" LIMIT $2`)).
+		WithArgs(22, 1).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "page_title", "url_slug", "page_type", "status", "hero_image_enabled", "hero_image_url", "hero_image_object_key",
+			"seo_page_title", "seo_page_description", "created_by", "modified_by", "parent_id", "last_modified", "created_at", "updated_at",
+		}).AddRow(
+			22, "Events", "/events", PageTypeModule, PageStatusPublished, false, "", "",
+			"Events", "Events landing page", 7, 7, nil, time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
+		))
+	mock.ExpectRollback()
+
+	if _, err := service.UpdatePage(22, req); !errors.Is(err, ErrPageModuleManaged) {
+		t.Fatalf("expected ErrPageModuleManaged from UpdatePage, got %v", err)
+	}
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "pages" WHERE "pages"."id" = $1 ORDER BY "pages"."id" LIMIT $2`)).
+		WithArgs(22, 1).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "page_title", "url_slug", "page_type", "status", "hero_image_enabled", "hero_image_url", "hero_image_object_key",
+			"seo_page_title", "seo_page_description", "created_by", "modified_by", "parent_id", "last_modified", "created_at", "updated_at",
+		}).AddRow(
+			22, "Events", "/events", PageTypeModule, PageStatusPublished, false, "", "",
+			"Events", "Events landing page", 7, 7, nil, time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
+		))
+	mock.ExpectRollback()
+
+	if err := service.DeletePage(22); !errors.Is(err, ErrPageModuleManaged) {
+		t.Fatalf("expected ErrPageModuleManaged from DeletePage, got %v", err)
 	}
 }
 

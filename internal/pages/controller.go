@@ -159,6 +159,8 @@ func isClientSafePageError(err error) bool {
 	case strings.Contains(message, " is required"),
 		strings.Contains(message, "invalid "),
 		strings.Contains(message, "must be a valid"),
+		strings.Contains(message, "module page"),
+		strings.Contains(message, "managed elsewhere"),
 		strings.Contains(message, "missing both uploaded file and file_url"),
 		strings.Contains(message, "parent_id"),
 		strings.Contains(message, "parent page slug"):

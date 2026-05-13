@@ -320,6 +320,21 @@ func TestPageEndpointErrorsAndProtection(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	protected.ServeHTTP(res, req)
 	assertPageAPIError(t, res, http.StatusUnauthorized, "missing_api_key", "Missing API key")
+
+	protected = setupProtectedPageRouter(&fakePageService{updateErr: ErrPageModuleManaged})
+	res = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPut, "/api/pages/12", strings.NewReader(`{"page_title":"Events","url_slug":"/events","status":"published","hero_image_enabled":false}`))
+	req.Header.Set("X-API-Key", "test-api-key")
+	req.Header.Set("Content-Type", "application/json")
+	protected.ServeHTTP(res, req)
+	assertPageAPIError(t, res, http.StatusBadRequest, "validation_error", "module pages are managed elsewhere in the CMS and cannot be edited here")
+
+	protected = setupProtectedPageRouter(&fakePageService{deleteErr: ErrPageModuleManaged})
+	res = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodDelete, "/api/pages/12", nil)
+	req.Header.Set("X-API-Key", "test-api-key")
+	protected.ServeHTTP(res, req)
+	assertPageAPIError(t, res, http.StatusBadRequest, "validation_error", "module pages are managed elsewhere in the CMS and cannot be edited here")
 }
 
 func TestWritePageErrorAndHelpers(t *testing.T) {
