@@ -17,6 +17,7 @@ var (
 	ErrStoreUnavailable         = errors.New("page store unavailable")
 	ErrPageNotFound             = errors.New("page not found")
 	ErrPageHeroImageNotFound    = errors.New("page hero image not found")
+	ErrPageModuleManaged        = errors.New("module pages are managed elsewhere in the CMS and cannot be edited here")
 	ErrMediaBucketNotConfigured = errors.New("drive bucket is not configured")
 )
 
@@ -69,6 +70,7 @@ func (s *PageService) ListPages(filter PageListFilters) (*PageListResponse, erro
 			pages.page_title,
 			pages.url_slug,
 			pages.parent_id,
+			pages.page_type,
 			COALESCE(parent_pages.page_title, '') AS parent_page_title,
 			COALESCE(parent_pages.url_slug, '') AS parent_page_url_slug,
 			pages.status,
@@ -135,6 +137,7 @@ func (s *PageService) GetPage(id int) (*PageDetailResponse, error) {
 			pages.page_title,
 			pages.url_slug,
 			pages.parent_id,
+			pages.page_type,
 			COALESCE(parent_pages.page_title, '') AS parent_page_title,
 			COALESCE(parent_pages.url_slug, '') AS parent_page_url_slug,
 			pages.status,
@@ -271,6 +274,7 @@ func (s *PageService) CreatePage(req SavePageRequest) (*PageMutationResponse, er
 		PageTitle: page.PageTitle,
 		URLSlug:   page.URLSlug,
 		ParentID:  page.ParentID,
+		PageType:  page.PageType,
 		Status:    page.Status,
 	}, nil
 }
@@ -300,6 +304,10 @@ func (s *PageService) UpdatePage(id int, req SavePageRequest) (*PageMutationResp
 			return nil, ErrPageNotFound
 		}
 		return nil, err
+	}
+	if page.PageType == PageTypeModule {
+		tx.Rollback()
+		return nil, ErrPageModuleManaged
 	}
 
 	if err := s.validateParentPage(tx, id, normalized); err != nil {
@@ -351,6 +359,7 @@ func (s *PageService) UpdatePage(id int, req SavePageRequest) (*PageMutationResp
 		PageTitle: page.PageTitle,
 		URLSlug:   page.URLSlug,
 		ParentID:  page.ParentID,
+		PageType:  page.PageType,
 		Status:    page.Status,
 	}, nil
 }
@@ -373,6 +382,10 @@ func (s *PageService) DeletePage(id int) error {
 			return ErrPageNotFound
 		}
 		return err
+	}
+	if page.PageType == PageTypeModule {
+		tx.Rollback()
+		return ErrPageModuleManaged
 	}
 
 	if err := tx.Delete(&page).Error; err != nil {
@@ -500,6 +513,7 @@ func buildPageModel(req SavePageRequest) Page {
 		PageTitle:          req.PageTitle,
 		URLSlug:            req.URLSlug,
 		ParentID:           req.ParentID,
+		PageType:           PageTypePage,
 		Status:             req.Status,
 		HeroImageEnabled:   req.HeroImageEnabled,
 		SEOPageTitle:       req.SEOPageTitle,

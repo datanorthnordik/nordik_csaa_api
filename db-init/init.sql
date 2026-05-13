@@ -143,6 +143,7 @@ CREATE TABLE IF NOT EXISTS pages (
     page_title VARCHAR(255) NOT NULL,
     url_slug VARCHAR(255) NOT NULL UNIQUE,
     parent_id INT NULL,
+    page_type VARCHAR(20) NOT NULL DEFAULT 'page',
     status VARCHAR(20) NOT NULL DEFAULT 'draft',
     hero_image_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     hero_image_url TEXT,
@@ -178,7 +179,10 @@ CREATE TABLE IF NOT EXISTS pages (
         ),
 
     CONSTRAINT chk_pages_status
-        CHECK (status IN ('draft', 'published'))
+        CHECK (status IN ('draft', 'published')),
+
+    CONSTRAINT chk_pages_type
+        CHECK (page_type IN ('page', 'module'))
 );
 
 DO $$
@@ -204,6 +208,13 @@ ALTER TABLE pages
     ADD COLUMN IF NOT EXISTS parent_id INT NULL;
 
 ALTER TABLE pages
+    ADD COLUMN IF NOT EXISTS page_type VARCHAR(20) NOT NULL DEFAULT 'page';
+
+UPDATE pages
+SET page_type = 'page'
+WHERE page_type IS NULL OR btrim(page_type) = '';
+
+ALTER TABLE pages
     DROP CONSTRAINT IF EXISTS fk_pages_parent_page;
 
 DO $$
@@ -218,6 +229,22 @@ BEGIN
             FOREIGN KEY (parent_id) REFERENCES pages(id)
             ON UPDATE CASCADE
             ON DELETE SET NULL;
+    END IF;
+END $$;
+
+ALTER TABLE pages
+    DROP CONSTRAINT IF EXISTS chk_pages_type;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_pages_type'
+    ) THEN
+        ALTER TABLE pages
+            ADD CONSTRAINT chk_pages_type
+            CHECK (page_type IN ('page', 'module'));
     END IF;
 END $$;
 
@@ -547,6 +574,7 @@ CREATE INDEX IF NOT EXISTS idx_gallery_images_file_url ON gallery_images(file_ur
 CREATE INDEX IF NOT EXISTS idx_gallery_images_gallery_sort ON gallery_images(gallery_id, sort_order, id);
 
 CREATE INDEX IF NOT EXISTS idx_pages_status ON pages(status);
+CREATE INDEX IF NOT EXISTS idx_pages_page_type ON pages(page_type);
 CREATE INDEX IF NOT EXISTS idx_pages_slug ON pages(url_slug);
 DROP INDEX IF EXISTS idx_pages_parent_page_id;
 CREATE INDEX IF NOT EXISTS idx_pages_parent_id ON pages(parent_id);

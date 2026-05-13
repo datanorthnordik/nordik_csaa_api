@@ -59,6 +59,7 @@ type MenuPageReference struct {
 	PageTitle string `json:"page_title"`
 	URLSlug   string `json:"url_slug"`
 	ParentID  *int   `json:"parent_id"`
+	PageType  string `json:"page_type"`
 	Status    string `json:"status"`
 }
 
@@ -72,6 +73,7 @@ type MenuItemResponse struct {
 	OpenInNewTab   bool               `json:"open_in_new_tab"`
 	SortOrder      int                `json:"sort_order"`
 	Href           string             `json:"href"`
+	PageType       string             `json:"page_type,omitempty"`
 	Page           *MenuPageReference `json:"page,omitempty"`
 	Children       []MenuItemResponse `json:"children"`
 }
@@ -89,6 +91,7 @@ type MenuPageOption struct {
 	URLSlug         string `json:"url_slug"`
 	ParentID        *int   `json:"parent_id"`
 	ParentPageTitle string `json:"parent_page_title"`
+	PageType        string `json:"page_type"`
 	Status          string `json:"status"`
 }
 

@@ -93,10 +93,10 @@ func TestGetMenuReturnsHydratedTreeWhenMenuExists(t *testing.T) {
 	mock.ExpectQuery(`SELECT .* FROM "pages" LEFT JOIN pages AS parent_pages ON parent_pages.id = pages.parent_id WHERE pages.id IN \(\$1,\$2\) ORDER BY pages.url_slug ASC,pages.id ASC`).
 		WithArgs(100, 101).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "page_title", "url_slug", "parent_id", "parent_page_title", "status",
+			"id", "page_title", "url_slug", "parent_id", "parent_page_title", "page_type", "status",
 		}).
-			AddRow(100, "About Us", "/about", nil, "", "published").
-			AddRow(101, "Team", "/about/team", 100, "About Us", "published"))
+			AddRow(100, "About Us", "/about", nil, "", "page", "published").
+			AddRow(101, "Team", "/about/team", 100, "About Us", "module", "published"))
 
 	resp, err := svc.GetMenu("main")
 	if err != nil {
@@ -108,8 +108,17 @@ func TestGetMenuReturnsHydratedTreeWhenMenuExists(t *testing.T) {
 	if resp.Items[0].Href != "/about" || resp.Items[0].Children[0].Href != "/about/team" {
 		t.Fatalf("expected page hrefs in response, got %#v", resp.Items)
 	}
+	if resp.Items[0].PageType != "page" || resp.Items[0].Page == nil || resp.Items[0].Page.PageType != "page" {
+		t.Fatalf("expected root page item type metadata, got %#v", resp.Items[0])
+	}
+	if resp.Items[0].Children[0].PageType != "module" || resp.Items[0].Children[0].Page == nil || resp.Items[0].Children[0].Page.PageType != "module" {
+		t.Fatalf("expected child page item type metadata, got %#v", resp.Items[0].Children[0])
+	}
 	if resp.Items[0].Children[1].Href != "https://example.com" || !resp.Items[0].Children[1].OpenInNewTab {
 		t.Fatalf("expected external link metadata in response, got %#v", resp.Items[0].Children[1])
+	}
+	if resp.Items[0].Children[1].PageType != "" {
+		t.Fatalf("expected external item page_type to be empty, got %#v", resp.Items[0].Children[1])
 	}
 }
 
@@ -122,9 +131,9 @@ func TestListMenuPageOptionsReturnsPublishedPages(t *testing.T) {
 	mock.ExpectQuery(`SELECT .* FROM "pages" LEFT JOIN pages AS parent_pages ON parent_pages.id = pages.parent_id WHERE pages.status = \$1 ORDER BY pages.url_slug ASC,pages.id ASC`).
 		WithArgs("published").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "page_title", "url_slug", "parent_id", "parent_page_title", "status",
-		}).AddRow(10, "About Us", "/about", nil, "", "published").
-			AddRow(11, "Team", "/about/team", 10, "About Us", "published"))
+			"id", "page_title", "url_slug", "parent_id", "parent_page_title", "page_type", "status",
+		}).AddRow(10, "About Us", "/about", nil, "", "page", "published").
+			AddRow(11, "Team", "/about/team", 10, "About Us", "module", "published"))
 
 	resp, err := svc.ListMenuPageOptions()
 	if err != nil {
@@ -132,6 +141,9 @@ func TestListMenuPageOptionsReturnsPublishedPages(t *testing.T) {
 	}
 	if len(resp.Items) != 2 || resp.Items[1].ParentID == nil || *resp.Items[1].ParentID != 10 {
 		t.Fatalf("unexpected menu page options: %#v", resp)
+	}
+	if resp.Items[0].PageType != "page" || resp.Items[1].PageType != "module" {
+		t.Fatalf("expected page types in menu options, got %#v", resp.Items)
 	}
 }
 
@@ -185,10 +197,10 @@ func TestSaveMenuUpdatesExistingMenuAndPersistsHierarchy(t *testing.T) {
 	mock.ExpectQuery(`SELECT .* FROM "pages" LEFT JOIN pages AS parent_pages ON parent_pages.id = pages.parent_id WHERE pages.id IN \(\$1,\$2\) ORDER BY pages.url_slug ASC,pages.id ASC`).
 		WithArgs(rootPageID, childPageID).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "page_title", "url_slug", "parent_id", "parent_page_title", "status",
+			"id", "page_title", "url_slug", "parent_id", "parent_page_title", "page_type", "status",
 		}).
-			AddRow(rootPageID, "About Us", "/about", nil, "", "published").
-			AddRow(childPageID, "Team", "/about/team", rootPageID, "About Us", "published"))
+			AddRow(rootPageID, "About Us", "/about", nil, "", "page", "published").
+			AddRow(childPageID, "Team", "/about/team", rootPageID, "About Us", "module", "published"))
 
 	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "menus" WHERE menu_key = $1 LIMIT $2`)).
@@ -221,10 +233,10 @@ func TestSaveMenuUpdatesExistingMenuAndPersistsHierarchy(t *testing.T) {
 	mock.ExpectQuery(`SELECT .* FROM "pages" LEFT JOIN pages AS parent_pages ON parent_pages.id = pages.parent_id WHERE pages.id IN \(\$1,\$2\) ORDER BY pages.url_slug ASC,pages.id ASC`).
 		WithArgs(rootPageID, childPageID).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "page_title", "url_slug", "parent_id", "parent_page_title", "status",
+			"id", "page_title", "url_slug", "parent_id", "parent_page_title", "page_type", "status",
 		}).
-			AddRow(rootPageID, "About Us", "/about", nil, "", "published").
-			AddRow(childPageID, "Team", "/about/team", rootPageID, "About Us", "published"))
+			AddRow(rootPageID, "About Us", "/about", nil, "", "page", "published").
+			AddRow(childPageID, "Team", "/about/team", rootPageID, "About Us", "module", "published"))
 
 	resp, err := svc.SaveMenu("main", SaveMenuRequest{
 		Name: "Main Website Navigation",
@@ -258,6 +270,9 @@ func TestSaveMenuUpdatesExistingMenuAndPersistsHierarchy(t *testing.T) {
 	}
 	if len(resp.Items[0].Children) != 2 || resp.Items[0].Children[1].Href != "https://example.com" {
 		t.Fatalf("expected persisted hierarchy in response, got %#v", resp.Items[0])
+	}
+	if resp.Items[0].PageType != "page" || resp.Items[0].Children[0].PageType != "module" {
+		t.Fatalf("expected page type metadata in saved menu response, got %#v", resp.Items[0])
 	}
 }
 
@@ -413,8 +428,8 @@ func TestBuildMenuTreeIncludesChildrenAndHref(t *testing.T) {
 		{ID: 3, ParentID: &rootID, Label: "External", NavigationType: NavigationTypeExternalLink, ExternalURL: "https://example.com", OpenInNewTab: true, SortOrder: 1},
 	}
 	pageMap := map[int]MenuPageReference{
-		10: {ID: 10, PageTitle: "About Us", URLSlug: "/about", Status: "published"},
-		11: {ID: 11, PageTitle: "Team", URLSlug: "/about/team", ParentID: &pageID, Status: "published"},
+		10: {ID: 10, PageTitle: "About Us", URLSlug: "/about", PageType: "page", Status: "published"},
+		11: {ID: 11, PageTitle: "Team", URLSlug: "/about/team", ParentID: &pageID, PageType: "module", Status: "published"},
 	}
 
 	tree := buildMenuTree(flat, pageMap)
@@ -423,6 +438,9 @@ func TestBuildMenuTreeIncludesChildrenAndHref(t *testing.T) {
 	}
 	if tree[0].Href != "/about" || tree[0].Children[0].Href != "/about/team" {
 		t.Fatalf("expected page hrefs to use url slugs, got %#v", tree)
+	}
+	if tree[0].PageType != "page" || tree[0].Children[0].PageType != "module" {
+		t.Fatalf("expected page type metadata in built tree, got %#v", tree)
 	}
 	if tree[0].Children[1].Href != "https://example.com" || !tree[0].Children[1].OpenInNewTab {
 		t.Fatalf("expected external link metadata, got %#v", tree[0].Children[1])
@@ -711,12 +729,15 @@ func TestLoadPageRecordsAndRollbackOnPanic(t *testing.T) {
 	mock.ExpectQuery(`SELECT .* FROM "pages" LEFT JOIN pages AS parent_pages ON parent_pages.id = pages.parent_id WHERE pages.id IN \(\$1\) ORDER BY pages.url_slug ASC,pages.id ASC`).
 		WithArgs(10).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "page_title", "url_slug", "parent_id", "parent_page_title", "status",
-		}).AddRow(10, "About Us", "/about", nil, "", "published"))
+			"id", "page_title", "url_slug", "parent_id", "parent_page_title", "page_type", "status",
+		}).AddRow(10, "About Us", "/about", nil, "", "page", "published"))
 
 	rows, err = svc.loadPageRecords([]int{10}, false)
 	if err != nil || len(rows) != 1 || rows[0].ID != 10 {
 		t.Fatalf("expected loaded page row, got rows=%#v err=%v", rows, err)
+	}
+	if rows[0].PageType != "page" {
+		t.Fatalf("expected loaded page type, got %#v", rows[0])
 	}
 
 	mock.ExpectBegin()

@@ -30,6 +30,7 @@ type menuPageRecord struct {
 	URLSlug         string
 	ParentID        *int
 	ParentPageTitle string
+	PageType        string
 	Status          string
 }
 
@@ -85,6 +86,7 @@ func (s *MenuService) ListMenuPageOptions() (*MenuPageOptionsResponse, error) {
 			URLSlug:         row.URLSlug,
 			ParentID:        row.ParentID,
 			ParentPageTitle: row.ParentPageTitle,
+			PageType:        row.PageType,
 			Status:          row.Status,
 		})
 	}
@@ -339,6 +341,7 @@ func (s *MenuService) loadPageRecords(pageIDs []int, publishedOnly bool) ([]menu
 			pages.url_slug,
 			pages.parent_id,
 			COALESCE(parent_pages.page_title, '') AS parent_page_title,
+			pages.page_type,
 			pages.status
 		`).
 		Joins(`LEFT JOIN pages AS parent_pages ON parent_pages.id = pages.parent_id`)
@@ -447,6 +450,7 @@ func (s *MenuService) loadMenuResponse(menu Menu) (*MenuResponse, error) {
 			PageTitle: row.PageTitle,
 			URLSlug:   row.URLSlug,
 			ParentID:  row.ParentID,
+			PageType:  row.PageType,
 			Status:    row.Status,
 		}
 	}
@@ -487,8 +491,12 @@ func buildMenuTree(items []MenuItem, pageMap map[int]MenuPageReference) []MenuIt
 			OpenInNewTab:   item.OpenInNewTab,
 			SortOrder:      item.SortOrder,
 			Href:           href,
+			PageType:       "",
 			Page:           pageRef,
 			Children:       make([]MenuItemResponse, 0),
+		}
+		if pageRef != nil {
+			node.PageType = pageRef.PageType
 		}
 		buckets[parentBucketKey(item.ParentID)] = append(buckets[parentBucketKey(item.ParentID)], node)
 	}

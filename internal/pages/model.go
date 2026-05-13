@@ -5,6 +5,8 @@ import "time"
 const (
 	PageStatusDraft     = "draft"
 	PageStatusPublished = "published"
+	PageTypePage        = "page"
+	PageTypeModule      = "module"
 )
 
 type Page struct {
@@ -12,6 +14,7 @@ type Page struct {
 	PageTitle          string    `gorm:"size:255;not null;column:page_title" json:"page_title"`
 	URLSlug            string    `gorm:"size:255;not null;uniqueIndex;column:url_slug" json:"url_slug"`
 	ParentID           *int      `gorm:"column:parent_id" json:"parent_id,omitempty"`
+	PageType           string    `gorm:"size:20;not null;default:page;column:page_type" json:"page_type"`
 	Status             string    `gorm:"size:20;not null;default:draft" json:"status"`
 	HeroImageEnabled   bool      `gorm:"not null;default:false;column:hero_image_enabled" json:"hero_image_enabled"`
 	HeroImageURL       string    `gorm:"column:hero_image_url" json:"hero_image_url"`
@@ -55,6 +58,7 @@ type PageMutationResponse struct {
 	PageTitle string `json:"page_title"`
 	URLSlug   string `json:"url_slug"`
 	ParentID  *int   `json:"parent_id"`
+	PageType  string `json:"page_type"`
 	Status    string `json:"status"`
 }
 
@@ -73,6 +77,7 @@ type PageListItem struct {
 	PageTitle         string    `json:"page_title"`
 	URLSlug           string    `json:"url_slug"`
 	ParentID          *int      `json:"parent_id,omitempty"`
+	PageType          string    `json:"page_type"`
 	ParentPageTitle   string    `json:"parent_page_title"`
 	ParentPageURLSlug string    `json:"parent_page_url_slug"`
 	Status            string    `json:"status"`
@@ -103,6 +108,7 @@ type PageDetailResponse struct {
 	PageTitle          string    `json:"page_title"`
 	URLSlug            string    `json:"url_slug"`
 	ParentID           *int      `json:"parent_id,omitempty"`
+	PageType           string    `json:"page_type"`
 	ParentPageTitle    string    `json:"parent_page_title"`
 	ParentPageURLSlug  string    `json:"parent_page_url_slug"`
 	Status             string    `json:"status"`
