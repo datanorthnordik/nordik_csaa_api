@@ -1,6 +1,7 @@
 package pages
 
 import (
+	"encoding/json"
 	"errors"
 	"regexp"
 	"testing"
@@ -210,6 +211,51 @@ func TestGetPageHeroImageContent(t *testing.T) {
 	}
 	if resp.FileName != "hero_20260501100000_banner.png" {
 		t.Fatalf("unexpected file name: %q", resp.FileName)
+	}
+}
+
+func TestJSONRawMessageUnmarshalsObjectPayloads(t *testing.T) {
+	var req SavePageRequest
+	payload := []byte(`{
+		"page_title":"News & Media",
+		"url_slug":"/news-media",
+		"status":"published",
+		"hero_image_enabled":false,
+		"remove_hero_image":true,
+		"page_detail":{
+			"template_key":"default",
+			"settings":{},
+			"sections":[
+				{
+					"section_name":"Header Module",
+					"section_type":"header",
+					"sort_order":0,
+					"is_enabled":true,
+					"settings":{},
+					"header":{
+						"main_header_text":"News & Media",
+						"sub_header_text":"",
+						"hierarchy":"h1_hero"
+					}
+				}
+			]
+		}
+	}`)
+
+	if err := json.Unmarshal(payload, &req); err != nil {
+		t.Fatalf("json.Unmarshal returned error: %v", err)
+	}
+	if req.PageDetail == nil {
+		t.Fatal("expected page_detail to be present")
+	}
+	if string(req.PageDetail.Settings) != "{}" {
+		t.Fatalf("expected page_detail.settings to be preserved as raw JSON object, got %q", string(req.PageDetail.Settings))
+	}
+	if len(req.PageDetail.Sections) != 1 {
+		t.Fatalf("expected one section, got %#v", req.PageDetail.Sections)
+	}
+	if string(req.PageDetail.Sections[0].Settings) != "{}" {
+		t.Fatalf("expected section settings to be preserved as raw JSON object, got %q", string(req.PageDetail.Sections[0].Settings))
 	}
 }
 
