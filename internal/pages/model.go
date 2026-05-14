@@ -40,17 +40,18 @@ type PageUploadInput struct {
 }
 
 type SavePageRequest struct {
-	PageTitle          string           `json:"page_title"`
-	URLSlug            string           `json:"url_slug"`
-	ParentID           *int             `json:"parent_id"`
-	Status             string           `json:"status"`
-	HeroImageEnabled   bool             `json:"hero_image_enabled"`
-	HeroImage          *PageUploadInput `json:"hero_image"`
-	RemoveHeroImage    bool             `json:"remove_hero_image"`
-	SEOPageTitle       string           `json:"seo_page_title"`
-	SEOPageDescription string           `json:"seo_page_description"`
-	CreatedBy          *int             `json:"created_by"`
-	ModifiedBy         *int             `json:"modified_by"`
+	PageTitle          string                 `json:"page_title"`
+	URLSlug            string                 `json:"url_slug"`
+	ParentID           *int                   `json:"parent_id"`
+	Status             string                 `json:"status"`
+	HeroImageEnabled   bool                   `json:"hero_image_enabled"`
+	HeroImage          *PageUploadInput       `json:"hero_image"`
+	RemoveHeroImage    bool                   `json:"remove_hero_image"`
+	SEOPageTitle       string                 `json:"seo_page_title"`
+	SEOPageDescription string                 `json:"seo_page_description"`
+	PageDetail         *SavePageDetailRequest `json:"page_detail"`
+	CreatedBy          *int                   `json:"created_by"`
+	ModifiedBy         *int                   `json:"modified_by"`
 }
 
 type PageMutationResponse struct {
@@ -104,27 +105,28 @@ type PageListResponse struct {
 }
 
 type PageDetailResponse struct {
-	ID                 int       `json:"id"`
-	PageTitle          string    `json:"page_title"`
-	URLSlug            string    `json:"url_slug"`
-	ParentID           *int      `json:"parent_id,omitempty"`
-	PageType           string    `json:"page_type"`
-	ParentPageTitle    string    `json:"parent_page_title"`
-	ParentPageURLSlug  string    `json:"parent_page_url_slug"`
-	Status             string    `json:"status"`
-	HeroImageEnabled   bool      `json:"hero_image_enabled"`
-	HeroImageURL       string    `json:"hero_image_url"`
-	HeroImageObjectKey string    `json:"hero_image_object_key"`
-	HeroImageFetchURL  string    `json:"hero_image_fetch_url"`
-	SEOPageTitle       string    `json:"seo_page_title"`
-	SEOPageDescription string    `json:"seo_page_description"`
-	CreatedBy          *int      `json:"created_by,omitempty"`
-	CreatedByName      string    `json:"created_by_name"`
-	ModifiedBy         *int      `json:"modified_by,omitempty"`
-	ModifiedByName     string    `json:"modified_by_name"`
-	LastModified       time.Time `json:"last_modified"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	ID                 int                        `json:"id"`
+	PageTitle          string                     `json:"page_title"`
+	URLSlug            string                     `json:"url_slug"`
+	ParentID           *int                       `json:"parent_id,omitempty"`
+	PageType           string                     `json:"page_type"`
+	ParentPageTitle    string                     `json:"parent_page_title"`
+	ParentPageURLSlug  string                     `json:"parent_page_url_slug"`
+	Status             string                     `json:"status"`
+	HeroImageEnabled   bool                       `json:"hero_image_enabled"`
+	HeroImageURL       string                     `json:"hero_image_url"`
+	HeroImageObjectKey string                     `json:"hero_image_object_key"`
+	HeroImageFetchURL  string                     `json:"hero_image_fetch_url"`
+	SEOPageTitle       string                     `json:"seo_page_title"`
+	SEOPageDescription string                     `json:"seo_page_description"`
+	CreatedBy          *int                       `json:"created_by,omitempty"`
+	CreatedByName      string                     `json:"created_by_name"`
+	ModifiedBy         *int                       `json:"modified_by,omitempty"`
+	ModifiedByName     string                     `json:"modified_by_name"`
+	LastModified       time.Time                  `json:"last_modified"`
+	CreatedAt          time.Time                  `json:"created_at"`
+	UpdatedAt          time.Time                  `json:"updated_at"`
+	PageDetail         *PageContentDetailResponse `json:"page_detail,omitempty"`
 }
 
 type PageHeroImageContent struct {

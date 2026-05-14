@@ -169,6 +169,12 @@ func (s *PageService) GetPage(id int) (*PageDetailResponse, error) {
 		item.HeroImageFetchURL = buildPageHeroFetchURL(item.ID)
 	}
 
+	pageDetail, err := s.getPageContentDetail(item.ID)
+	if err != nil {
+		return nil, err
+	}
+	item.PageDetail = pageDetail
+
 	return &item, nil
 }
 
@@ -225,7 +231,8 @@ func (s *PageService) CreatePage(req SavePageRequest) (*PageMutationResponse, er
 	}
 	defer rollbackOnPanic(tx)
 
-	uploadedObjects := make([]string, 0, 1)
+	uploadedObjects := make([]string, 0, 4)
+	storedObjectsToCleanup := make([]pageStoredObject, 0, 4)
 
 	if err := s.validateParentPage(tx, 0, normalized); err != nil {
 		tx.Rollback()
@@ -264,8 +271,22 @@ func (s *PageService) CreatePage(req SavePageRequest) (*PageMutationResponse, er
 		}
 	}
 
+	detailUploadedObjects, detailCleanupObjects, err := s.savePageContentDetail(tx, page.ID, normalized.PageDetail, page.ModifiedBy)
+	if err != nil {
+		tx.Rollback()
+		s.cleanupObjects(uploadedObjects)
+		s.cleanupObjects(detailUploadedObjects)
+		return nil, err
+	}
+	uploadedObjects = append(uploadedObjects, detailUploadedObjects...)
+	storedObjectsToCleanup = append(storedObjectsToCleanup, detailCleanupObjects...)
+
 	if err := tx.Commit().Error; err != nil {
 		s.cleanupObjects(uploadedObjects)
+		return nil, err
+	}
+
+	if err := s.cleanupStoredObjects(storedObjectsToCleanup); err != nil {
 		return nil, err
 	}
 
@@ -295,7 +316,8 @@ func (s *PageService) UpdatePage(id int, req SavePageRequest) (*PageMutationResp
 	}
 	defer rollbackOnPanic(tx)
 
-	uploadedObjects := make([]string, 0, 1)
+	uploadedObjects := make([]string, 0, 4)
+	storedObjectsToCleanup := make([]pageStoredObject, 0, 4)
 
 	var page Page
 	if err := tx.First(&page, id).Error; err != nil {
@@ -343,6 +365,16 @@ func (s *PageService) UpdatePage(id int, req SavePageRequest) (*PageMutationResp
 		return nil, err
 	}
 
+	detailUploadedObjects, detailCleanupObjects, err := s.savePageContentDetail(tx, page.ID, normalized.PageDetail, normalized.ModifiedBy)
+	if err != nil {
+		tx.Rollback()
+		s.cleanupObjects(uploadedObjects)
+		s.cleanupObjects(detailUploadedObjects)
+		return nil, err
+	}
+	uploadedObjects = append(uploadedObjects, detailUploadedObjects...)
+	storedObjectsToCleanup = append(storedObjectsToCleanup, detailCleanupObjects...)
+
 	if err := tx.Commit().Error; err != nil {
 		s.cleanupObjects(uploadedObjects)
 		return nil, err
@@ -352,6 +384,9 @@ func (s *PageService) UpdatePage(id int, req SavePageRequest) (*PageMutationResp
 		if err := s.cleanupSingleHeroObject(oldHero); err != nil {
 			return nil, err
 		}
+	}
+	if err := s.cleanupStoredObjects(storedObjectsToCleanup); err != nil {
+		return nil, err
 	}
 
 	return &PageMutationResponse{
@@ -375,6 +410,8 @@ func (s *PageService) DeletePage(id int) error {
 	}
 	defer rollbackOnPanic(tx)
 
+	storedObjectsToCleanup := make([]pageStoredObject, 0, 4)
+
 	var page Page
 	if err := tx.First(&page, id).Error; err != nil {
 		tx.Rollback()
@@ -388,16 +425,37 @@ func (s *PageService) DeletePage(id int) error {
 		return ErrPageModuleManaged
 	}
 
+	candidateDocuments, err := s.loadPageDocumentReferencesForPage(tx, id)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+
 	if err := tx.Delete(&page).Error; err != nil {
 		tx.Rollback()
 		return err
+	}
+
+	for _, candidate := range candidateDocuments {
+		cleanupObject, err := s.deleteOrphanPageDocument(tx, candidate.ID)
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+		if cleanupObject != nil {
+			storedObjectsToCleanup = append(storedObjectsToCleanup, *cleanupObject)
+		}
 	}
 
 	if err := tx.Commit().Error; err != nil {
 		return err
 	}
 
-	return s.cleanupSingleHeroObject(page)
+	if err := s.cleanupSingleHeroObject(page); err != nil {
+		return err
+	}
+
+	return s.cleanupStoredObjects(storedObjectsToCleanup)
 }
 
 func normalizeSavePageRequest(req SavePageRequest) (SavePageRequest, error) {
@@ -410,6 +468,13 @@ func normalizeSavePageRequest(req SavePageRequest) (SavePageRequest, error) {
 	if req.HeroImage != nil {
 		cleaned := sanitizeUploadInput(*req.HeroImage)
 		req.HeroImage = &cleaned
+	}
+	if req.PageDetail != nil {
+		normalizedDetail, err := normalizeSavePageDetailRequest(req.PageDetail)
+		if err != nil {
+			return req, err
+		}
+		req.PageDetail = normalizedDetail
 	}
 
 	if req.Status == "" {

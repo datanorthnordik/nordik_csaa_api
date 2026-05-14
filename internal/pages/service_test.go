@@ -155,6 +155,9 @@ func TestGetPageSuccessAndNotFound(t *testing.T) {
 			"About CSAA", "Page description", 3, 7, time.Date(2026, 5, 10, 9, 0, 0, 0, time.UTC), time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 5, 10, 9, 0, 0, 0, time.UTC),
 			"Alex Rivera", "Jane Doe",
 		))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "page_details" WHERE page_id = $1 ORDER BY "page_details"."id" LIMIT $2`)).
+		WithArgs(12, 1).
+		WillReturnError(gorm.ErrRecordNotFound)
 
 	resp, err := service.GetPage(12)
 	if err != nil {
@@ -168,6 +171,9 @@ func TestGetPageSuccessAndNotFound(t *testing.T) {
 	}
 	if resp.PageType != PageTypeModule {
 		t.Fatalf("expected module page type, got %#v", resp)
+	}
+	if resp.PageDetail == nil || resp.PageDetail.PageID != 12 || len(resp.PageDetail.Sections) != 0 {
+		t.Fatalf("expected synthesized empty page detail, got %#v", resp.PageDetail)
 	}
 
 	mock.ExpectQuery(`SELECT .* FROM "pages" LEFT JOIN users AS created_users ON created_users.id = pages.created_by LEFT JOIN users AS modified_users ON modified_users.id = pages.modified_by LEFT JOIN pages AS parent_pages ON parent_pages.id = pages.parent_id WHERE pages.id = \$1 LIMIT \$2`).
@@ -283,6 +289,9 @@ func TestCreateUpdateAndDeletePageSuccess(t *testing.T) {
 			11, "Homepage", "/home", PageTypePage, PageStatusPublished, true, "gs://drive-bucket/pages/11/hero_20260501100000_new-banner.png", "pages/11/hero_20260501100000_new-banner.png",
 			"Homepage SEO", "Desc", 7, 7, nil, time.Date(2026, 5, 10, 0, 0, 0, 0, time.UTC), time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 5, 10, 0, 0, 0, 0, time.UTC),
 		))
+	mock.ExpectQuery(`SELECT DISTINCT documents\.id, documents\.file_url, COALESCE\(documents\.gcp_object_key, ''\) AS gcp_object_key FROM "page_details" JOIN page_sections ON page_sections\.page_detail_id = page_details\.id JOIN page_section_documents ON page_section_documents\.page_section_id = page_sections\.id JOIN documents ON documents\.id = page_section_documents\.document_id WHERE page_details\.page_id = \$1`).
+		WithArgs(11).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "file_url", "gcp_object_key"}))
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM "pages" WHERE "pages"."id" = $1`)).
 		WithArgs(11).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -405,6 +414,34 @@ func TestPageValidationAndHelpers(t *testing.T) {
 
 	if (Page{}).TableName() != "pages" {
 		t.Fatal("unexpected pages table name")
+	}
+}
+
+func TestGetPageDocumentContent(t *testing.T) {
+	db, mock, cleanup := setupMockDB(t)
+	defer cleanup()
+
+	service := &PageService{DB: db, BucketName: "drive-bucket"}
+	restore := stubPageMediaHooks()
+	defer restore()
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "documents" WHERE "documents"."id" = $1 ORDER BY "documents"."id" LIMIT $2`)).
+		WithArgs(17, 1).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "display_name", "description", "original_file_name", "gcp_object_key", "file_url", "mime_type", "file_size", "checksum_sha256", "created_by", "updated_by", "created_at", "updated_at",
+		}).AddRow(
+			17, "Board Agenda", "Meeting agenda", "agenda.pdf", "page-documents/agenda.pdf", "gs://drive-bucket/page-documents/agenda.pdf", "application/pdf", 1024, "", 7, 7, time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
+		))
+
+	resp, err := service.GetPageDocumentContent(17)
+	if err != nil {
+		t.Fatalf("GetPageDocumentContent returned error: %v", err)
+	}
+	if string(resp.Content) != "downloaded:drive-bucket/page-documents/agenda.pdf" {
+		t.Fatalf("unexpected content: %q", string(resp.Content))
+	}
+	if resp.FileName != "agenda.pdf" {
+		t.Fatalf("unexpected file name: %q", resp.FileName)
 	}
 }
 

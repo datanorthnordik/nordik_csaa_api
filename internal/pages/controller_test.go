@@ -23,17 +23,20 @@ type fakePageService struct {
 	listResp      *PageListResponse
 	detailResp    *PageDetailResponse
 	heroResp      *PageHeroImageContent
+	documentResp  *PageDocumentContent
 	createResp    *PageMutationResponse
 	updateResp    *PageMutationResponse
 	listErr       error
 	detailErr     error
 	heroErr       error
+	documentErr   error
 	createErr     error
 	updateErr     error
 	deleteErr     error
 	gotListFilter PageListFilters
 	gotGetID      int
 	gotHeroID     int
+	gotDocumentID int
 	gotCreateReq  SavePageRequest
 	gotUpdateID   int
 	gotUpdateReq  SavePageRequest
@@ -71,6 +74,17 @@ func (s *fakePageService) GetPageHeroImageContent(id int) (*PageHeroImageContent
 		return &PageHeroImageContent{Content: []byte("ok"), ContentType: "image/png", FileName: "hero.png"}, nil
 	}
 	return s.heroResp, nil
+}
+
+func (s *fakePageService) GetPageDocumentContent(id int) (*PageDocumentContent, error) {
+	s.gotDocumentID = id
+	if s.documentErr != nil {
+		return nil, s.documentErr
+	}
+	if s.documentResp == nil {
+		return &PageDocumentContent{Content: []byte("document"), ContentType: "application/pdf", FileName: "document.pdf"}, nil
+	}
+	return s.documentResp, nil
 }
 
 func (s *fakePageService) CreatePage(req SavePageRequest) (*PageMutationResponse, error) {
@@ -174,6 +188,11 @@ func TestGetPageAndHeroEndpoints(t *testing.T) {
 			ContentType: "image/png",
 			FileName:    "hero.png",
 		},
+		documentResp: &PageDocumentContent{
+			Content:     []byte("document"),
+			ContentType: "application/pdf",
+			FileName:    "document.pdf",
+		},
 	}
 	router := setupPageRouter(service)
 
@@ -198,6 +217,19 @@ func TestGetPageAndHeroEndpoints(t *testing.T) {
 	}
 	if got := res.Header().Get("Content-Disposition"); !strings.Contains(got, "hero.png") {
 		t.Fatalf("expected content disposition filename, got %q", got)
+	}
+
+	res = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/pages/documents/23/content", nil)
+	router.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", res.Code, res.Body.String())
+	}
+	if service.gotDocumentID != 23 {
+		t.Fatalf("expected document id 23, got %d", service.gotDocumentID)
+	}
+	if res.Body.String() != "document" {
+		t.Fatalf("unexpected document body: %q", res.Body.String())
 	}
 }
 
@@ -314,6 +346,15 @@ func TestPageEndpointErrorsAndProtection(t *testing.T) {
 	payload := assertPageAPIError(t, res, http.StatusBadRequest, "validation_error", "Invalid path parameter")
 	if len(payload.Error.Details) != 1 || payload.Error.Details[0].Field != "id" {
 		t.Fatalf("expected id validation detail, got %#v", payload)
+	}
+
+	router = setupPageRouter(&fakePageService{})
+	res = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/pages/documents/bad/content", nil)
+	router.ServeHTTP(res, req)
+	payload = assertPageAPIError(t, res, http.StatusBadRequest, "validation_error", "Invalid path parameter")
+	if len(payload.Error.Details) != 1 || payload.Error.Details[0].Field != "documentId" {
+		t.Fatalf("expected documentId validation detail, got %#v", payload)
 	}
 
 	protected := setupProtectedPageRouter(&fakePageService{})
