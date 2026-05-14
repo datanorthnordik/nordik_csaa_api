@@ -4,6 +4,7 @@ type PageServicePort interface {
 	ListPages(filter PageListFilters) (*PageListResponse, error)
 	GetPage(id int) (*PageDetailResponse, error)
 	GetPageHeroImageContent(id int) (*PageHeroImageContent, error)
+	GetPageDocumentContent(id int) (*PageDocumentContent, error)
 	CreatePage(req SavePageRequest) (*PageMutationResponse, error)
 	UpdatePage(id int, req SavePageRequest) (*PageMutationResponse, error)
 	DeletePage(id int) error

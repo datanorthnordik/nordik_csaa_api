@@ -2,6 +2,7 @@ package pages
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"nordikcsaaapi/internal/apiresponse"
@@ -36,6 +37,23 @@ func bindSavePageRequest(c *gin.Context) (SavePageRequest, bool) {
 			return req, false
 		}
 		applyPageUploadedFile(&req.HeroImage, file)
+
+		if req.PageDetail != nil {
+			for sectionIdx := range req.PageDetail.Sections {
+				section := &req.PageDetail.Sections[sectionIdx]
+				if section.Documents == nil {
+					continue
+				}
+				for documentIdx := range section.Documents.Items {
+					file, err := httpapi.ReadMultipartFile(c, pageDocumentFileField(sectionIdx, documentIdx))
+					if err != nil {
+						apiresponse.WriteValidationError(c, "invalid multipart form data")
+						return req, false
+					}
+					applyPageDocumentUploadedFile(&section.Documents.Items[documentIdx], file)
+				}
+			}
+		}
 		return req, true
 	}
 
@@ -52,7 +70,23 @@ func bindSavePageRequest(c *gin.Context) (SavePageRequest, bool) {
 }
 
 func pageRequestUsesEmbeddedBase64(req SavePageRequest) bool {
-	return req.HeroImage != nil && strings.TrimSpace(req.HeroImage.DataBase64) != ""
+	if req.HeroImage != nil && strings.TrimSpace(req.HeroImage.DataBase64) != "" {
+		return true
+	}
+	if req.PageDetail == nil {
+		return false
+	}
+	for _, section := range req.PageDetail.Sections {
+		if section.Documents == nil {
+			continue
+		}
+		for _, item := range section.Documents.Items {
+			if strings.TrimSpace(item.DataBase64) != "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func applyPageUploadedFile(dst **PageUploadInput, file *httpapi.UploadedFile) {
@@ -71,4 +105,26 @@ func applyPageUploadedFile(dst **PageUploadInput, file *httpapi.UploadedFile) {
 	}
 	(*dst).DataBase64 = ""
 	(*dst).Content = append([]byte(nil), file.Data...)
+}
+
+func applyPageDocumentUploadedFile(dst *PageDocumentInput, file *httpapi.UploadedFile) {
+	if file == nil {
+		return
+	}
+
+	if strings.TrimSpace(dst.FileName) == "" {
+		dst.FileName = file.Filename
+	}
+	if strings.TrimSpace(dst.OriginalFileName) == "" {
+		dst.OriginalFileName = file.Filename
+	}
+	if strings.TrimSpace(dst.MimeType) == "" {
+		dst.MimeType = file.ContentType
+	}
+	dst.DataBase64 = ""
+	dst.Content = append([]byte(nil), file.Data...)
+}
+
+func pageDocumentFileField(sectionIdx int, documentIdx int) string {
+	return fmt.Sprintf("page_detail.sections[%d].documents.items[%d].file", sectionIdx, documentIdx)
 }

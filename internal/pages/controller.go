@@ -76,6 +76,29 @@ func (pc *PageController) GetPageHeroImageContent(c *gin.Context) {
 	c.Data(http.StatusOK, contentType, resp.Content)
 }
 
+func (pc *PageController) GetPageDocumentContent(c *gin.Context) {
+	id, ok := pathInt(c, "documentId")
+	if !ok {
+		return
+	}
+
+	resp, err := pc.PageService.GetPageDocumentContent(id)
+	if err != nil {
+		writePageError(c, err)
+		return
+	}
+
+	contentType := strings.TrimSpace(resp.ContentType)
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	if fileName := sanitizeContentDispositionFilename(resp.FileName); fileName != "" {
+		c.Header("Content-Disposition", "inline; filename="+strconv.Quote(fileName))
+	}
+
+	c.Data(http.StatusOK, contentType, resp.Content)
+}
+
 func (pc *PageController) CreatePage(c *gin.Context) {
 	req, ok := bindSavePageRequest(c)
 	if !ok {
@@ -143,7 +166,7 @@ func (pc *PageController) DeletePage(c *gin.Context) {
 func writePageError(c *gin.Context, err error) {
 	httpapi.HandleError(c, "pages", err,
 		httpapi.ServiceUnavailableRule("Page service is temporarily unavailable", ErrStoreUnavailable, ErrMediaBucketNotConfigured),
-		httpapi.NotFoundRule(ErrPageNotFound, ErrPageHeroImageNotFound),
+		httpapi.NotFoundRule(ErrPageNotFound, ErrPageHeroImageNotFound, ErrPageDocumentNotFound),
 		httpapi.ConflictRule("Unable to save page because a conflicting record already exists"),
 		httpapi.ValidationRule(isClientSafePageError),
 	)
@@ -162,8 +185,10 @@ func isClientSafePageError(err error) bool {
 		strings.Contains(message, "module page"),
 		strings.Contains(message, "managed elsewhere"),
 		strings.Contains(message, "missing both uploaded file and file_url"),
+		strings.Contains(message, "must be a supported document file"),
 		strings.Contains(message, "parent_id"),
-		strings.Contains(message, "parent page slug"):
+		strings.Contains(message, "parent page slug"),
+		strings.Contains(message, "page_detail.sections"):
 		return true
 	default:
 		return false
