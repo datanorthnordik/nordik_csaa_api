@@ -30,6 +30,26 @@ const (
 
 type JSONRawMessage json.RawMessage
 
+func (r JSONRawMessage) MarshalJSON() ([]byte, error) {
+	if len(r) == 0 {
+		return []byte("null"), nil
+	}
+	return []byte(r), nil
+}
+
+func (r *JSONRawMessage) UnmarshalJSON(data []byte) error {
+	if r == nil {
+		return fmt.Errorf("json raw message target cannot be nil")
+	}
+	if data == nil {
+		*r = nil
+		return nil
+	}
+
+	*r = append((*r)[:0], data...)
+	return nil
+}
+
 func (r JSONRawMessage) Value() (driver.Value, error) {
 	if len(r) == 0 {
 		return nil, nil
