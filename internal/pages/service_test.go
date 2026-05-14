@@ -259,6 +259,68 @@ func TestJSONRawMessageUnmarshalsObjectPayloads(t *testing.T) {
 	}
 }
 
+func TestApplyPageDocumentStoredFileFieldsPreservesChecksumForUnchangedReference(t *testing.T) {
+	oldChecksum := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	row := PageDocument{}
+	oldRow := PageDocument{
+		FileURL:        "gs://bucket/page-documents/test.pdf",
+		GCPObjectKey:   "page-documents/test.pdf",
+		FileSize:       4096,
+		ChecksumSHA256: &oldChecksum,
+	}
+
+	applyPageDocumentStoredFileFields(
+		&row,
+		oldRow,
+		"gs://bucket/page-documents/test.pdf",
+		"page-documents/test.pdf",
+		0,
+		"",
+		true,
+	)
+
+	if row.FileURL != oldRow.FileURL || row.GCPObjectKey != oldRow.GCPObjectKey {
+		t.Fatalf("expected stored object reference to remain unchanged, got %#v", row)
+	}
+	if row.FileSize != oldRow.FileSize {
+		t.Fatalf("expected existing file size to be preserved, got %d", row.FileSize)
+	}
+	if row.ChecksumSHA256 == nil || *row.ChecksumSHA256 != oldChecksum {
+		t.Fatalf("expected existing checksum to be preserved, got %#v", row.ChecksumSHA256)
+	}
+}
+
+func TestApplyPageDocumentStoredFileFieldsClearsChecksumForChangedReferenceOnlyUpdate(t *testing.T) {
+	oldChecksum := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	row := PageDocument{}
+	oldRow := PageDocument{
+		FileURL:        "gs://bucket/page-documents/original.pdf",
+		GCPObjectKey:   "page-documents/original.pdf",
+		FileSize:       4096,
+		ChecksumSHA256: &oldChecksum,
+	}
+
+	applyPageDocumentStoredFileFields(
+		&row,
+		oldRow,
+		"gs://bucket/page-documents/relinked.pdf",
+		"page-documents/relinked.pdf",
+		0,
+		"",
+		true,
+	)
+
+	if row.FileURL != "gs://bucket/page-documents/relinked.pdf" || row.GCPObjectKey != "page-documents/relinked.pdf" {
+		t.Fatalf("expected updated stored object reference, got %#v", row)
+	}
+	if row.FileSize != 0 {
+		t.Fatalf("expected changed reference without upload to reset file size, got %d", row.FileSize)
+	}
+	if row.ChecksumSHA256 != nil {
+		t.Fatalf("expected checksum to be cleared for changed reference-only update, got %#v", row.ChecksumSHA256)
+	}
+}
+
 func TestCreateUpdateAndDeletePageSuccess(t *testing.T) {
 	db, mock, cleanup := setupMockDB(t)
 	defer cleanup()

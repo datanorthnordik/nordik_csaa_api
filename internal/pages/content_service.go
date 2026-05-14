@@ -751,6 +751,7 @@ func (s *PageService) loadPageDocumentReferencesForPage(tx *gorm.DB, pageID int)
 func (s *PageService) upsertPageDocument(tx *gorm.DB, input PageDocumentInput, userID *int) (PageDocument, string, *pageStoredObject, error) {
 	var uploadedObject string
 	var cleanupObject *pageStoredObject
+	referenceOnly := len(input.Content) == 0 && strings.TrimSpace(input.DataBase64) == ""
 
 	if input.ID == nil {
 		fileURL, objectKey, fileSize, checksum, uploaded, err := s.storePageDocumentInput(input)
@@ -766,7 +767,7 @@ func (s *PageService) upsertPageDocument(tx *gorm.DB, input PageDocumentInput, u
 			FileURL:          fileURL,
 			MimeType:         input.MimeType,
 			FileSize:         fileSize,
-			ChecksumSHA256:   checksum,
+			ChecksumSHA256:   checksumPointer(checksum),
 			CreatedBy:        userID,
 			UpdatedBy:        userID,
 		}
@@ -794,10 +795,7 @@ func (s *PageService) upsertPageDocument(tx *gorm.DB, input PageDocumentInput, u
 		if err != nil {
 			return PageDocument{}, "", nil, err
 		}
-		row.FileURL = fileURL
-		row.GCPObjectKey = objectKey
-		row.FileSize = fileSize
-		row.ChecksumSHA256 = checksum
+		applyPageDocumentStoredFileFields(&row, oldRow, fileURL, objectKey, fileSize, checksum, referenceOnly)
 		uploadedObject = uploaded
 	}
 
@@ -821,6 +819,38 @@ func (s *PageService) upsertPageDocument(tx *gorm.DB, input PageDocumentInput, u
 	}
 
 	return row, uploadedObject, cleanupObject, nil
+}
+
+func applyPageDocumentStoredFileFields(row *PageDocument, oldRow PageDocument, fileURL string, objectKey string, fileSize int64, checksum string, referenceOnly bool) {
+	if row == nil {
+		return
+	}
+
+	row.FileURL = fileURL
+	row.GCPObjectKey = objectKey
+
+	if !referenceOnly {
+		row.FileSize = fileSize
+		row.ChecksumSHA256 = checksumPointer(checksum)
+		return
+	}
+
+	if shouldCleanupStoredObject(oldRow.GCPObjectKey, oldRow.FileURL, objectKey, fileURL) {
+		row.FileSize = fileSize
+		row.ChecksumSHA256 = checksumPointer(checksum)
+		return
+	}
+
+	row.FileSize = oldRow.FileSize
+	row.ChecksumSHA256 = oldRow.ChecksumSHA256
+}
+
+func checksumPointer(value string) *string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
 }
 
 func (s *PageService) storePageDocumentInput(input PageDocumentInput) (string, string, int64, string, string, error) {
