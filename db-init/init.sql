@@ -698,3 +698,629 @@ VALUES ('main', 'Main Website Navigation')
 ON CONFLICT (menu_key) DO UPDATE
 SET name = EXCLUDED.name,
     updated_at = CURRENT_TIMESTAMP;
+
+-- Page content builder schema.
+-- Note: the 1:1 relation is stored as page_details.page_id instead of pages.page_detail_id
+-- to avoid circular foreign keys and orphaned detail rows.
+
+CREATE TABLE IF NOT EXISTS page_details (
+    id SERIAL PRIMARY KEY,
+    page_id INT NOT NULL UNIQUE,
+    template_key VARCHAR(100) NOT NULL DEFAULT 'default',
+    settings JSONB NOT NULL DEFAULT '{}'::jsonb,
+    schema_version INT NOT NULL DEFAULT 1,
+    created_by INT NULL,
+    updated_by INT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_page_details_page
+        FOREIGN KEY (page_id) REFERENCES pages(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_page_details_created_by
+        FOREIGN KEY (created_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT fk_page_details_updated_by
+        FOREIGN KEY (updated_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT chk_page_details_template_key_not_blank
+        CHECK (btrim(template_key) <> ''),
+
+    CONSTRAINT chk_page_details_settings_is_object
+        CHECK (jsonb_typeof(settings) = 'object'),
+
+    CONSTRAINT chk_page_details_schema_version_positive
+        CHECK (schema_version > 0)
+);
+
+CREATE TABLE IF NOT EXISTS page_sections (
+    id SERIAL PRIMARY KEY,
+    page_detail_id INT NOT NULL,
+    section_name VARCHAR(150) NOT NULL,
+    section_type VARCHAR(50) NOT NULL,
+    sort_order INT NOT NULL DEFAULT -1,
+    is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    settings JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_page_sections_page_detail
+        FOREIGN KEY (page_detail_id) REFERENCES page_details(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT chk_page_sections_name_not_blank
+        CHECK (btrim(section_name) <> ''),
+
+    CONSTRAINT chk_page_sections_type
+        CHECK (section_type IN (
+            'typography',
+            'gallery',
+            'document',
+            'quote',
+            'cta_banner',
+            'header'
+        )),
+
+    CONSTRAINT chk_page_sections_sort_order
+        CHECK (sort_order >= 0),
+
+    CONSTRAINT chk_page_sections_settings_is_object
+        CHECK (jsonb_typeof(settings) = 'object')
+);
+
+CREATE TABLE IF NOT EXISTS documents (
+    id SERIAL PRIMARY KEY,
+    display_name VARCHAR(255) NOT NULL,
+    description TEXT,
+    original_file_name VARCHAR(255),
+    gcp_object_key TEXT,
+    file_url TEXT NOT NULL,
+    mime_type VARCHAR(255),
+    file_size BIGINT,
+    checksum_sha256 CHAR(64),
+    created_by INT NULL,
+    updated_by INT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_documents_created_by
+        FOREIGN KEY (created_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT fk_documents_updated_by
+        FOREIGN KEY (updated_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT chk_documents_display_name_not_blank
+        CHECK (btrim(display_name) <> ''),
+
+    CONSTRAINT chk_documents_file_url_not_blank
+        CHECK (btrim(file_url) <> ''),
+
+    CONSTRAINT chk_documents_file_size
+        CHECK (file_size IS NULL OR file_size >= 0),
+
+    CONSTRAINT chk_documents_checksum_sha256
+        CHECK (
+            checksum_sha256 IS NULL
+            OR checksum_sha256 ~ '^[A-Fa-f0-9]{64}$'
+        )
+);
+
+CREATE TABLE IF NOT EXISTS page_section_header_modules (
+    page_section_id INT PRIMARY KEY,
+    main_header_text VARCHAR(255) NOT NULL,
+    sub_header_text VARCHAR(255),
+    hierarchy VARCHAR(20) NOT NULL DEFAULT 'h1_hero',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_page_section_header_modules_section
+        FOREIGN KEY (page_section_id) REFERENCES page_sections(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT chk_page_section_header_modules_main_header_text_not_blank
+        CHECK (btrim(main_header_text) <> ''),
+
+    CONSTRAINT chk_page_section_header_modules_hierarchy
+        CHECK (hierarchy IN ('h1_hero', 'h2_section'))
+);
+
+CREATE TABLE IF NOT EXISTS page_section_typography_modules (
+    page_section_id INT PRIMARY KEY,
+    body_html TEXT NOT NULL,
+    body_text TEXT,
+    text_align VARCHAR(20) NOT NULL DEFAULT 'left',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_page_section_typography_modules_section
+        FOREIGN KEY (page_section_id) REFERENCES page_sections(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT chk_page_section_typography_modules_body_html_not_blank
+        CHECK (btrim(body_html) <> ''),
+
+    CONSTRAINT chk_page_section_typography_modules_text_align
+        CHECK (text_align IN ('left', 'center', 'right'))
+);
+
+CREATE TABLE IF NOT EXISTS page_section_gallery_modules (
+    page_section_id INT PRIMARY KEY,
+    gallery_id INT NOT NULL,
+    view_mode VARCHAR(20) NOT NULL DEFAULT 'grid',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_page_section_gallery_modules_section
+        FOREIGN KEY (page_section_id) REFERENCES page_sections(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_page_section_gallery_modules_gallery
+        FOREIGN KEY (gallery_id) REFERENCES galleries(id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+
+    CONSTRAINT chk_page_section_gallery_modules_view_mode
+        CHECK (view_mode IN ('grid', 'carousel', 'masonry', 'focus'))
+);
+
+CREATE TABLE IF NOT EXISTS page_section_quote_modules (
+    page_section_id INT PRIMARY KEY,
+    quote_content TEXT NOT NULL,
+    attribution VARCHAR(255),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_page_section_quote_modules_section
+        FOREIGN KEY (page_section_id) REFERENCES page_sections(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT chk_page_section_quote_modules_quote_content_not_blank
+        CHECK (btrim(quote_content) <> '')
+);
+
+CREATE TABLE IF NOT EXISTS page_section_cta_banner_modules (
+    page_section_id INT PRIMARY KEY,
+    banner_heading VARCHAR(255) NOT NULL,
+    banner_message VARCHAR(255),
+    button_text VARCHAR(100),
+    button_url TEXT,
+    open_in_new_tab BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_page_section_cta_banner_modules_section
+        FOREIGN KEY (page_section_id) REFERENCES page_sections(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT chk_page_section_cta_banner_modules_banner_heading_not_blank
+        CHECK (btrim(banner_heading) <> ''),
+
+    CONSTRAINT chk_page_section_cta_banner_modules_button_pair
+        CHECK (
+            (btrim(COALESCE(button_text, '')) = '' AND btrim(COALESCE(button_url, '')) = '')
+            OR
+            (btrim(COALESCE(button_text, '')) <> '' AND btrim(COALESCE(button_url, '')) <> '')
+        )
+);
+
+CREATE TABLE IF NOT EXISTS page_section_documents (
+    id SERIAL PRIMARY KEY,
+    page_section_id INT NOT NULL,
+    document_id INT NOT NULL,
+    display_name_override VARCHAR(255),
+    sort_order INT NOT NULL DEFAULT -1,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_page_section_documents_section
+        FOREIGN KEY (page_section_id) REFERENCES page_sections(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_page_section_documents_document
+        FOREIGN KEY (document_id) REFERENCES documents(id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+
+    CONSTRAINT chk_page_section_documents_sort_order
+        CHECK (sort_order >= 0)
+);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'uq_page_sections_page_detail_sort'
+    ) THEN
+        ALTER TABLE page_sections
+            ADD CONSTRAINT uq_page_sections_page_detail_sort
+            UNIQUE (page_detail_id, sort_order)
+            DEFERRABLE INITIALLY IMMEDIATE;
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'uq_page_section_documents_section_sort'
+    ) THEN
+        ALTER TABLE page_section_documents
+            ADD CONSTRAINT uq_page_section_documents_section_sort
+            UNIQUE (page_section_id, sort_order)
+            DEFERRABLE INITIALLY IMMEDIATE;
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'uq_page_section_documents_section_document'
+    ) THEN
+        ALTER TABLE page_section_documents
+            ADD CONSTRAINT uq_page_section_documents_section_document
+            UNIQUE (page_section_id, document_id);
+    END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_page_details_page_id ON page_details(page_id);
+CREATE INDEX IF NOT EXISTS idx_page_details_created_by ON page_details(created_by);
+CREATE INDEX IF NOT EXISTS idx_page_details_updated_by ON page_details(updated_by);
+
+CREATE INDEX IF NOT EXISTS idx_page_sections_page_detail_id ON page_sections(page_detail_id);
+CREATE INDEX IF NOT EXISTS idx_page_sections_type ON page_sections(section_type);
+CREATE INDEX IF NOT EXISTS idx_page_sections_page_detail_sort ON page_sections(page_detail_id, sort_order, id);
+
+CREATE INDEX IF NOT EXISTS idx_documents_display_name ON documents(display_name);
+CREATE INDEX IF NOT EXISTS idx_documents_created_by ON documents(created_by);
+CREATE INDEX IF NOT EXISTS idx_documents_updated_by ON documents(updated_by);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_documents_gcp_object_key
+    ON documents(gcp_object_key)
+    WHERE gcp_object_key IS NOT NULL AND btrim(gcp_object_key) <> '';
+
+CREATE INDEX IF NOT EXISTS idx_page_section_gallery_modules_gallery_id
+    ON page_section_gallery_modules(gallery_id);
+
+CREATE INDEX IF NOT EXISTS idx_page_section_documents_section_id
+    ON page_section_documents(page_section_id);
+CREATE INDEX IF NOT EXISTS idx_page_section_documents_document_id
+    ON page_section_documents(document_id);
+CREATE INDEX IF NOT EXISTS idx_page_section_documents_section_sort
+    ON page_section_documents(page_section_id, sort_order, id);
+
+CREATE OR REPLACE FUNCTION assign_page_section_sort_order()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.sort_order >= 0 THEN
+        RETURN NEW;
+    END IF;
+
+    PERFORM 1
+    FROM page_details
+    WHERE id = NEW.page_detail_id
+    FOR UPDATE;
+
+    SELECT COALESCE(MAX(sort_order), -1) + 1
+    INTO NEW.sort_order
+    FROM page_sections
+    WHERE page_detail_id = NEW.page_detail_id
+      AND id <> COALESCE(NEW.id, 0);
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION assign_page_section_document_sort_order()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.sort_order >= 0 THEN
+        RETURN NEW;
+    END IF;
+
+    PERFORM 1
+    FROM page_sections
+    WHERE id = NEW.page_section_id
+    FOR UPDATE;
+
+    SELECT COALESCE(MAX(sort_order), -1) + 1
+    INTO NEW.sort_order
+    FROM page_section_documents
+    WHERE page_section_id = NEW.page_section_id
+      AND id <> COALESCE(NEW.id, 0);
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION validate_page_section_type()
+RETURNS TRIGGER AS $$
+DECLARE
+    expected_type TEXT := TG_ARGV[0];
+    actual_type TEXT;
+BEGIN
+    SELECT section_type
+    INTO actual_type
+    FROM page_sections
+    WHERE id = NEW.page_section_id;
+
+    IF actual_type IS NULL THEN
+        RAISE EXCEPTION 'page_section_id % does not exist', NEW.page_section_id;
+    END IF;
+
+    IF actual_type <> expected_type THEN
+        RAISE EXCEPTION 'page_section_id % must reference a % section, found %',
+            NEW.page_section_id,
+            expected_type,
+            actual_type;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION sync_page_from_page_details()
+RETURNS TRIGGER AS $$
+DECLARE
+    target_page_id INT;
+    target_modified_by INT;
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        target_page_id := OLD.page_id;
+        target_modified_by := COALESCE(OLD.updated_by, OLD.created_by);
+    ELSIF TG_OP = 'INSERT' THEN
+        target_page_id := NEW.page_id;
+        target_modified_by := COALESCE(NEW.updated_by, NEW.created_by);
+    ELSE
+        target_page_id := COALESCE(NEW.page_id, OLD.page_id);
+        target_modified_by := COALESCE(NEW.updated_by, NEW.created_by, OLD.updated_by, OLD.created_by);
+    END IF;
+
+    IF target_page_id IS NOT NULL THEN
+        UPDATE pages
+        SET updated_at = CURRENT_TIMESTAMP,
+            last_modified = CURRENT_TIMESTAMP,
+            modified_by = COALESCE(target_modified_by, modified_by)
+        WHERE id = target_page_id;
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION touch_page_detail_from_section()
+RETURNS TRIGGER AS $$
+DECLARE
+    target_page_detail_id INT;
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        target_page_detail_id := OLD.page_detail_id;
+    ELSIF TG_OP = 'INSERT' THEN
+        target_page_detail_id := NEW.page_detail_id;
+    ELSE
+        target_page_detail_id := COALESCE(NEW.page_detail_id, OLD.page_detail_id);
+    END IF;
+
+    IF target_page_detail_id IS NOT NULL THEN
+        UPDATE page_details
+        SET updated_at = CURRENT_TIMESTAMP
+        WHERE id = target_page_detail_id;
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION touch_page_detail_from_section_child()
+RETURNS TRIGGER AS $$
+DECLARE
+    target_page_section_id INT;
+    target_page_detail_id INT;
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        target_page_section_id := OLD.page_section_id;
+    ELSIF TG_OP = 'INSERT' THEN
+        target_page_section_id := NEW.page_section_id;
+    ELSE
+        target_page_section_id := COALESCE(NEW.page_section_id, OLD.page_section_id);
+    END IF;
+
+    IF target_page_section_id IS NULL THEN
+        IF TG_OP = 'DELETE' THEN
+            RETURN OLD;
+        END IF;
+        RETURN NEW;
+    END IF;
+
+    SELECT page_detail_id
+    INTO target_page_detail_id
+    FROM page_sections
+    WHERE id = target_page_section_id;
+
+    IF target_page_detail_id IS NOT NULL THEN
+        UPDATE page_details
+        SET updated_at = CURRENT_TIMESTAMP
+        WHERE id = target_page_detail_id;
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_page_details_set_updated_at ON page_details;
+CREATE TRIGGER trg_page_details_set_updated_at
+BEFORE UPDATE ON page_details
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_page_sections_assign_sort_order ON page_sections;
+CREATE TRIGGER trg_page_sections_assign_sort_order
+BEFORE INSERT OR UPDATE ON page_sections
+FOR EACH ROW
+EXECUTE FUNCTION assign_page_section_sort_order();
+
+DROP TRIGGER IF EXISTS trg_page_sections_set_updated_at ON page_sections;
+CREATE TRIGGER trg_page_sections_set_updated_at
+BEFORE UPDATE ON page_sections
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_documents_set_updated_at ON documents;
+CREATE TRIGGER trg_documents_set_updated_at
+BEFORE UPDATE ON documents
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_page_section_header_modules_set_updated_at ON page_section_header_modules;
+CREATE TRIGGER trg_page_section_header_modules_set_updated_at
+BEFORE UPDATE ON page_section_header_modules
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_page_section_typography_modules_set_updated_at ON page_section_typography_modules;
+CREATE TRIGGER trg_page_section_typography_modules_set_updated_at
+BEFORE UPDATE ON page_section_typography_modules
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_page_section_gallery_modules_set_updated_at ON page_section_gallery_modules;
+CREATE TRIGGER trg_page_section_gallery_modules_set_updated_at
+BEFORE UPDATE ON page_section_gallery_modules
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_page_section_quote_modules_set_updated_at ON page_section_quote_modules;
+CREATE TRIGGER trg_page_section_quote_modules_set_updated_at
+BEFORE UPDATE ON page_section_quote_modules
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_page_section_cta_banner_modules_set_updated_at ON page_section_cta_banner_modules;
+CREATE TRIGGER trg_page_section_cta_banner_modules_set_updated_at
+BEFORE UPDATE ON page_section_cta_banner_modules
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_page_section_documents_assign_sort_order ON page_section_documents;
+CREATE TRIGGER trg_page_section_documents_assign_sort_order
+BEFORE INSERT OR UPDATE ON page_section_documents
+FOR EACH ROW
+EXECUTE FUNCTION assign_page_section_document_sort_order();
+
+DROP TRIGGER IF EXISTS trg_page_section_documents_set_updated_at ON page_section_documents;
+CREATE TRIGGER trg_page_section_documents_set_updated_at
+BEFORE UPDATE ON page_section_documents
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_page_section_header_modules_validate_type ON page_section_header_modules;
+CREATE TRIGGER trg_page_section_header_modules_validate_type
+BEFORE INSERT OR UPDATE ON page_section_header_modules
+FOR EACH ROW
+EXECUTE FUNCTION validate_page_section_type('header');
+
+DROP TRIGGER IF EXISTS trg_page_section_typography_modules_validate_type ON page_section_typography_modules;
+CREATE TRIGGER trg_page_section_typography_modules_validate_type
+BEFORE INSERT OR UPDATE ON page_section_typography_modules
+FOR EACH ROW
+EXECUTE FUNCTION validate_page_section_type('typography');
+
+DROP TRIGGER IF EXISTS trg_page_section_gallery_modules_validate_type ON page_section_gallery_modules;
+CREATE TRIGGER trg_page_section_gallery_modules_validate_type
+BEFORE INSERT OR UPDATE ON page_section_gallery_modules
+FOR EACH ROW
+EXECUTE FUNCTION validate_page_section_type('gallery');
+
+DROP TRIGGER IF EXISTS trg_page_section_quote_modules_validate_type ON page_section_quote_modules;
+CREATE TRIGGER trg_page_section_quote_modules_validate_type
+BEFORE INSERT OR UPDATE ON page_section_quote_modules
+FOR EACH ROW
+EXECUTE FUNCTION validate_page_section_type('quote');
+
+DROP TRIGGER IF EXISTS trg_page_section_cta_banner_modules_validate_type ON page_section_cta_banner_modules;
+CREATE TRIGGER trg_page_section_cta_banner_modules_validate_type
+BEFORE INSERT OR UPDATE ON page_section_cta_banner_modules
+FOR EACH ROW
+EXECUTE FUNCTION validate_page_section_type('cta_banner');
+
+DROP TRIGGER IF EXISTS trg_page_section_documents_validate_type ON page_section_documents;
+CREATE TRIGGER trg_page_section_documents_validate_type
+BEFORE INSERT OR UPDATE ON page_section_documents
+FOR EACH ROW
+EXECUTE FUNCTION validate_page_section_type('document');
+
+DROP TRIGGER IF EXISTS trg_page_details_sync_page ON page_details;
+CREATE TRIGGER trg_page_details_sync_page
+AFTER INSERT OR UPDATE OR DELETE ON page_details
+FOR EACH ROW
+EXECUTE FUNCTION sync_page_from_page_details();
+
+DROP TRIGGER IF EXISTS trg_page_sections_touch_page_detail ON page_sections;
+CREATE TRIGGER trg_page_sections_touch_page_detail
+AFTER INSERT OR UPDATE OR DELETE ON page_sections
+FOR EACH ROW
+EXECUTE FUNCTION touch_page_detail_from_section();
+
+DROP TRIGGER IF EXISTS trg_page_section_header_modules_touch_page_detail ON page_section_header_modules;
+CREATE TRIGGER trg_page_section_header_modules_touch_page_detail
+AFTER INSERT OR UPDATE OR DELETE ON page_section_header_modules
+FOR EACH ROW
+EXECUTE FUNCTION touch_page_detail_from_section_child();
+
+DROP TRIGGER IF EXISTS trg_page_section_typography_modules_touch_page_detail ON page_section_typography_modules;
+CREATE TRIGGER trg_page_section_typography_modules_touch_page_detail
+AFTER INSERT OR UPDATE OR DELETE ON page_section_typography_modules
+FOR EACH ROW
+EXECUTE FUNCTION touch_page_detail_from_section_child();
+
+DROP TRIGGER IF EXISTS trg_page_section_gallery_modules_touch_page_detail ON page_section_gallery_modules;
+CREATE TRIGGER trg_page_section_gallery_modules_touch_page_detail
+AFTER INSERT OR UPDATE OR DELETE ON page_section_gallery_modules
+FOR EACH ROW
+EXECUTE FUNCTION touch_page_detail_from_section_child();
+
+DROP TRIGGER IF EXISTS trg_page_section_quote_modules_touch_page_detail ON page_section_quote_modules;
+CREATE TRIGGER trg_page_section_quote_modules_touch_page_detail
+AFTER INSERT OR UPDATE OR DELETE ON page_section_quote_modules
+FOR EACH ROW
+EXECUTE FUNCTION touch_page_detail_from_section_child();
+
+DROP TRIGGER IF EXISTS trg_page_section_cta_banner_modules_touch_page_detail ON page_section_cta_banner_modules;
+CREATE TRIGGER trg_page_section_cta_banner_modules_touch_page_detail
+AFTER INSERT OR UPDATE OR DELETE ON page_section_cta_banner_modules
+FOR EACH ROW
+EXECUTE FUNCTION touch_page_detail_from_section_child();
+
+DROP TRIGGER IF EXISTS trg_page_section_documents_touch_page_detail ON page_section_documents;
+CREATE TRIGGER trg_page_section_documents_touch_page_detail
+AFTER INSERT OR UPDATE OR DELETE ON page_section_documents
+FOR EACH ROW
+EXECUTE FUNCTION touch_page_detail_from_section_child();
