@@ -15,31 +15,21 @@ type PressController struct {
 	PressService PressServicePort
 }
 
-// ListPressEntries retrieves all press entries with optional filtering
 func (pc *PressController) ListPressEntries(c *gin.Context) {
+	if pc.PressService == nil {
+		apiresponse.WriteInternalError(c)
+		return
+	}
+
 	filter := ListPressFilter{
 		Status:     strings.TrimSpace(c.DefaultQuery("status", "")),
 		Visibility: strings.TrimSpace(c.DefaultQuery("visibility", "")),
 		SearchTerm: strings.TrimSpace(c.DefaultQuery("search", "")),
 		SortBy:     strings.TrimSpace(c.DefaultQuery("sort_by", "release_date")),
 		SortOrder:  strings.TrimSpace(c.DefaultQuery("sort_order", "desc")),
+		Page:       queryInt(c, "page", 1, 1, 0),
+		PageSize:   queryInt(c, "page_size", 20, 1, 100),
 	}
-
-	page := c.DefaultQuery("page", "1")
-	pageSize := c.DefaultQuery("page_size", "20")
-
-	pageInt, err := strconv.Atoi(page)
-	if err != nil || pageInt < 1 {
-		pageInt = 1
-	}
-
-	pageSizeInt, err := strconv.Atoi(pageSize)
-	if err != nil || pageSizeInt < 1 || pageSizeInt > 100 {
-		pageSizeInt = 20
-	}
-
-	filter.Page = pageInt
-	filter.PageSize = pageSizeInt
 
 	resp, err := pc.PressService.ListPressEntries(filter)
 	if err != nil {
@@ -50,8 +40,12 @@ func (pc *PressController) ListPressEntries(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-// GetPressEntry retrieves a single press entry by ID
 func (pc *PressController) GetPressEntry(c *gin.Context) {
+	if pc.PressService == nil {
+		apiresponse.WriteInternalError(c)
+		return
+	}
+
 	id, ok := pathInt(c, "id")
 	if !ok {
 		return
@@ -66,8 +60,12 @@ func (pc *PressController) GetPressEntry(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-// GetPressMediaContent retrieves the actual media file content
 func (pc *PressController) GetPressMediaContent(c *gin.Context) {
+	if pc.PressService == nil {
+		apiresponse.WriteInternalError(c)
+		return
+	}
+
 	id, ok := pathInt(c, "id")
 	if !ok {
 		return
@@ -94,8 +92,12 @@ func (pc *PressController) GetPressMediaContent(c *gin.Context) {
 	c.Data(http.StatusOK, contentType, resp.Content)
 }
 
-// CreatePressEntry creates a new press entry
 func (pc *PressController) CreatePressEntry(c *gin.Context) {
+	if pc.PressService == nil {
+		apiresponse.WriteInternalError(c)
+		return
+	}
+
 	req, ok := bindSavePressEntryRequest(c)
 	if !ok {
 		return
@@ -110,8 +112,12 @@ func (pc *PressController) CreatePressEntry(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"message": "Press entry created successfully", "entry": resp})
 }
 
-// UpdatePressEntry updates an existing press entry
 func (pc *PressController) UpdatePressEntry(c *gin.Context) {
+	if pc.PressService == nil {
+		apiresponse.WriteInternalError(c)
+		return
+	}
+
 	id, ok := pathInt(c, "id")
 	if !ok {
 		return
@@ -131,8 +137,12 @@ func (pc *PressController) UpdatePressEntry(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Press entry updated successfully", "entry": resp})
 }
 
-// DeletePressEntry deletes a press entry
 func (pc *PressController) DeletePressEntry(c *gin.Context) {
+	if pc.PressService == nil {
+		apiresponse.WriteInternalError(c)
+		return
+	}
+
 	id, ok := pathInt(c, "id")
 	if !ok {
 		return
@@ -146,8 +156,12 @@ func (pc *PressController) DeletePressEntry(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Press entry deleted successfully"})
 }
 
-// AddPressMedia adds media files to a press entry
 func (pc *PressController) AddPressMedia(c *gin.Context) {
+	if pc.PressService == nil {
+		apiresponse.WriteInternalError(c)
+		return
+	}
+
 	id, ok := pathInt(c, "id")
 	if !ok {
 		return
@@ -167,8 +181,12 @@ func (pc *PressController) AddPressMedia(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"message": "Media files added successfully", "result": resp})
 }
 
-// UpdatePressMedia updates metadata for a media file
 func (pc *PressController) UpdatePressMedia(c *gin.Context) {
+	if pc.PressService == nil {
+		apiresponse.WriteInternalError(c)
+		return
+	}
+
 	id, ok := pathInt(c, "id")
 	if !ok {
 		return
@@ -192,8 +210,12 @@ func (pc *PressController) UpdatePressMedia(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Media updated successfully", "media": resp})
 }
 
-// ReorderPressMedia reorders media files in a press entry
 func (pc *PressController) ReorderPressMedia(c *gin.Context) {
+	if pc.PressService == nil {
+		apiresponse.WriteInternalError(c)
+		return
+	}
+
 	id, ok := pathInt(c, "id")
 	if !ok {
 		return
@@ -213,8 +235,12 @@ func (pc *PressController) ReorderPressMedia(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Media reordered successfully", "result": resp})
 }
 
-// DeletePressMedia deletes media files from a press entry
 func (pc *PressController) DeletePressMedia(c *gin.Context) {
+	if pc.PressService == nil {
+		apiresponse.WriteInternalError(c)
+		return
+	}
+
 	id, ok := pathInt(c, "id")
 	if !ok {
 		return
@@ -234,7 +260,13 @@ func (pc *PressController) DeletePressMedia(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Media deleted successfully", "result": resp})
 }
 
-// Helper functions
+func queryInt(c *gin.Context, key string, fallback int, min int, max int) int {
+	value, err := strconv.Atoi(strings.TrimSpace(c.DefaultQuery(key, strconv.Itoa(fallback))))
+	if err != nil || value < min || (max > 0 && value > max) {
+		return fallback
+	}
+	return value
+}
 
 func pathInt(c *gin.Context, param string) (int, bool) {
 	value := strings.TrimSpace(c.Param(param))
@@ -244,13 +276,8 @@ func pathInt(c *gin.Context, param string) (int, bool) {
 	}
 
 	id, err := strconv.Atoi(value)
-	if err != nil {
-		apiresponse.WriteValidationError(c, param+" must be a valid integer")
-		return 0, false
-	}
-
-	if id <= 0 {
-		apiresponse.WriteValidationError(c, param+" must be positive")
+	if err != nil || id <= 0 {
+		apiresponse.WriteValidationError(c, param+" must be a positive integer")
 		return 0, false
 	}
 
@@ -258,24 +285,40 @@ func pathInt(c *gin.Context, param string) (int, bool) {
 }
 
 func authUserID(c *gin.Context) *int {
-	val, exists := c.Get("userID")
-	if !exists {
-		return nil
+	for _, key := range []string{"userID", "user_id", "userId"} {
+		val, exists := c.Get(key)
+		if !exists {
+			continue
+		}
+		switch v := val.(type) {
+		case int:
+			return &v
+		case int64:
+			userID := int(v)
+			return &userID
+		case uint:
+			userID := int(v)
+			return &userID
+		case float64:
+			userID := int(v)
+			return &userID
+		case string:
+			if parsed, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+				return &parsed
+			}
+		}
 	}
-
-	userID, ok := val.(int)
-	if !ok {
-		return nil
-	}
-
-	return &userID
+	return nil
 }
 
 func sanitizeContentDispositionFilename(filename string) string {
 	filename = strings.TrimSpace(filename)
-	// Basic sanitization - remove path separators
 	filename = strings.ReplaceAll(filename, "/", "")
 	filename = strings.ReplaceAll(filename, "\\", "")
+	filename = strings.ReplaceAll(filename, "\r", "")
+	filename = strings.ReplaceAll(filename, "\n", "")
+	filename = strings.ReplaceAll(filename, ";", "")
+	filename = strings.ReplaceAll(filename, "\"", "")
 	return filename
 }
 
@@ -286,15 +329,17 @@ func writePressError(c *gin.Context, err error) {
 	}
 
 	switch {
-	case errors.Is(err, ErrStoreUnavailable):
+	case errors.Is(err, ErrStoreUnavailable), errors.Is(err, ErrMediaBucketNotConfigured):
 		apiresponse.WriteInternalError(c)
 	case errors.Is(err, ErrPressEntryNotFound):
-		apiresponse.WriteNotFoundError(c, "Press entry not found")
+		writePressNotFound(c, "Press entry not found")
 	case errors.Is(err, ErrPressMediaNotFound):
-		apiresponse.WriteNotFoundError(c, "Press media not found")
-	case errors.Is(err, ErrMediaBucketNotConfigured):
-		apiresponse.WriteInternalError(c)
+		writePressNotFound(c, "Press media not found")
 	default:
 		apiresponse.WriteValidationError(c, err.Error())
 	}
+}
+
+func writePressNotFound(c *gin.Context, message string) {
+	c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": message})
 }
