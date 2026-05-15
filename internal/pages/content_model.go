@@ -153,7 +153,7 @@ type PageDocument struct {
 	FileURL          string    `gorm:"not null;column:file_url" json:"file_url"`
 	MimeType         string    `gorm:"size:255;column:mime_type" json:"mime_type"`
 	FileSize         int64     `gorm:"column:file_size" json:"file_size"`
-	ChecksumSHA256   string    `gorm:"size:64;column:checksum_sha256" json:"checksum_sha256"`
+	ChecksumSHA256   *string   `gorm:"size:64;column:checksum_sha256" json:"checksum_sha256"`
 	CreatedBy        *int      `gorm:"column:created_by" json:"created_by,omitempty"`
 	UpdatedBy        *int      `gorm:"column:updated_by" json:"updated_by,omitempty"`
 	CreatedAt        time.Time `json:"created_at"`
