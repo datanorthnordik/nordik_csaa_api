@@ -1492,3 +1492,161 @@ FOR EACH ROW
 EXECUTE FUNCTION assign_press_media_sort_order();
 
 COMMIT;
+
+-- Newsletters Migration
+-- Prerequisites: tables users(id) must already exist.
+
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS newsletter_entries (
+    id SERIAL PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    category VARCHAR(20) NOT NULL DEFAULT '',
+    send_date DATE NOT NULL,
+    content_html TEXT NOT NULL DEFAULT '',
+    status VARCHAR(30) NOT NULL DEFAULT 'draft',
+    visibility VARCHAR(30) NOT NULL DEFAULT 'public',
+    publish_at TIMESTAMP,
+    created_by INT,
+    updated_by INT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_newsletter_entries_created_by
+        FOREIGN KEY (created_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT fk_newsletter_entries_updated_by
+        FOREIGN KEY (updated_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT chk_newsletter_entries_title_not_blank
+        CHECK (btrim(title) <> ''),
+
+    CONSTRAINT chk_newsletter_entries_category
+        CHECK (category IN ('', 'csaa', 'cst')),
+
+    CONSTRAINT chk_newsletter_entries_status
+        CHECK (status IN ('draft', 'published', 'scheduled')),
+
+    CONSTRAINT chk_newsletter_entries_visibility
+        CHECK (visibility IN ('public', 'private'))
+);
+
+CREATE TABLE IF NOT EXISTS newsletter_media (
+    id SERIAL PRIMARY KEY,
+    newsletter_entry_id INT NOT NULL,
+    display_name VARCHAR(255) NOT NULL,
+    file_name VARCHAR(255),
+    gcp_object_key TEXT,
+    file_url TEXT NOT NULL,
+    mime_type VARCHAR(255),
+    file_size BIGINT,
+    media_role VARCHAR(50) NOT NULL DEFAULT 'attachment',
+    sort_order INT NOT NULL DEFAULT -1,
+    created_by INT,
+    updated_by INT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_newsletter_media_newsletter_entry
+        FOREIGN KEY (newsletter_entry_id) REFERENCES newsletter_entries(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_newsletter_media_created_by
+        FOREIGN KEY (created_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT fk_newsletter_media_updated_by
+        FOREIGN KEY (updated_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT chk_newsletter_media_display_name_not_blank
+        CHECK (btrim(display_name) <> ''),
+
+    CONSTRAINT chk_newsletter_media_file_url_not_blank
+        CHECK (btrim(file_url) <> ''),
+
+    CONSTRAINT chk_newsletter_media_media_role
+        CHECK (media_role IN ('attachment')),
+
+    CONSTRAINT chk_newsletter_media_file_size
+        CHECK (file_size IS NULL OR file_size >= 0),
+
+    CONSTRAINT chk_newsletter_media_sort_order
+        CHECK (sort_order >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_newsletter_entries_send_date
+    ON newsletter_entries(send_date DESC);
+
+CREATE INDEX IF NOT EXISTS idx_newsletter_entries_status
+    ON newsletter_entries(status);
+
+CREATE INDEX IF NOT EXISTS idx_newsletter_entries_visibility
+    ON newsletter_entries(visibility);
+
+CREATE INDEX IF NOT EXISTS idx_newsletter_entries_category
+    ON newsletter_entries(category);
+
+CREATE INDEX IF NOT EXISTS idx_newsletter_entries_created_by
+    ON newsletter_entries(created_by);
+
+CREATE INDEX IF NOT EXISTS idx_newsletter_entries_updated_by
+    ON newsletter_entries(updated_by);
+
+CREATE INDEX IF NOT EXISTS idx_newsletter_media_newsletter_entry_id
+    ON newsletter_media(newsletter_entry_id);
+
+CREATE INDEX IF NOT EXISTS idx_newsletter_media_media_role
+    ON newsletter_media(media_role);
+
+CREATE INDEX IF NOT EXISTS idx_newsletter_media_sort_order
+    ON newsletter_media(newsletter_entry_id, sort_order, id);
+
+DROP TRIGGER IF EXISTS trg_newsletter_entries_set_updated_at ON newsletter_entries;
+CREATE TRIGGER trg_newsletter_entries_set_updated_at
+BEFORE UPDATE ON newsletter_entries
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_newsletter_media_set_updated_at ON newsletter_media;
+CREATE TRIGGER trg_newsletter_media_set_updated_at
+BEFORE UPDATE ON newsletter_media
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+CREATE OR REPLACE FUNCTION assign_newsletter_media_sort_order()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.sort_order >= 0 THEN
+        RETURN NEW;
+    END IF;
+
+    PERFORM 1
+    FROM newsletter_entries
+    WHERE id = NEW.newsletter_entry_id
+    FOR UPDATE;
+
+    SELECT COALESCE(MAX(sort_order), -1) + 1
+    INTO NEW.sort_order
+    FROM newsletter_media
+    WHERE newsletter_entry_id = NEW.newsletter_entry_id
+      AND id <> COALESCE(NEW.id, 0);
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_newsletter_media_assign_sort_order ON newsletter_media;
+CREATE TRIGGER trg_newsletter_media_assign_sort_order
+BEFORE INSERT OR UPDATE ON newsletter_media
+FOR EACH ROW
+EXECUTE FUNCTION assign_newsletter_media_sort_order();
+
+COMMIT;
