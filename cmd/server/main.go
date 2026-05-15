@@ -10,6 +10,7 @@ import (
 	"nordikcsaaapi/internal/gallery"
 	"nordikcsaaapi/internal/menus"
 	"nordikcsaaapi/internal/pages"
+	"nordikcsaaapi/internal/press"
 	"os"
 
 	"github.com/gin-contrib/cors"
@@ -71,6 +72,8 @@ func main() {
 	pages.RegisterRoutes(r, pageService, auth.RequireBearerAuth(&cfg))
 	menuService := &menus.MenuService{DB: db}
 	menus.RegisterRoutes(r, menuService, auth.RequireBearerAuth(&cfg))
+	pressService := &press.PressService{DB: db, BucketName: cfg.DriveBucketName, BucketPrefix: cfg.DriveBucketPrefix}
+	press.RegisterRoutes(r, pressService, auth.RequireBearerAuth(&cfg))
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
