@@ -27,7 +27,7 @@ type Event struct {
 	Published                   bool           `gorm:"not null;default:false" json:"published"`
 	RequestReview               bool           `gorm:"not null;default:false;column:request_review" json:"request_review"`
 	ReviewEmailList             pq.StringArray `gorm:"type:text[];not null;default:'{}';column:review_email_list" json:"review_email_list"`
-	Teaser                      string         `gorm:"not null;default:''" json:"teaser"`
+	Teaser                      string         `gorm:"default:''" json:"teaser"`
 	DescriptionHTML             string         `gorm:"column:description_html" json:"description_html"`
 	ContactName                 string         `gorm:"size:150;column:contact_name" json:"contact_name"`
 	ContactEmail                string         `gorm:"size:255;column:contact_email" json:"contact_email"`

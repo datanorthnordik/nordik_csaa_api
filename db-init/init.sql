@@ -277,7 +277,7 @@ CREATE TABLE IF NOT EXISTS events (
     published BOOLEAN NOT NULL DEFAULT FALSE,
     request_review BOOLEAN NOT NULL DEFAULT FALSE,
     review_email_list TEXT[] NOT NULL DEFAULT '{}',
-    teaser TEXT NOT NULL DEFAULT '',
+    teaser TEXT DEFAULT '',
     description_html TEXT,
     contact_name VARCHAR(150),
     contact_email VARCHAR(255),
@@ -681,6 +681,9 @@ EXECUTE FUNCTION set_updated_at();
 
 ALTER TABLE events
     ALTER COLUMN teaser SET DEFAULT '';
+
+ALTER TABLE events
+    ALTER COLUMN teaser DROP NOT NULL;
 
 ALTER TABLE events
     DROP CONSTRAINT IF EXISTS chk_events_teaser_not_blank;
@@ -1489,4 +1492,3 @@ FOR EACH ROW
 EXECUTE FUNCTION assign_press_media_sort_order();
 
 COMMIT;
-
