@@ -367,7 +367,8 @@ func (s *EventService) UpdateEvent(id int, req SaveEventRequest) (*EventMutation
 		return nil, err
 	}
 
-	addressID, err := s.resolveAddress(tx, normalized.LocationMode, normalized.Address)
+	previousAddressID := event.AddressID
+	addressID, err := s.resolveAddressForUpdate(tx, previousAddressID, normalized.LocationMode, normalized.Address)
 	if err != nil {
 		tx.Rollback()
 		s.cleanupObjects(uploadedObjects)
@@ -378,6 +379,12 @@ func (s *EventService) UpdateEvent(id int, req SaveEventRequest) (*EventMutation
 	event.AddressID = addressID
 
 	if err := tx.Save(&event).Error; err != nil {
+		tx.Rollback()
+		s.cleanupObjects(uploadedObjects)
+		return nil, err
+	}
+
+	if err := s.cleanupUnusedTemporaryAddress(tx, previousAddressID, event.AddressID); err != nil {
 		tx.Rollback()
 		s.cleanupObjects(uploadedObjects)
 		return nil, err
@@ -616,6 +623,9 @@ func normalizeSaveEventRequest(req SaveEventRequest) (SaveEventRequest, error) {
 	if !isAllowed(req.PrivacyType, "public", "private") {
 		return req, errors.New("invalid privacy_type")
 	}
+	if req.PrivacyType == "public" && len(req.PrivateAudiences) > 0 {
+		return req, errors.New("private_audiences must be empty when privacy_type is public")
+	}
 	if req.PrivacyType == "private" && len(req.PrivateAudiences) == 0 {
 		return req, errors.New("private_audiences are required when privacy_type is private")
 	}
@@ -624,6 +634,11 @@ func normalizeSaveEventRequest(req SaveEventRequest) (SaveEventRequest, error) {
 	}
 	if req.LocationMode == "address" && req.Address == nil {
 		return req, errors.New("address details are required when location_mode is address")
+	}
+	if req.LocationMode == "address" && req.Address != nil && req.Address.ID == nil {
+		if err := validateNewAddressInput(*req.Address); err != nil {
+			return req, err
+		}
 	}
 	if req.Published && req.RequestReview {
 		return req, errors.New("request_review cannot be true when published is true")
@@ -755,7 +770,6 @@ func applyEventRequest(event *Event, req SaveEventRequest) {
 	event.RecurrenceInterval = updated.RecurrenceInterval
 	event.RecurrenceUntil = updated.RecurrenceUntil
 	event.RecurrenceRule = updated.RecurrenceRule
-	event.CreatedBy = updated.CreatedBy
 }
 
 func (s *EventService) resolveAddress(tx *gorm.DB, locationMode string, input *EventAddressInput) (*int, error) {
@@ -788,6 +802,92 @@ func (s *EventService) resolveAddress(tx *gorm.DB, locationMode string, input *E
 		return nil, err
 	}
 	return &address.ID, nil
+}
+
+func (s *EventService) resolveAddressForUpdate(tx *gorm.DB, currentAddressID *int, locationMode string, input *EventAddressInput) (*int, error) {
+	if locationMode != "address" || input == nil {
+		return nil, nil
+	}
+
+	if input.ID != nil {
+		var address Address
+		if err := tx.First(&address, *input.ID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, errors.New("address not found")
+			}
+			return nil, err
+		}
+		return input.ID, nil
+	}
+
+	if currentAddressID != nil {
+		var current Address
+		if err := tx.First(&current, *currentAddressID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, errors.New("address not found")
+			}
+			return nil, err
+		}
+		if !current.IsSaved {
+			current.Name = input.Name
+			current.AddressLine1 = input.AddressLine1
+			current.AddressLine2 = input.AddressLine2
+			current.City = input.City
+			current.ProvinceState = input.ProvinceState
+			current.PostalCode = input.PostalCode
+			current.Country = input.Country
+			current.IsSaved = input.IsSaved
+			if err := tx.Save(&current).Error; err != nil {
+				return nil, err
+			}
+			return &current.ID, nil
+		}
+	}
+
+	address := Address{
+		Name:          input.Name,
+		AddressLine1:  input.AddressLine1,
+		AddressLine2:  input.AddressLine2,
+		City:          input.City,
+		ProvinceState: input.ProvinceState,
+		PostalCode:    input.PostalCode,
+		Country:       input.Country,
+		IsSaved:       input.IsSaved,
+	}
+	if err := tx.Create(&address).Error; err != nil {
+		return nil, err
+	}
+	return &address.ID, nil
+}
+
+func (s *EventService) cleanupUnusedTemporaryAddress(tx *gorm.DB, previousAddressID *int, nextAddressID *int) error {
+	if previousAddressID == nil {
+		return nil
+	}
+	if nextAddressID != nil && *previousAddressID == *nextAddressID {
+		return nil
+	}
+
+	var address Address
+	if err := tx.First(&address, *previousAddressID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	if address.IsSaved {
+		return nil
+	}
+
+	var references int64
+	if err := tx.Model(&Event{}).Where("address_id = ?", address.ID).Count(&references).Error; err != nil {
+		return err
+	}
+	if references > 0 {
+		return nil
+	}
+
+	return tx.Delete(&address).Error
 }
 
 func (s *EventService) saveDisplayImage(tx *gorm.DB, eventID int, input *EventUploadInput, uploadedObjects *[]string) error {
@@ -954,6 +1054,25 @@ func sanitizeStringSlice(values []string) []string {
 		}
 	}
 	return cleaned
+}
+
+func validateNewAddressInput(input EventAddressInput) error {
+	switch {
+	case strings.TrimSpace(input.Name) == "":
+		return errors.New("address.name is required when creating a new address")
+	case strings.TrimSpace(input.AddressLine1) == "":
+		return errors.New("address.address_line_1 is required when creating a new address")
+	case strings.TrimSpace(input.City) == "":
+		return errors.New("address.city is required when creating a new address")
+	case strings.TrimSpace(input.ProvinceState) == "":
+		return errors.New("address.province_state is required when creating a new address")
+	case strings.TrimSpace(input.PostalCode) == "":
+		return errors.New("address.postal_code is required when creating a new address")
+	case strings.TrimSpace(input.Country) == "":
+		return errors.New("address.country is required when creating a new address")
+	default:
+		return nil
+	}
 }
 
 func sanitizeUploadInputs(values []EventUploadInput) []EventUploadInput {

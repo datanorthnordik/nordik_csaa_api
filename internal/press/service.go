@@ -150,6 +150,45 @@ func (s *PressService) GetPressEntry(id int) (*PressDetailResponse, error) {
 	}, nil
 }
 
+func (s *PressService) GetPressCoverImageContent(id int) (*PressMediaContent, error) {
+	if s.DB == nil {
+		return nil, ErrStoreUnavailable
+	}
+
+	entry, err := s.getPressEntryModel(id)
+	if err != nil {
+		return nil, err
+	}
+
+	objectKey := strings.TrimSpace(entry.CoverImageGCPKey)
+	fileURL := strings.TrimSpace(entry.CoverImageURL)
+	if objectKey == "" && fileURL == "" {
+		return nil, ErrPressMediaNotFound
+	}
+
+	bucketName, resolvedObjectKey, err := s.resolveStoredObjectReference(objectKey, fileURL)
+	if err != nil {
+		return nil, err
+	}
+
+	data, contentType, err := downloadGCSObjectHook(bucketName, resolvedObjectKey)
+	if err != nil {
+		if errors.Is(err, util.ErrObjectNotFound) {
+			return nil, ErrPressMediaNotFound
+		}
+		return nil, err
+	}
+	if strings.TrimSpace(contentType) == "" {
+		contentType = "application/octet-stream"
+	}
+
+	return &PressMediaContent{
+		Content:     data,
+		ContentType: contentType,
+		FileName:    storedFilename(resolvedObjectKey, "cover-image"),
+	}, nil
+}
+
 func (s *PressService) GetPressMediaContent(id int, mediaID int) (*PressMediaContent, error) {
 	if s.DB == nil {
 		return nil, ErrStoreUnavailable
@@ -949,4 +988,12 @@ func looksLikeGCSReference(fileURL string) bool {
 	default:
 		return !strings.Contains(fileURL, "://")
 	}
+}
+
+func storedFilename(objectKey string, fallback string) string {
+	name := path.Base(strings.TrimSpace(objectKey))
+	if name == "" || name == "." || name == "/" {
+		return fallback
+	}
+	return name
 }

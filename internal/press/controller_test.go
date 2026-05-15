@@ -23,6 +23,7 @@ import (
 type fakePressService struct {
 	listResp            *PressListResponse
 	detailResp          *PressDetailResponse
+	coverContentResp    *PressMediaContent
 	mediaContentResp    *PressMediaContent
 	createResp          *PressMutationResponse
 	updateResp          *PressMutationResponse
@@ -32,6 +33,7 @@ type fakePressService struct {
 	deleteMediaResp     *DeletePressMediaResponse
 	listErr             error
 	detailErr           error
+	coverContentErr     error
 	mediaContentErr     error
 	createErr           error
 	updateErr           error
@@ -42,6 +44,7 @@ type fakePressService struct {
 	deleteMediaErr      error
 	gotListFilter       ListPressFilter
 	gotDetailID         int
+	gotCoverEntryID     int
 	gotMediaEntryID     int
 	gotMediaID          int
 	gotCreateReq        SavePressEntryRequest
@@ -82,6 +85,17 @@ func (f *fakePressService) GetPressEntry(id int) (*PressDetailResponse, error) {
 		return &PressDetailResponse{ID: id, Title: "Spring Fair"}, nil
 	}
 	return f.detailResp, nil
+}
+
+func (f *fakePressService) GetPressCoverImageContent(id int) (*PressMediaContent, error) {
+	f.gotCoverEntryID = id
+	if f.coverContentErr != nil {
+		return nil, f.coverContentErr
+	}
+	if f.coverContentResp == nil {
+		return &PressMediaContent{Content: []byte("cover"), ContentType: "image/png", FileName: "cover.png"}, nil
+	}
+	return f.coverContentResp, nil
 }
 
 func (f *fakePressService) GetPressMediaContent(id int, mediaID int) (*PressMediaContent, error) {
@@ -273,6 +287,34 @@ func TestGetPressMediaContentEndpoint(t *testing.T) {
 	}
 }
 
+func TestGetPressCoverImageContentEndpoint(t *testing.T) {
+	service := &fakePressService{
+		coverContentResp: &PressMediaContent{
+			Content:     []byte("cover"),
+			ContentType: "image/png",
+			FileName:    "cover.png",
+		},
+	}
+	router := setupPressRouter(service)
+
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/press/5/cover/content", nil)
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", res.Code, res.Body.String())
+	}
+	if res.Body.String() != "cover" {
+		t.Fatalf("unexpected body: %q", res.Body.String())
+	}
+	if service.gotCoverEntryID != 5 {
+		t.Fatalf("expected cover entry id 5, got %d", service.gotCoverEntryID)
+	}
+	if got := res.Header().Get("Content-Disposition"); !strings.Contains(got, "cover.png") {
+		t.Fatalf("expected content disposition filename, got %q", got)
+	}
+}
+
 func TestGetPressMediaContentEndpointDefaultsAndErrors(t *testing.T) {
 	service := &fakePressService{
 		mediaContentResp: &PressMediaContent{
@@ -299,6 +341,12 @@ func TestGetPressMediaContentEndpointDefaultsAndErrors(t *testing.T) {
 	router = setupPressRouter(&fakePressService{mediaContentErr: ErrPressMediaNotFound})
 	res = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/api/press/5/media/8/content", nil)
+	router.ServeHTTP(res, req)
+	assertPressAPIError(t, res, http.StatusNotFound, "not_found", "press media not found")
+
+	router = setupPressRouter(&fakePressService{coverContentErr: ErrPressMediaNotFound})
+	res = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/press/5/cover/content", nil)
 	router.ServeHTTP(res, req)
 	assertPressAPIError(t, res, http.StatusNotFound, "not_found", "press media not found")
 }
@@ -659,6 +707,7 @@ func TestPressControllerNilServiceBranches(t *testing.T) {
 	}{
 		{name: "list", run: controller.ListPressEntries},
 		{name: "get", run: controller.GetPressEntry},
+		{name: "cover content", run: controller.GetPressCoverImageContent},
 		{name: "media content", run: controller.GetPressMediaContent},
 		{name: "create", run: controller.CreatePressEntry},
 		{name: "update", run: controller.UpdatePressEntry},

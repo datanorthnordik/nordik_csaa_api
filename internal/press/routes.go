@@ -10,6 +10,7 @@ func RegisterRoutes(r *gin.Engine, ps PressServicePort, protected ...gin.Handler
 		// Public GET endpoints - read-only, no authentication required
 		publicGroup.GET("", controller.ListPressEntries)
 		publicGroup.GET("/:id", controller.GetPressEntry)
+		publicGroup.GET("/:id/cover/content", controller.GetPressCoverImageContent)
 		publicGroup.GET("/:id/media/:mediaId/content", controller.GetPressMediaContent)
 
 		// Protected endpoints - require authentication

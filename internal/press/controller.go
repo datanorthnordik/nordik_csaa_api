@@ -60,6 +60,34 @@ func (pc *PressController) GetPressEntry(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+func (pc *PressController) GetPressCoverImageContent(c *gin.Context) {
+	if pc.PressService == nil {
+		apiresponse.WriteInternalError(c)
+		return
+	}
+
+	id, ok := pathInt(c, "id")
+	if !ok {
+		return
+	}
+
+	resp, err := pc.PressService.GetPressCoverImageContent(id)
+	if err != nil {
+		writePressError(c, err)
+		return
+	}
+
+	contentType := strings.TrimSpace(resp.ContentType)
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	if fileName := sanitizeContentDispositionFilename(resp.FileName); fileName != "" {
+		c.Header("Content-Disposition", "inline; filename="+strconv.Quote(fileName))
+	}
+
+	c.Data(http.StatusOK, contentType, resp.Content)
+}
+
 func (pc *PressController) GetPressMediaContent(c *gin.Context) {
 	if pc.PressService == nil {
 		apiresponse.WriteInternalError(c)

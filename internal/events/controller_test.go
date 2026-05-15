@@ -391,6 +391,50 @@ func TestCreateEventEndpointAllowsMissingTeaser(t *testing.T) {
 	}
 }
 
+func TestCreateEventEndpointUsesAuthenticatedUserID(t *testing.T) {
+	service := &fakeEventService{}
+	router := setupProtectedEventRouter(service)
+
+	body := `{"title":"Spring Fair","show_title":true,"categories":["Events"],"event_type":"single_day_all_day","start_at":"2026-05-01T10:00:00Z","privacy_type":"public","teaser":"Welcome!","created_by":999}`
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/events", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+signEventTestToken(t, "test-secret"))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusCreated {
+		t.Fatalf("expected status 201, got %d: %s", res.Code, res.Body.String())
+	}
+	if service.gotCreateRequest.CreatedBy == nil || *service.gotCreateRequest.CreatedBy != 7 {
+		t.Fatalf("expected created_by to be stamped from auth user 7, got %#v", service.gotCreateRequest.CreatedBy)
+	}
+}
+
+func TestCreateEventEndpointAcceptsWellnessSummitPayload(t *testing.T) {
+	service := &fakeEventService{}
+	router := setupProtectedEventRouter(service)
+
+	body := `{"title":"CSAA 2024 Wellness Summit","show_title":true,"categories":["Wellness","Community","Health"],"address":{"id":17,"name":"","address_line_1":"","address_line_2":"","city":"","province_state":"","postal_code":"","country":"","is_saved":false},"attachments":[],"contact_email":"events@ingaged.ca","contact_ext":"","contact_fax":"","contact_name":"","contact_phone":"","description_html":"In October 2024, the Children of Shingwauk Alumni Association (CSAA) gathered at Shingwauk Kinoomaage Gamig for three days of connection, healing, and community-building.","end_at":"2024-10-17T00:00:00-04:00","event_type":"multi_day_all_day","gallery_id":null,"location_mode":"address","occurrences":[],"privacy_type":"public","private_audiences":[],"published":true,"recurrence_frequency":"","recurrence_interval":1,"recurrence_type":"","recurrence_until":null,"registration_enabled":false,"registration_end_at":null,"registration_start_at":null,"registration_url":"","repeat_enabled":false,"request_review":false,"review_email_list":[],"show_display_image_when_viewing":false,"start_at":"2024-10-15T00:00:00-04:00","teaser":""}`
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/events", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+signEventTestToken(t, "test-secret"))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusCreated {
+		t.Fatalf("expected status 201, got %d: %s", res.Code, res.Body.String())
+	}
+	if service.gotCreateRequest.EventType != "multi_day_all_day" {
+		t.Fatalf("expected event_type to be forwarded, got %q", service.gotCreateRequest.EventType)
+	}
+	if service.gotCreateRequest.Address == nil || service.gotCreateRequest.Address.ID == nil || *service.gotCreateRequest.Address.ID != 17 {
+		t.Fatalf("expected existing address id 17, got %#v", service.gotCreateRequest.Address)
+	}
+	if service.gotCreateRequest.ContactEmail != "events@ingaged.ca" {
+		t.Fatalf("expected contact email to be forwarded, got %q", service.gotCreateRequest.ContactEmail)
+	}
+}
+
 func TestListEventsEndpoint(t *testing.T) {
 	service := &fakeEventService{
 		listResp: &EventListResponse{
@@ -523,6 +567,25 @@ func TestUpdateEventEndpoint(t *testing.T) {
 	}
 	if service.gotUpdateID != 12 {
 		t.Fatalf("expected update id 12, got %d", service.gotUpdateID)
+	}
+}
+
+func TestUpdateEventEndpointIgnoresCreatedByPayload(t *testing.T) {
+	service := &fakeEventService{}
+	router := setupProtectedEventRouter(service)
+
+	body := `{"title":"Updated Fair","categories":["Events"],"event_type":"single_day_all_day","start_at":"2026-05-01T10:00:00Z","teaser":"Updated!","created_by":999}`
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/events/12", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+signEventTestToken(t, "test-secret"))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", res.Code, res.Body.String())
+	}
+	if service.gotUpdateRequest.CreatedBy != nil {
+		t.Fatalf("expected update request to ignore created_by payload, got %#v", service.gotUpdateRequest.CreatedBy)
 	}
 }
 
@@ -828,6 +891,22 @@ func TestWriteEventErrorAndHelpers(t *testing.T) {
 		t.Fatalf("expected status 409, got %d", rec.Code)
 	}
 	assertEventAPIError(t, rec, http.StatusConflict, "conflict", "Unable to save event because a conflicting record already exists")
+
+	rec = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(rec)
+	writeEventError(c, errors.New(`ERROR: new row for relation "events" violates check constraint "chk_events_private_audiences" (SQLSTATE 23514)`))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", rec.Code)
+	}
+	assertEventAPIError(t, rec, http.StatusBadRequest, "validation_error", "private_audiences must match privacy_type")
+
+	rec = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(rec)
+	writeEventError(c, errors.New(`ERROR: insert or update on table "events" violates foreign key constraint "fk_events_gallery" (SQLSTATE 23503)`))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", rec.Code)
+	}
+	assertEventAPIError(t, rec, http.StatusBadRequest, "validation_error", "gallery not found")
 
 	rec = httptest.NewRecorder()
 	c, _ = gin.CreateTestContext(rec)
