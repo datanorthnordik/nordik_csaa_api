@@ -3,6 +3,7 @@ package press
 type PressServicePort interface {
 	ListPressEntries(filter ListPressFilter) (*PressListResponse, error)
 	GetPressEntry(id int) (*PressDetailResponse, error)
+	GetPressCoverImageContent(id int) (*PressMediaContent, error)
 	GetPressMediaContent(id int, mediaID int) (*PressMediaContent, error)
 	CreatePressEntry(req SavePressEntryRequest, userID *int) (*PressMutationResponse, error)
 	UpdatePressEntry(id int, req SavePressEntryRequest, userID *int) (*PressMutationResponse, error)

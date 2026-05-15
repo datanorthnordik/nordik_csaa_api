@@ -365,7 +365,7 @@ func TestCreateEventSuccess(t *testing.T) {
 		Teaser:                      "Welcome!",
 		DescriptionHTML:             "<p>Hello</p>",
 		LocationMode:                "address",
-		Address:                     &EventAddressInput{Name: "Hall", AddressLine1: "1 Main", City: "Toronto", Country: "Canada", IsSaved: true},
+		Address:                     &EventAddressInput{Name: "Hall", AddressLine1: "1 Main", City: "Toronto", ProvinceState: "ON", PostalCode: "A1A1A1", Country: "Canada", IsSaved: true},
 		ShowDisplayImageWhenViewing: true,
 		RegistrationEnabled:         true,
 		RegistrationStartAt:         &regStart,
@@ -472,6 +472,70 @@ func TestCreateEventWithExistingAddressAndNoMedia(t *testing.T) {
 	}
 	if resp.ID != 11 {
 		t.Fatalf("expected id 11, got %d", resp.ID)
+	}
+}
+
+func TestResolveAddressForUpdateReusesExistingTemporaryAddress(t *testing.T) {
+	db, mock, cleanup := setupMockDB(t)
+	defer cleanup()
+
+	service := &EventService{DB: db}
+	currentAddressID := 7
+	input := &EventAddressInput{
+		Name:          "Community Hall",
+		AddressLine1:  "1 Main",
+		AddressLine2:  "Suite B",
+		City:          "Toronto",
+		ProvinceState: "ON",
+		PostalCode:    "A1A1A1",
+		Country:       "Canada",
+		IsSaved:       false,
+	}
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "addresses" WHERE "addresses"."id" = $1 ORDER BY "addresses"."id" LIMIT $2`)).
+		WithArgs(7, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "address_line_1", "address_line_2", "city", "province_state", "postal_code", "country", "is_saved", "created_at", "updated_at"}).
+			AddRow(7, "Old Hall", "9 Old", "", "Toronto", "ON", "Z9Z9Z9", "Canada", false, time.Now(), time.Now()))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE "addresses" SET`)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	addressID, err := service.resolveAddressForUpdate(db.Session(&gorm.Session{SkipDefaultTransaction: true}), &currentAddressID, "address", input)
+	if err != nil {
+		t.Fatalf("resolveAddressForUpdate returned error: %v", err)
+	}
+	if addressID == nil || *addressID != currentAddressID {
+		t.Fatalf("expected address id %d to be reused, got %#v", currentAddressID, addressID)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestCleanupUnusedTemporaryAddressDeletesUnreferencedRow(t *testing.T) {
+	db, mock, cleanup := setupMockDB(t)
+	defer cleanup()
+
+	service := &EventService{DB: db}
+	addressID := 9
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "addresses" WHERE "addresses"."id" = $1 ORDER BY "addresses"."id" LIMIT $2`)).
+		WithArgs(9, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "address_line_1", "address_line_2", "city", "province_state", "postal_code", "country", "is_saved", "created_at", "updated_at"}).
+			AddRow(9, "Temp Hall", "1 Main", "", "Toronto", "ON", "A1A1A1", "Canada", false, time.Now(), time.Now()))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT count(*) FROM "events" WHERE address_id = $1`)).
+		WithArgs(9).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM "addresses" WHERE "addresses"."id" = $1`)).
+		WithArgs(9).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	if err := service.cleanupUnusedTemporaryAddress(db.Session(&gorm.Session{SkipDefaultTransaction: true}), &addressID, nil); err != nil {
+		t.Fatalf("cleanupUnusedTemporaryAddress returned error: %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
 	}
 }
 
@@ -772,11 +836,12 @@ func TestNormalizeHelpersAndUtilityBranches(t *testing.T) {
 	req := validSaveEventRequest()
 	req.Published = false
 	req.RequestReview = true
+	req.PrivacyType = "private"
 	req.Categories = []string{" ", "Events "}
 	req.PrivateAudiences = []string{" Members "}
 	req.ReviewEmailList = []string{" review@example.com "}
 	req.LocationMode = "address"
-	req.Address = &EventAddressInput{Name: " Hall "}
+	req.Address = &EventAddressInput{Name: " Hall ", AddressLine1: " 1 Main ", City: " Toronto ", ProvinceState: " ON ", PostalCode: " A1A1A1 ", Country: " Canada "}
 	req.RecurrenceRule = json.RawMessage(`{"ok":true}`)
 	req.Occurrences = []EventOccurrenceInput{{OccurrenceStartAt: req.StartAt, OccurrenceKind: "generated"}}
 
@@ -813,6 +878,12 @@ func TestNormalizeHelpersAndUtilityBranches(t *testing.T) {
 	}
 
 	req = validSaveEventRequest()
+	req.PrivateAudiences = []string{"Members"}
+	if _, err := normalizeSaveEventRequest(req); err == nil {
+		t.Fatal("expected public audience validation error")
+	}
+
+	req = validSaveEventRequest()
 	req.PrivacyType = "secret"
 	if _, err := normalizeSaveEventRequest(req); err == nil {
 		t.Fatal("expected invalid privacy validation error")
@@ -829,6 +900,13 @@ func TestNormalizeHelpersAndUtilityBranches(t *testing.T) {
 	req.Address = nil
 	if _, err := normalizeSaveEventRequest(req); err == nil {
 		t.Fatal("expected missing address validation error")
+	}
+
+	req = validSaveEventRequest()
+	req.LocationMode = "address"
+	req.Address = &EventAddressInput{}
+	if _, err := normalizeSaveEventRequest(req); err == nil {
+		t.Fatal("expected blank new address validation error")
 	}
 
 	req = validSaveEventRequest()
@@ -1076,6 +1154,20 @@ func TestModelHelpersAndJSONRawMessage(t *testing.T) {
 	}
 }
 
+func TestApplyEventRequestPreservesCreatedBy(t *testing.T) {
+	creatorID := 7
+	event := &Event{CreatedBy: &creatorID}
+	replacementID := 99
+	req := validSaveEventRequest()
+	req.CreatedBy = &replacementID
+
+	applyEventRequest(event, req)
+
+	if event.CreatedBy == nil || *event.CreatedBy != creatorID {
+		t.Fatalf("expected created_by %d to be preserved, got %#v", creatorID, event.CreatedBy)
+	}
+}
+
 func TestCreateEventErrorBranches(t *testing.T) {
 	req := validSaveEventRequest()
 
@@ -1086,7 +1178,7 @@ func TestCreateEventErrorBranches(t *testing.T) {
 	defer restore()
 
 	req.LocationMode = "address"
-	req.Address = &EventAddressInput{Name: "Hall"}
+	req.Address = &EventAddressInput{Name: "Hall", AddressLine1: "1 Main", City: "Toronto", ProvinceState: "ON", PostalCode: "A1A1A1", Country: "Canada"}
 	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO "addresses"`)).
 		WillReturnError(errors.New("insert address failed"))

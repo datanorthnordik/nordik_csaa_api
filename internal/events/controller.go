@@ -96,6 +96,7 @@ func (ec *EventController) CreateEvent(c *gin.Context) {
 	if !ok {
 		return
 	}
+	req.CreatedBy = authUserIDFromContext(c)
 
 	event, err := ec.EventService.CreateEvent(req)
 	if err != nil {
@@ -119,6 +120,7 @@ func (ec *EventController) UpdateEvent(c *gin.Context) {
 	if !ok {
 		return
 	}
+	req.CreatedBy = nil
 
 	event, err := ec.EventService.UpdateEvent(id, req)
 	if err != nil {
@@ -211,12 +213,94 @@ func (ec *EventController) DeleteEventPhoto(c *gin.Context) {
 }
 
 func writeEventError(c *gin.Context, err error) {
+	if message, ok := eventValidationMessageFromStoreError(err); ok {
+		apiresponse.WriteValidationError(c, message)
+		return
+	}
+
 	httpapi.HandleError(c, "events", err,
 		httpapi.ServiceUnavailableRule("Event service is temporarily unavailable", ErrStoreUnavailable, ErrMediaBucketNotConfigured),
 		httpapi.NotFoundRule(ErrEventNotFound, ErrEventMediaNotFound),
 		httpapi.ConflictRule("Unable to save event because a conflicting record already exists"),
 		httpapi.ValidationRule(isClientSafeEventError),
 	)
+}
+
+func eventValidationMessageFromStoreError(err error) (string, bool) {
+	if err == nil {
+		return "", false
+	}
+
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+
+	if mapped := mapEventConstraintMessage(message); mapped != "" {
+		return mapped, true
+	}
+
+	switch {
+	case strings.Contains(message, "sqlstate 23514"),
+		strings.Contains(message, "violates check constraint"):
+		return "event payload violates a database constraint", true
+	case strings.Contains(message, "sqlstate 23503"),
+		strings.Contains(message, "violates foreign key constraint"):
+		return "event payload references a related record that does not exist", true
+	case strings.Contains(message, "sqlstate 23502"),
+		strings.Contains(message, "violates not-null constraint"):
+		return "event payload is missing a required field", true
+	default:
+		return "", false
+	}
+}
+
+func mapEventConstraintMessage(message string) string {
+	switch {
+	case strings.Contains(message, "chk_events_title_not_blank"):
+		return "title is required"
+	case strings.Contains(message, "chk_events_categories_required"):
+		return "at least one category is required"
+	case strings.Contains(message, "chk_events_event_type"):
+		return "invalid event_type"
+	case strings.Contains(message, "chk_events_end_after_start"):
+		return "end_at must be on or after start_at"
+	case strings.Contains(message, "chk_events_event_type_dates"):
+		return "event dates do not match event_type"
+	case strings.Contains(message, "chk_events_privacy_type"):
+		return "invalid privacy_type"
+	case strings.Contains(message, "chk_events_private_audiences"):
+		return "private_audiences must match privacy_type"
+	case strings.Contains(message, "chk_events_location_mode"):
+		return "invalid location_mode"
+	case strings.Contains(message, "chk_events_location_address"):
+		return "address details are required when location_mode is address"
+	case strings.Contains(message, "chk_events_review_request_emails"):
+		return "review_email_list must match request_review"
+	case strings.Contains(message, "chk_events_published_review"):
+		return "request_review cannot be true when published is true"
+	case strings.Contains(message, "chk_events_registration"):
+		return "registration_start_at and registration_end_at are required when registration_enabled is true"
+	case strings.Contains(message, "chk_events_recurrence_type"):
+		return "invalid recurrence_type"
+	case strings.Contains(message, "chk_events_recurrence_frequency"):
+		return "invalid recurrence_frequency"
+	case strings.Contains(message, "chk_events_recurrence_interval"):
+		return "recurrence_interval must be greater than zero"
+	case strings.Contains(message, "chk_events_repeat_definition"):
+		return "recurrence_type is required when repeat_enabled is true"
+	case strings.Contains(message, "chk_events_recurring_requires_frequency"):
+		return "recurrence_frequency is required when recurrence_type is recurring"
+	case strings.Contains(message, "chk_events_scheduled_has_no_frequency"):
+		return "recurrence_frequency must be empty when recurrence_type is scheduled"
+	case strings.Contains(message, "chk_events_recurrence_rule_json"):
+		return "recurrence_rule must be valid json"
+	case strings.Contains(message, "fk_events_address"):
+		return "address not found"
+	case strings.Contains(message, "fk_events_gallery"):
+		return "gallery not found"
+	case strings.Contains(message, "fk_events_created_by"):
+		return "created_by is invalid"
+	default:
+		return ""
+	}
 }
 
 func isClientSafeEventError(err error) bool {
@@ -274,6 +358,30 @@ func pathInt(c *gin.Context, key string) (int, bool) {
 		return 0, false
 	}
 	return value, true
+}
+
+func authUserIDFromContext(c *gin.Context) *int {
+	if c == nil {
+		return nil
+	}
+
+	value, exists := c.Get("auth_user_id")
+	if !exists {
+		return nil
+	}
+
+	switch typed := value.(type) {
+	case int:
+		return &typed
+	case int32:
+		next := int(typed)
+		return &next
+	case int64:
+		next := int(typed)
+		return &next
+	default:
+		return nil
+	}
 }
 
 func listEventsFilterFromQuery(c *gin.Context) (ListEventsFilter, error) {
