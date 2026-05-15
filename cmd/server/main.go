@@ -9,6 +9,7 @@ import (
 	"nordikcsaaapi/internal/events"
 	"nordikcsaaapi/internal/gallery"
 	"nordikcsaaapi/internal/menus"
+	"nordikcsaaapi/internal/newsletters"
 	"nordikcsaaapi/internal/pages"
 	"nordikcsaaapi/internal/press"
 	"os"
@@ -72,6 +73,8 @@ func main() {
 	pages.RegisterRoutes(r, pageService, auth.RequireBearerAuth(&cfg))
 	menuService := &menus.MenuService{DB: db}
 	menus.RegisterRoutes(r, menuService, auth.RequireBearerAuth(&cfg))
+	newsletterService := &newsletters.NewsletterService{DB: db, BucketName: cfg.DriveBucketName, BucketPrefix: cfg.DriveBucketPrefix}
+	newsletters.RegisterRoutes(r, newsletterService, auth.RequireBearerAuth(&cfg))
 	pressService := &press.PressService{DB: db, BucketName: cfg.DriveBucketName, BucketPrefix: cfg.DriveBucketPrefix}
 	press.RegisterRoutes(r, pressService, auth.RequireBearerAuth(&cfg))
 	r.GET("/health", func(c *gin.Context) {
