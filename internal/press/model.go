@@ -144,15 +144,15 @@ type PressMutationResponse struct {
 }
 
 type AddPressMediaResponse struct {
-	UploadedCount int `json:"uploaded_count"`
+	UploadedCount int `json:"uploadedCount"`
 }
 
 type DeletePressMediaResponse struct {
-	DeletedCount int `json:"deleted_count"`
+	DeletedCount int `json:"deletedCount"`
 }
 
 type ReorderPressMediaResponse struct {
-	UpdatedCount int `json:"updated_count"`
+	UpdatedCount int `json:"updatedCount"`
 }
 
 type PressMediaContent struct {

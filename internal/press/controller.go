@@ -1,12 +1,12 @@
 package press
 
 import (
-	"errors"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"nordikcsaaapi/internal/apiresponse"
+	"nordikcsaaapi/internal/httpapi"
 
 	"github.com/gin-gonic/gin"
 )
@@ -178,7 +178,7 @@ func (pc *PressController) AddPressMedia(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"message": "Media files added successfully", "result": resp})
+	c.JSON(http.StatusCreated, gin.H{"message": "Media files added successfully", "uploadedCount": resp.UploadedCount})
 }
 
 func (pc *PressController) UpdatePressMedia(c *gin.Context) {
@@ -232,7 +232,7 @@ func (pc *PressController) ReorderPressMedia(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Media reordered successfully", "result": resp})
+	c.JSON(http.StatusOK, gin.H{"message": "Media reordered successfully", "updatedCount": resp.UpdatedCount})
 }
 
 func (pc *PressController) DeletePressMedia(c *gin.Context) {
@@ -257,7 +257,7 @@ func (pc *PressController) DeletePressMedia(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Media deleted successfully", "result": resp})
+	c.JSON(http.StatusOK, gin.H{"message": "Media deleted successfully", "deletedCount": resp.DeletedCount})
 }
 
 func queryInt(c *gin.Context, key string, fallback int, min int, max int) int {
@@ -271,13 +271,13 @@ func queryInt(c *gin.Context, key string, fallback int, min int, max int) int {
 func pathInt(c *gin.Context, param string) (int, bool) {
 	value := strings.TrimSpace(c.Param(param))
 	if value == "" {
-		apiresponse.WriteValidationError(c, param+" is required")
+		apiresponse.WritePathParamError(c, param)
 		return 0, false
 	}
 
 	id, err := strconv.Atoi(value)
 	if err != nil || id <= 0 {
-		apiresponse.WriteValidationError(c, param+" must be a positive integer")
+		apiresponse.WritePathParamError(c, param)
 		return 0, false
 	}
 
@@ -285,7 +285,10 @@ func pathInt(c *gin.Context, param string) (int, bool) {
 }
 
 func authUserID(c *gin.Context) *int {
-	for _, key := range []string{"userID", "user_id", "userId"} {
+	if c == nil {
+		return nil
+	}
+	for _, key := range []string{"auth_user_id", "userID", "user_id", "userId"} {
 		val, exists := c.Get(key)
 		if !exists {
 			continue
@@ -293,6 +296,9 @@ func authUserID(c *gin.Context) *int {
 		switch v := val.(type) {
 		case int:
 			return &v
+		case int32:
+			userID := int(v)
+			return &userID
 		case int64:
 			userID := int(v)
 			return &userID
@@ -323,23 +329,33 @@ func sanitizeContentDispositionFilename(filename string) string {
 }
 
 func writePressError(c *gin.Context, err error) {
-	if err == nil {
-		apiresponse.WriteInternalError(c)
-		return
-	}
-
-	switch {
-	case errors.Is(err, ErrStoreUnavailable), errors.Is(err, ErrMediaBucketNotConfigured):
-		apiresponse.WriteInternalError(c)
-	case errors.Is(err, ErrPressEntryNotFound):
-		writePressNotFound(c, "Press entry not found")
-	case errors.Is(err, ErrPressMediaNotFound):
-		writePressNotFound(c, "Press media not found")
-	default:
-		apiresponse.WriteValidationError(c, err.Error())
-	}
+	httpapi.HandleError(c, "press", err,
+		httpapi.ServiceUnavailableRule("Press service is temporarily unavailable", ErrStoreUnavailable, ErrMediaBucketNotConfigured),
+		httpapi.NotFoundRule(ErrPressEntryNotFound, ErrPressMediaNotFound),
+		httpapi.ConflictRule("Unable to save press entry because a conflicting record already exists"),
+		httpapi.ValidationRule(isClientSafePressError),
+	)
 }
 
-func writePressNotFound(c *gin.Context, message string) {
-	c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": message})
+func isClientSafePressError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+
+	switch {
+	case strings.Contains(message, " is required"),
+		strings.Contains(message, " must be "),
+		strings.Contains(message, " must contain "),
+		strings.Contains(message, " must not contain "),
+		strings.Contains(message, "invalid "),
+		strings.Contains(message, "file upload or file_url is required"),
+		strings.Contains(message, "media content is not available from storage"),
+		strings.Contains(message, "use multipart/form-data"),
+		strings.Contains(message, "must include every press media item exactly once"):
+		return true
+	default:
+		return false
+	}
 }

@@ -24,6 +24,7 @@ var (
 )
 
 var (
+	pressNowFunc         = time.Now
 	uploadBytesToGCSHook = func(data []byte, bucketName, objectName, contentType string) (string, int64, error) {
 		return util.UploadBytesToGCS(data, bucketName, objectName, contentType)
 	}
@@ -167,15 +168,16 @@ func (s *PressService) GetPressMediaContent(id int, mediaID int) (*PressMediaCon
 	}
 
 	objectKey := strings.TrimSpace(media.GCPObjectKey)
-	if objectKey == "" {
-		return nil, fmt.Errorf("media content is not available from storage")
-	}
-	if strings.TrimSpace(s.BucketName) == "" {
-		return nil, ErrMediaBucketNotConfigured
+	bucketName, objectKey, err := s.resolveStoredObjectReference(objectKey, media.FileURL)
+	if err != nil {
+		return nil, err
 	}
 
-	data, contentType, err := downloadGCSObjectHook(s.BucketName, objectKey)
+	data, contentType, err := downloadGCSObjectHook(bucketName, objectKey)
 	if err != nil {
+		if errors.Is(err, util.ErrObjectNotFound) {
+			return nil, ErrPressMediaNotFound
+		}
 		return nil, err
 	}
 	if strings.TrimSpace(contentType) == "" {
@@ -252,6 +254,7 @@ func (s *PressService) UpdatePressEntry(id int, req SavePressEntryRequest, userI
 	}
 
 	oldCoverKey := entry.CoverImageGCPKey
+	oldCoverURL := entry.CoverImageURL
 	newCoverKey := ""
 	replaceOrRemoveCover := cleanReq.RemoveCoverImage
 
@@ -288,8 +291,8 @@ func (s *PressService) UpdatePressEntry(id int, req SavePressEntryRequest, userI
 		return nil, err
 	}
 
-	if replaceOrRemoveCover && oldCoverKey != "" && oldCoverKey != newCoverKey {
-		s.deleteObjectBestEffort(oldCoverKey)
+	if replaceOrRemoveCover && (oldCoverKey != "" || strings.TrimSpace(oldCoverURL) != "") && oldCoverKey != newCoverKey {
+		s.deleteStoredObjectBestEffort(oldCoverKey, oldCoverURL)
 	}
 
 	return pressMutationFromModel(entry), nil
@@ -319,9 +322,9 @@ func (s *PressService) DeletePressEntry(id int) error {
 		return err
 	}
 
-	s.deleteObjectBestEffort(entry.CoverImageGCPKey)
+	s.deleteStoredObjectBestEffort(entry.CoverImageGCPKey, entry.CoverImageURL)
 	for _, media := range mediaList {
-		s.deleteObjectBestEffort(media.GCPObjectKey)
+		s.deleteStoredObjectBestEffort(media.GCPObjectKey, media.FileURL)
 	}
 
 	return nil
@@ -404,7 +407,12 @@ func (s *PressService) UpdatePressMedia(id int, mediaID int, req UpdatePressMedi
 		media.FileName = fileName
 	}
 
-	if err := s.DB.Save(&media).Error; err != nil {
+	if err := s.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(&media).Error; err != nil {
+			return err
+		}
+		return touchPressEntry(tx, id, nil)
+	}); err != nil {
 		return nil, err
 	}
 
@@ -425,7 +433,7 @@ func (s *PressService) ReorderPressMedia(id int, mediaIDs []int) (*ReorderPressM
 	}
 
 	err = s.DB.Transaction(func(tx *gorm.DB) error {
-		if err := ensureMediaIDsBelongToEntry(tx, id, cleanIDs); err != nil {
+		if err := validatePressMediaReorderSet(tx, id, cleanIDs); err != nil {
 			return err
 		}
 
@@ -475,13 +483,16 @@ func (s *PressService) DeletePressMedia(id int, mediaIDs []int) (*DeletePressMed
 		if err := tx.Where("id IN ? AND press_entry_id = ?", cleanIDs, id).Delete(&PressMedia{}).Error; err != nil {
 			return err
 		}
+		if err := resequencePressMedia(tx, id); err != nil {
+			return err
+		}
 		return touchPressEntry(tx, id, nil)
 	}); err != nil {
 		return nil, err
 	}
 
 	for _, media := range mediaList {
-		s.deleteObjectBestEffort(media.GCPObjectKey)
+		s.deleteStoredObjectBestEffort(media.GCPObjectKey, media.FileURL)
 	}
 
 	return &DeletePressMediaResponse{DeletedCount: len(mediaList)}, nil
@@ -576,6 +587,11 @@ func (s *PressService) resolveCoverImage(input PressUploadInput, userID *int) (f
 
 	fileURL = strings.TrimSpace(input.FileURL)
 	objectKey = strings.TrimSpace(input.GCPObjectKey)
+	if objectKey == "" && looksLikeGCSReference(fileURL) {
+		if resolvedBucket, resolvedObjectKey, parseErr := util.ParseGCSObjectReference(strings.TrimSpace(s.BucketName), fileURL); parseErr == nil && strings.TrimSpace(resolvedBucket) != "" {
+			objectKey = resolvedObjectKey
+		}
+	}
 	if fileURL == "" && objectKey == "" {
 		return "", "", false, nil
 	}
@@ -612,6 +628,11 @@ func (s *PressService) buildPressMediaModel(pressEntryID int, input PressUploadI
 	if fileURL == "" {
 		return PressMedia{}, uploadedKey, fmt.Errorf("file upload or file_url is required")
 	}
+	if objectKey == "" && looksLikeGCSReference(fileURL) {
+		if resolvedBucket, resolvedObjectKey, parseErr := util.ParseGCSObjectReference(strings.TrimSpace(s.BucketName), fileURL); parseErr == nil && strings.TrimSpace(resolvedBucket) != "" {
+			objectKey = resolvedObjectKey
+		}
+	}
 	if displayName == "" {
 		displayName = fileName
 	}
@@ -642,7 +663,7 @@ func (s *PressService) buildObjectKey(kind string, filename string, userID *int)
 	}
 
 	ext := safeFileExtension(filename)
-	objectName := fmt.Sprintf("%s-%d-u%s%s", kind, time.Now().UnixNano(), userPart, ext)
+	objectName := fmt.Sprintf("%s-%d-u%s%s", kind, pressNowFunc().UnixNano(), userPart, ext)
 	if prefix == "" {
 		return path.Join("press-entries", kind, objectName)
 	}
@@ -655,6 +676,47 @@ func (s *PressService) deleteObjectBestEffort(objectKey string) {
 		return
 	}
 	_ = deleteGCSObjectHook(s.BucketName, objectKey)
+}
+
+func (s *PressService) deleteStoredObjectBestEffort(objectKey string, fileURL string) {
+	bucketName, resolvedObjectKey, err := s.resolveStoredObjectReference(objectKey, fileURL)
+	if err != nil || strings.TrimSpace(bucketName) == "" || strings.TrimSpace(resolvedObjectKey) == "" {
+		return
+	}
+	_ = deleteGCSObjectHook(bucketName, resolvedObjectKey)
+}
+
+func (s *PressService) resolveStoredObjectReference(objectKey string, fileURL string) (string, string, error) {
+	objectKey = strings.TrimSpace(objectKey)
+	fileURL = strings.TrimSpace(fileURL)
+	if objectKey != "" && strings.TrimSpace(s.BucketName) != "" {
+		bucketName := strings.TrimSpace(s.BucketName)
+		return bucketName, objectKey, nil
+	}
+	if fileURL == "" {
+		if objectKey != "" {
+			return "", "", ErrMediaBucketNotConfigured
+		}
+		return "", "", fmt.Errorf("media content is not available from storage")
+	}
+	if !looksLikeGCSReference(fileURL) {
+		return "", "", fmt.Errorf("media content is not available from storage")
+	}
+
+	bucketName, resolvedObjectKey, err := util.ParseGCSObjectReference(strings.TrimSpace(s.BucketName), fileURL)
+	if err != nil {
+		if errors.Is(err, util.ErrBucketNameRequired) {
+			return "", "", ErrMediaBucketNotConfigured
+		}
+		if errors.Is(err, util.ErrObjectNameRequired) {
+			return "", "", fmt.Errorf("media content is not available from storage")
+		}
+		return "", "", err
+	}
+	if strings.TrimSpace(bucketName) == "" || strings.TrimSpace(resolvedObjectKey) == "" {
+		return "", "", fmt.Errorf("media content is not available from storage")
+	}
+	return bucketName, resolvedObjectKey, nil
 }
 
 func (s *PressService) getPressEntryModel(id int) (PressEntry, error) {
@@ -682,27 +744,66 @@ func nextPressMediaSortOrder(tx *gorm.DB, pressEntryID int) (int, error) {
 	return int(maxSort.Int64) + 1, nil
 }
 
-func ensureMediaIDsBelongToEntry(tx *gorm.DB, pressEntryID int, mediaIDs []int) error {
-	var count int64
-	if err := tx.Model(&PressMedia{}).
-		Where("press_entry_id = ? AND id IN ?", pressEntryID, mediaIDs).
-		Count(&count).Error; err != nil {
+func validatePressMediaReorderSet(tx *gorm.DB, pressEntryID int, mediaIDs []int) error {
+	var rows []PressMedia
+	if err := tx.
+		Where("press_entry_id = ?", pressEntryID).
+		Order("sort_order ASC").
+		Order("id ASC").
+		Find(&rows).Error; err != nil {
 		return err
 	}
-	if int(count) != len(mediaIDs) {
+	if len(rows) == 0 {
 		return ErrPressMediaNotFound
+	}
+
+	available := make(map[int]struct{}, len(rows))
+	for _, row := range rows {
+		available[row.ID] = struct{}{}
+	}
+	for _, mediaID := range mediaIDs {
+		if _, exists := available[mediaID]; !exists {
+			return ErrPressMediaNotFound
+		}
+	}
+	if len(rows) != len(mediaIDs) {
+		return fmt.Errorf("media_ids must include every press media item exactly once")
 	}
 	return nil
 }
 
 func touchPressEntry(tx *gorm.DB, pressEntryID int, userID *int) error {
 	updates := map[string]interface{}{
-		"updated_at": time.Now(),
+		"updated_at": pressNowFunc(),
 	}
 	if userID != nil {
 		updates["updated_by"] = userID
 	}
 	return tx.Model(&PressEntry{}).Where("id = ?", pressEntryID).Updates(updates).Error
+}
+
+func resequencePressMedia(tx *gorm.DB, pressEntryID int) error {
+	var mediaList []PressMedia
+	if err := tx.
+		Where("press_entry_id = ?", pressEntryID).
+		Order("sort_order ASC").
+		Order("id ASC").
+		Find(&mediaList).Error; err != nil {
+		return err
+	}
+
+	for index, media := range mediaList {
+		if media.SortOrder == index {
+			continue
+		}
+		if err := tx.Model(&PressMedia{}).
+			Where("id = ? AND press_entry_id = ?", media.ID, pressEntryID).
+			Update("sort_order", index).Error; err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func validatePressMediaIDs(mediaIDs []int) ([]int, error) {
@@ -832,4 +933,20 @@ func safeFileExtension(filename string) string {
 		return ""
 	}
 	return ext
+}
+
+func looksLikeGCSReference(fileURL string) bool {
+	fileURL = strings.ToLower(strings.TrimSpace(fileURL))
+	switch {
+	case fileURL == "":
+		return false
+	case strings.HasPrefix(fileURL, "gs://"):
+		return true
+	case strings.HasPrefix(fileURL, "https://storage.googleapis.com/"),
+		strings.HasPrefix(fileURL, "http://storage.googleapis.com/"),
+		strings.Contains(fileURL, ".storage.googleapis.com/"):
+		return true
+	default:
+		return !strings.Contains(fileURL, "://")
+	}
 }
