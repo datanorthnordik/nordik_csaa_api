@@ -382,6 +382,13 @@ func TestAddUpdateReorderDeletePressMediaEndpoints(t *testing.T) {
 	if service.gotAddMediaUserID == nil || *service.gotAddMediaUserID != 7 {
 		t.Fatalf("expected add media auth user id 7, got %#v", service.gotAddMediaUserID)
 	}
+	var addPayload map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&addPayload); err != nil {
+		t.Fatalf("decode add media response: %v", err)
+	}
+	if addPayload["uploadedCount"] != float64(2) {
+		t.Fatalf("expected uploadedCount 2, got %#v", addPayload)
+	}
 
 	res = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPatch, "/api/press/4/media/10", strings.NewReader(`{"display_name":"Agenda v2","file_name":"agenda-v2.pdf"}`))
@@ -400,6 +407,13 @@ func TestAddUpdateReorderDeletePressMediaEndpoints(t *testing.T) {
 	if res.Code != http.StatusOK || service.gotReorderID != 4 || len(service.gotReorderMediaIDs) != 2 {
 		t.Fatalf("unexpected reorder result: status=%d id=%d ids=%#v", res.Code, service.gotReorderID, service.gotReorderMediaIDs)
 	}
+	var reorderPayload map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&reorderPayload); err != nil {
+		t.Fatalf("decode reorder response: %v", err)
+	}
+	if reorderPayload["updatedCount"] != float64(2) {
+		t.Fatalf("expected updatedCount 2, got %#v", reorderPayload)
+	}
 
 	res = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodDelete, "/api/press/4/media", strings.NewReader(`{"media_ids":[10,11]}`))
@@ -408,6 +422,13 @@ func TestAddUpdateReorderDeletePressMediaEndpoints(t *testing.T) {
 	router.ServeHTTP(res, req)
 	if res.Code != http.StatusOK || service.gotDeleteMediaID != 4 || len(service.gotDeleteMediaIDs) != 2 {
 		t.Fatalf("unexpected delete media result: status=%d id=%d ids=%#v", res.Code, service.gotDeleteMediaID, service.gotDeleteMediaIDs)
+	}
+	var deletePayload map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&deletePayload); err != nil {
+		t.Fatalf("decode delete media response: %v", err)
+	}
+	if deletePayload["deletedCount"] != float64(2) {
+		t.Fatalf("expected deletedCount 2, got %#v", deletePayload)
 	}
 
 	res = httptest.NewRecorder()

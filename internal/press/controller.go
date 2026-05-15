@@ -178,7 +178,7 @@ func (pc *PressController) AddPressMedia(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"message": "Media files added successfully", "result": resp})
+	c.JSON(http.StatusCreated, gin.H{"message": "Media files added successfully", "uploadedCount": resp.UploadedCount})
 }
 
 func (pc *PressController) UpdatePressMedia(c *gin.Context) {
@@ -232,7 +232,7 @@ func (pc *PressController) ReorderPressMedia(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Media reordered successfully", "result": resp})
+	c.JSON(http.StatusOK, gin.H{"message": "Media reordered successfully", "updatedCount": resp.UpdatedCount})
 }
 
 func (pc *PressController) DeletePressMedia(c *gin.Context) {
@@ -257,7 +257,7 @@ func (pc *PressController) DeletePressMedia(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Media deleted successfully", "result": resp})
+	c.JSON(http.StatusOK, gin.H{"message": "Media deleted successfully", "deletedCount": resp.DeletedCount})
 }
 
 func queryInt(c *gin.Context, key string, fallback int, min int, max int) int {
