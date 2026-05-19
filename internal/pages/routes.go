@@ -8,6 +8,7 @@ func RegisterRoutes(r *gin.Engine, ps PageServicePort, protected ...gin.HandlerF
 	publicGroup := r.Group("/api/pages")
 	{
 		publicGroup.GET("", controller.ListPages)
+		publicGroup.GET("/by-slug", controller.GetPageBySlug)
 		publicGroup.GET("/documents/:documentId/content", controller.GetPageDocumentContent)
 		publicGroup.GET("/:id", controller.GetPage)
 		publicGroup.GET("/:id/hero/content", controller.GetPageHeroImageContent)

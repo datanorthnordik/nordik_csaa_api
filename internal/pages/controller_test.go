@@ -22,12 +22,14 @@ import (
 type fakePageService struct {
 	listResp      *PageListResponse
 	detailResp    *PageDetailResponse
+	slugResp      *PageDetailResponse
 	heroResp      *PageHeroImageContent
 	documentResp  *PageDocumentContent
 	createResp    *PageMutationResponse
 	updateResp    *PageMutationResponse
 	listErr       error
 	detailErr     error
+	slugErr       error
 	heroErr       error
 	documentErr   error
 	createErr     error
@@ -35,6 +37,7 @@ type fakePageService struct {
 	deleteErr     error
 	gotListFilter PageListFilters
 	gotGetID      int
+	gotGetSlug    string
 	gotHeroID     int
 	gotDocumentID int
 	gotCreateReq  SavePageRequest
@@ -63,6 +66,17 @@ func (s *fakePageService) GetPage(id int) (*PageDetailResponse, error) {
 		return &PageDetailResponse{ID: id, PageTitle: "Homepage"}, nil
 	}
 	return s.detailResp, nil
+}
+
+func (s *fakePageService) GetPageBySlug(slug string) (*PageDetailResponse, error) {
+	s.gotGetSlug = slug
+	if s.slugErr != nil {
+		return nil, s.slugErr
+	}
+	if s.slugResp == nil {
+		return &PageDetailResponse{ID: 1, PageTitle: "Homepage", URLSlug: slug, Status: PageStatusPublished}, nil
+	}
+	return s.slugResp, nil
 }
 
 func (s *fakePageService) GetPageHeroImageContent(id int) (*PageHeroImageContent, error) {
@@ -183,6 +197,7 @@ func TestListPagesEndpointWithoutPaginationParamsReturnsAllPages(t *testing.T) {
 func TestGetPageAndHeroEndpoints(t *testing.T) {
 	service := &fakePageService{
 		detailResp: &PageDetailResponse{ID: 12, PageTitle: "About Us", URLSlug: "/about-us"},
+		slugResp:   &PageDetailResponse{ID: 13, PageTitle: "About", URLSlug: "/about"},
 		heroResp: &PageHeroImageContent{
 			Content:     []byte("hero"),
 			ContentType: "image/png",
@@ -204,6 +219,16 @@ func TestGetPageAndHeroEndpoints(t *testing.T) {
 	}
 	if service.gotGetID != 12 {
 		t.Fatalf("expected get id 12, got %d", service.gotGetID)
+	}
+
+	res = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/pages/by-slug?slug=About", nil)
+	router.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", res.Code, res.Body.String())
+	}
+	if service.gotGetSlug != "/about" {
+		t.Fatalf("expected normalized slug /about, got %q", service.gotGetSlug)
 	}
 
 	res = httptest.NewRecorder()
@@ -355,6 +380,15 @@ func TestPageEndpointErrorsAndProtection(t *testing.T) {
 	payload = assertPageAPIError(t, res, http.StatusBadRequest, "validation_error", "Invalid path parameter")
 	if len(payload.Error.Details) != 1 || payload.Error.Details[0].Field != "documentId" {
 		t.Fatalf("expected documentId validation detail, got %#v", payload)
+	}
+
+	router = setupPageRouter(&fakePageService{})
+	res = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/pages/by-slug", nil)
+	router.ServeHTTP(res, req)
+	payload = assertPageAPIError(t, res, http.StatusBadRequest, "validation_error", "Invalid query parameter")
+	if len(payload.Error.Details) != 1 || payload.Error.Details[0].Field != "slug" {
+		t.Fatalf("expected slug validation detail, got %#v", payload)
 	}
 
 	protected := setupProtectedPageRouter(&fakePageService{})

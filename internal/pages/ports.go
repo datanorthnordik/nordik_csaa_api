@@ -3,6 +3,7 @@ package pages
 type PageServicePort interface {
 	ListPages(filter PageListFilters) (*PageListResponse, error)
 	GetPage(id int) (*PageDetailResponse, error)
+	GetPageBySlug(slug string) (*PageDetailResponse, error)
 	GetPageHeroImageContent(id int) (*PageHeroImageContent, error)
 	GetPageDocumentContent(id int) (*PageDocumentContent, error)
 	CreatePage(req SavePageRequest) (*PageMutationResponse, error)
