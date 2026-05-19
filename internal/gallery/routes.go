@@ -7,10 +7,6 @@ func RegisterRoutes(r *gin.Engine, gs GalleryServicePort, protected ...gin.Handl
 
 	group := r.Group("/api/galleries")
 	{
-		getHandlers := withProtected(controller.ListGalleries, protected...)
-		getByIDHandlers := withProtected(controller.GetGallery, protected...)
-		getCoverHandlers := withProtected(controller.GetGalleryCoverContent, protected...)
-		getImageContentHandlers := withProtected(controller.GetGalleryImageContent, protected...)
 		postHandlers := withProtected(controller.CreateGallery, protected...)
 		putHandlers := withProtected(controller.UpdateGallery, protected...)
 		deleteHandlers := withProtected(controller.DeleteGallery, protected...)
@@ -19,10 +15,10 @@ func RegisterRoutes(r *gin.Engine, gs GalleryServicePort, protected ...gin.Handl
 		reorderImagesHandlers := withProtected(controller.ReorderGalleryImages, protected...)
 		deleteImagesHandlers := withProtected(controller.DeleteGalleryImages, protected...)
 
-		group.GET("", getHandlers...)
-		group.GET("/:id", getByIDHandlers...)
-		group.GET("/:id/cover/content", getCoverHandlers...)
-		group.GET("/:id/images/:imageId/content", getImageContentHandlers...)
+		group.GET("", controller.ListGalleries)
+		group.GET("/:id", controller.GetGallery)
+		group.GET("/:id/cover/content", controller.GetGalleryCoverContent)
+		group.GET("/:id/images/:imageId/content", controller.GetGalleryImageContent)
 		group.POST("", postHandlers...)
 		group.PUT("/:id", putHandlers...)
 		group.DELETE("/:id", deleteHandlers...)
