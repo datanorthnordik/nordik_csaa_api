@@ -192,6 +192,13 @@ func setupProtectedRouter(service GalleryServicePort) *gin.Engine {
 	return r
 }
 
+func setupRouter(service GalleryServicePort) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	RegisterRoutes(r, service, authpkg.RequireBearerAuth(&config.Config{JWTSecret: "test-secret"}))
+	return r
+}
+
 func TestCreateGalleryEndpoint(t *testing.T) {
 	service := &fakeGalleryService{}
 	router := setupProtectedRouter(service)
@@ -240,11 +247,10 @@ func TestListAndGetGalleryEndpoints(t *testing.T) {
 		},
 		detailResp: &GalleryDetailResponse{ID: 4, Name: "Homepage", AssetLimit: 20},
 	}
-	router := setupProtectedRouter(service)
+	router := setupRouter(service)
 
 	res := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/galleries", nil)
-	req.Header.Set("Authorization", "Bearer "+signToken(t))
 	router.ServeHTTP(res, req)
 	if res.Code != http.StatusOK || !service.gotList {
 		t.Fatalf("unexpected list result: status=%d gotList=%v", res.Code, service.gotList)
@@ -252,7 +258,6 @@ func TestListAndGetGalleryEndpoints(t *testing.T) {
 
 	res = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/api/galleries/4", nil)
-	req.Header.Set("Authorization", "Bearer "+signToken(t))
 	router.ServeHTTP(res, req)
 	if res.Code != http.StatusOK || service.gotDetailID != 4 {
 		t.Fatalf("unexpected detail result: status=%d id=%d", res.Code, service.gotDetailID)
@@ -290,11 +295,10 @@ func TestDeleteGalleryEndpoint(t *testing.T) {
 
 func TestGalleryContentEndpoints(t *testing.T) {
 	service := &fakeGalleryService{}
-	router := setupProtectedRouter(service)
+	router := setupRouter(service)
 
 	res := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/galleries/4/cover/content", nil)
-	req.Header.Set("Authorization", "Bearer "+signToken(t))
 	router.ServeHTTP(res, req)
 	if res.Code != http.StatusOK || service.gotCoverID != 4 {
 		t.Fatalf("unexpected cover result: status=%d id=%d", res.Code, service.gotCoverID)
@@ -302,7 +306,6 @@ func TestGalleryContentEndpoints(t *testing.T) {
 
 	res = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/api/galleries/4/images/12/content", nil)
-	req.Header.Set("Authorization", "Bearer "+signToken(t))
 	router.ServeHTTP(res, req)
 	if res.Code != http.StatusOK || service.gotImageContentID != 4 || service.gotImageContentImageID != 12 {
 		t.Fatalf(
@@ -311,6 +314,19 @@ func TestGalleryContentEndpoints(t *testing.T) {
 			service.gotImageContentID,
 			service.gotImageContentImageID,
 		)
+	}
+}
+
+func TestGalleryMutationEndpointsStillRequireAuth(t *testing.T) {
+	router := setupRouter(&fakeGalleryService{})
+
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/galleries", strings.NewReader(`{"name":"Homepage"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for unauthenticated mutation, got %d: %s", res.Code, res.Body.String())
 	}
 }
 
