@@ -53,6 +53,25 @@ func (pc *PageController) GetPage(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+func (pc *PageController) GetPageBySlug(c *gin.Context) {
+	slug := normalizeURLSlug(c.Query("slug"))
+	if slug == "" {
+		apiresponse.WriteValidationError(c, "Invalid query parameter", apiresponse.ErrorDetail{
+			Field:   "slug",
+			Message: "slug is required",
+		})
+		return
+	}
+
+	resp, err := pc.PageService.GetPageBySlug(slug)
+	if err != nil {
+		writePageError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
 func (pc *PageController) GetPageHeroImageContent(c *gin.Context) {
 	id, ok := pathInt(c, "id")
 	if !ok {

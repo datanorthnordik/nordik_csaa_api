@@ -42,6 +42,9 @@ func TestPageServiceReturnsStoreUnavailableWithoutDB(t *testing.T) {
 	if _, err := service.GetPage(1); !errors.Is(err, ErrStoreUnavailable) {
 		t.Fatalf("expected GetPage to return ErrStoreUnavailable, got %v", err)
 	}
+	if _, err := service.GetPageBySlug("/home"); !errors.Is(err, ErrStoreUnavailable) {
+		t.Fatalf("expected GetPageBySlug to return ErrStoreUnavailable, got %v", err)
+	}
 	if _, err := service.GetPageHeroImageContent(1); !errors.Is(err, ErrStoreUnavailable) {
 		t.Fatalf("expected GetPageHeroImageContent to return ErrStoreUnavailable, got %v", err)
 	}
@@ -183,6 +186,39 @@ func TestGetPageSuccessAndNotFound(t *testing.T) {
 
 	if _, err := service.GetPage(99); !errors.Is(err, ErrPageNotFound) {
 		t.Fatalf("expected ErrPageNotFound, got %v", err)
+	}
+}
+
+func TestGetPageBySlugReturnsPublishedPage(t *testing.T) {
+	db, mock, cleanup := setupMockDB(t)
+	defer cleanup()
+
+	service := &PageService{DB: db}
+
+	mock.ExpectQuery(`SELECT .* FROM "pages" LEFT JOIN users AS created_users ON created_users.id = pages.created_by LEFT JOIN users AS modified_users ON modified_users.id = pages.modified_by LEFT JOIN pages AS parent_pages ON parent_pages.id = pages.parent_id WHERE pages.url_slug = \$1 AND pages.status = \$2 LIMIT \$3`).
+		WithArgs("/about", PageStatusPublished, 1).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "page_title", "url_slug", "parent_id", "page_type", "parent_page_title", "parent_page_url_slug", "status", "hero_image_enabled", "hero_image_url", "hero_image_object_key",
+			"seo_page_title", "seo_page_description", "created_by", "modified_by", "last_modified", "created_at", "updated_at",
+			"created_by_name", "modified_by_name",
+		}).AddRow(
+			12, "About Us", "/about", nil, PageTypePage, "", "", PageStatusPublished, false, "", "",
+			"About CSAA", "Page description", 3, 7, time.Date(2026, 5, 10, 9, 0, 0, 0, time.UTC), time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 5, 10, 9, 0, 0, 0, time.UTC),
+			"Alex Rivera", "Jane Doe",
+		))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "page_details" WHERE page_id = $1 ORDER BY "page_details"."id" LIMIT $2`)).
+		WithArgs(12, 1).
+		WillReturnError(gorm.ErrRecordNotFound)
+
+	resp, err := service.GetPageBySlug(" About ")
+	if err != nil {
+		t.Fatalf("GetPageBySlug returned error: %v", err)
+	}
+	if resp.URLSlug != "/about" || resp.Status != PageStatusPublished {
+		t.Fatalf("unexpected detail response: %#v", resp)
+	}
+	if resp.PageDetail == nil || resp.PageDetail.PageID != 12 {
+		t.Fatalf("expected synthesized empty page detail, got %#v", resp.PageDetail)
 	}
 }
 

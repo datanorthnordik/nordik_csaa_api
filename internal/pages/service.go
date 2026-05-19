@@ -130,8 +130,29 @@ func (s *PageService) GetPage(id int) (*PageDetailResponse, error) {
 		return nil, ErrStoreUnavailable
 	}
 
+	return s.lookupPageDetail(func(query *gorm.DB) *gorm.DB {
+		return query.Where("pages.id = ?", id)
+	})
+}
+
+func (s *PageService) GetPageBySlug(slug string) (*PageDetailResponse, error) {
+	if s.DB == nil {
+		return nil, ErrStoreUnavailable
+	}
+
+	normalizedSlug := normalizeURLSlug(slug)
+	if normalizedSlug == "" {
+		return nil, errors.New("slug is required")
+	}
+
+	return s.lookupPageDetail(func(query *gorm.DB) *gorm.DB {
+		return query.Where("pages.url_slug = ? AND pages.status = ?", normalizedSlug, PageStatusPublished)
+	})
+}
+
+func (s *PageService) lookupPageDetail(apply func(*gorm.DB) *gorm.DB) (*PageDetailResponse, error) {
 	var item PageDetailResponse
-	if err := s.DB.Model(&Page{}).
+	query := s.DB.Model(&Page{}).
 		Select(`
 			pages.id,
 			pages.page_title,
@@ -156,9 +177,12 @@ func (s *PageService) GetPage(id int) (*PageDetailResponse, error) {
 		`).
 		Joins(`LEFT JOIN users AS created_users ON created_users.id = pages.created_by`).
 		Joins(`LEFT JOIN users AS modified_users ON modified_users.id = pages.modified_by`).
-		Joins(`LEFT JOIN pages AS parent_pages ON parent_pages.id = pages.parent_id`).
-		Where("pages.id = ?", id).
-		Take(&item).Error; err != nil {
+		Joins(`LEFT JOIN pages AS parent_pages ON parent_pages.id = pages.parent_id`)
+	if apply != nil {
+		query = apply(query)
+	}
+
+	if err := query.Take(&item).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrPageNotFound
 		}
