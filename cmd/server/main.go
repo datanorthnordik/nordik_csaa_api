@@ -52,8 +52,8 @@ func main() {
 	if err != nil {
 		log.Fatal("Failed to initialize database pool:", err)
 	}
-	sqlDB.SetMaxOpenConns(10)
-	sqlDB.SetMaxIdleConns(5)
+	sqlDB.SetMaxOpenConns(2)
+	sqlDB.SetMaxIdleConns(1)
 	sqlDB.SetConnMaxLifetime(5 * time.Minute)
 	sqlDB.SetConnMaxIdleTime(5 * time.Minute)
 

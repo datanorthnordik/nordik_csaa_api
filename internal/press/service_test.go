@@ -133,6 +133,12 @@ func TestListPressEntriesSuccessAndValidation(t *testing.T) {
 			9, "Spring Fair", time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), nil, "https://example.com/press", "<p>Hello</p>", "published", "public",
 			"gs://drive-bucket/press-entries/covers/cover.png", "press-entries/covers/cover.png", nil, 7, 7, time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC),
 		))
+	mock.ExpectQuery(`SELECT \* FROM "press_media" WHERE press_entry_id IN \(\$1\) ORDER BY press_entry_id ASC,sort_order ASC,id ASC`).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "press_entry_id", "display_name", "file_name", "gcp_object_key", "file_url", "mime_type", "file_size", "media_role", "sort_order", "created_by", "updated_by", "created_at", "updated_at",
+		}).AddRow(
+			4, 9, "Agenda", "agenda.pdf", "press-entries/media/agenda.pdf", "gs://drive-bucket/press-entries/media/agenda.pdf", "application/pdf", 1024, "attachment", 0, 7, 7, time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
+		))
 
 	resp, err := svc.ListPressEntries(ListPressFilter{
 		Status:     "published",
@@ -151,6 +157,12 @@ func TestListPressEntriesSuccessAndValidation(t *testing.T) {
 	}
 	if resp.Items[0].Title != "Spring Fair" || resp.Items[0].Status != "published" {
 		t.Fatalf("unexpected summary item: %#v", resp.Items[0])
+	}
+	if resp.Items[0].SourceURL != "https://example.com/press" || resp.Items[0].ContentHTML != "<p>Hello</p>" {
+		t.Fatalf("expected list item detail fields, got %#v", resp.Items[0])
+	}
+	if len(resp.Items[0].Media) != 1 || resp.Items[0].Media[0].DisplayName != "Agenda" {
+		t.Fatalf("expected list item media, got %#v", resp.Items[0].Media)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -1263,11 +1275,17 @@ func TestPressHelpersAndValidation(t *testing.T) {
 	}
 
 	entry := PressEntry{ID: 9, Title: "Spring Fair", ReleaseDate: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), Status: "published", Visibility: "public"}
-	if summary := pressSummaryFromModel(entry); summary.Title != "Spring Fair" {
+	if summary := pressSummaryFromModel(entry, nil); summary.Title != "Spring Fair" {
 		t.Fatalf("unexpected summary conversion: %#v", summary)
+	}
+	if summary := pressSummaryFromModel(entry, nil); summary.Media == nil {
+		t.Fatalf("expected summary media to default to empty slice, got %#v", summary)
 	}
 	if mutation := pressMutationFromModel(entry); mutation.ID != 9 {
 		t.Fatalf("unexpected mutation conversion: %#v", mutation)
+	}
+	if detail := pressDetailFromModel(entry, nil); detail.Media == nil || detail.Title != "Spring Fair" {
+		t.Fatalf("unexpected detail conversion: %#v", detail)
 	}
 	if mediaResp := pressMediaFromModel(PressMedia{ID: 4, DisplayName: "Agenda"}); mediaResp.DisplayName != "Agenda" {
 		t.Fatalf("unexpected media conversion: %#v", mediaResp)

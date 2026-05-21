@@ -96,9 +96,34 @@ func (s *PressService) ListPressEntries(filter ListPressFilter) (*PressListRespo
 		return nil, err
 	}
 
+	mediaByEntryID := make(map[int][]PressMediaResponse, len(entries))
+	if len(entries) > 0 {
+		entryIDs := make([]int, 0, len(entries))
+		for _, entry := range entries {
+			entryIDs = append(entryIDs, entry.ID)
+		}
+
+		var mediaList []PressMedia
+		if err := s.DB.
+			Where("press_entry_id IN ?", entryIDs).
+			Order("press_entry_id ASC").
+			Order("sort_order ASC").
+			Order("id ASC").
+			Find(&mediaList).Error; err != nil {
+			return nil, err
+		}
+
+		for _, media := range mediaList {
+			mediaByEntryID[media.PressEntryID] = append(
+				mediaByEntryID[media.PressEntryID],
+				pressMediaFromModel(media),
+			)
+		}
+	}
+
 	items := make([]PressSummaryItem, 0, len(entries))
 	for _, entry := range entries {
-		items = append(items, pressSummaryFromModel(entry))
+		items = append(items, pressSummaryFromModel(entry, mediaByEntryID[entry.ID]))
 	}
 
 	return &PressListResponse{
@@ -130,24 +155,8 @@ func (s *PressService) GetPressEntry(id int) (*PressDetailResponse, error) {
 		mediaResponses = append(mediaResponses, pressMediaFromModel(media))
 	}
 
-	return &PressDetailResponse{
-		ID:               entry.ID,
-		Title:            entry.Title,
-		ReleaseDate:      entry.ReleaseDate,
-		CategoryID:       entry.CategoryID,
-		SourceURL:        entry.SourceURL,
-		ContentHTML:      entry.ContentHTML,
-		Status:           entry.Status,
-		Visibility:       entry.Visibility,
-		CoverImageURL:    entry.CoverImageURL,
-		CoverImageGCPKey: entry.CoverImageGCPKey,
-		PublishAt:        entry.PublishAt,
-		Media:            mediaResponses,
-		CreatedBy:        entry.CreatedBy,
-		UpdatedBy:        entry.UpdatedBy,
-		CreatedAt:        entry.CreatedAt,
-		UpdatedAt:        entry.UpdatedAt,
-	}, nil
+	resp := pressDetailFromModel(entry, mediaResponses)
+	return &resp, nil
 }
 
 func (s *PressService) GetPressCoverImageContent(id int) (*PressMediaContent, error) {
@@ -901,16 +910,53 @@ func allowedPressSortColumn(sortBy string) string {
 	}
 }
 
-func pressSummaryFromModel(entry PressEntry) PressSummaryItem {
+func pressSummaryFromModel(entry PressEntry, media []PressMediaResponse) PressSummaryItem {
+	if media == nil {
+		media = []PressMediaResponse{}
+	}
+
 	return PressSummaryItem{
-		ID:            entry.ID,
-		Title:         entry.Title,
-		ReleaseDate:   entry.ReleaseDate,
-		Status:        entry.Status,
-		Visibility:    entry.Visibility,
-		CoverImageURL: entry.CoverImageURL,
-		CreatedAt:     entry.CreatedAt,
-		UpdatedAt:     entry.UpdatedAt,
+		ID:               entry.ID,
+		Title:            entry.Title,
+		ReleaseDate:      entry.ReleaseDate,
+		CategoryID:       entry.CategoryID,
+		SourceURL:        entry.SourceURL,
+		ContentHTML:      entry.ContentHTML,
+		Status:           entry.Status,
+		Visibility:       entry.Visibility,
+		CoverImageURL:    entry.CoverImageURL,
+		CoverImageGCPKey: entry.CoverImageGCPKey,
+		PublishAt:        entry.PublishAt,
+		Media:            media,
+		CreatedBy:        entry.CreatedBy,
+		UpdatedBy:        entry.UpdatedBy,
+		CreatedAt:        entry.CreatedAt,
+		UpdatedAt:        entry.UpdatedAt,
+	}
+}
+
+func pressDetailFromModel(entry PressEntry, media []PressMediaResponse) PressDetailResponse {
+	if media == nil {
+		media = []PressMediaResponse{}
+	}
+
+	return PressDetailResponse{
+		ID:               entry.ID,
+		Title:            entry.Title,
+		ReleaseDate:      entry.ReleaseDate,
+		CategoryID:       entry.CategoryID,
+		SourceURL:        entry.SourceURL,
+		ContentHTML:      entry.ContentHTML,
+		Status:           entry.Status,
+		Visibility:       entry.Visibility,
+		CoverImageURL:    entry.CoverImageURL,
+		CoverImageGCPKey: entry.CoverImageGCPKey,
+		PublishAt:        entry.PublishAt,
+		Media:            media,
+		CreatedBy:        entry.CreatedBy,
+		UpdatedBy:        entry.UpdatedBy,
+		CreatedAt:        entry.CreatedAt,
+		UpdatedAt:        entry.UpdatedAt,
 	}
 }
 
