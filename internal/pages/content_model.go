@@ -306,12 +306,12 @@ type PageSectionResponse struct {
 	SortOrder   int                            `json:"sort_order"`
 	IsEnabled   bool                           `json:"is_enabled"`
 	Settings    JSONRawMessage                 `json:"settings,omitempty"`
-	Header      *PageHeaderSectionResponse     `json:"header,omitempty"`
-	Typography  *PageTypographySectionResponse `json:"typography,omitempty"`
-	Gallery     *PageGallerySectionResponse    `json:"gallery,omitempty"`
-	Quote       *PageQuoteSectionResponse      `json:"quote,omitempty"`
-	CTABanner   *PageCTABannerSectionResponse  `json:"cta_banner,omitempty"`
-	Documents   *PageDocumentsSectionResponse  `json:"documents,omitempty"`
+	Header      *PageHeaderSectionResponse     `gorm:"-" json:"header,omitempty"`
+	Typography  *PageTypographySectionResponse `gorm:"-" json:"typography,omitempty"`
+	Gallery     *PageGallerySectionResponse    `gorm:"-" json:"gallery,omitempty"`
+	Quote       *PageQuoteSectionResponse      `gorm:"-" json:"quote,omitempty"`
+	CTABanner   *PageCTABannerSectionResponse  `gorm:"-" json:"cta_banner,omitempty"`
+	Documents   *PageDocumentsSectionResponse  `gorm:"-" json:"documents,omitempty"`
 	CreatedAt   time.Time                      `json:"created_at"`
 	UpdatedAt   time.Time                      `json:"updated_at"`
 }
