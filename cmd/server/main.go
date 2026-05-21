@@ -13,6 +13,7 @@ import (
 	"nordikcsaaapi/internal/pages"
 	"nordikcsaaapi/internal/press"
 	"os"
+	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -47,6 +48,14 @@ func main() {
 	if err != nil {
 		log.Fatal("Failed to connect to database:", err)
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		log.Fatal("Failed to initialize database pool:", err)
+	}
+	sqlDB.SetMaxOpenConns(2)
+	sqlDB.SetMaxIdleConns(1)
+	sqlDB.SetConnMaxLifetime(5 * time.Minute)
+	sqlDB.SetConnMaxIdleTime(5 * time.Minute)
 
 	r := gin.New()
 	r.Use(gin.Logger())

@@ -126,7 +126,7 @@ type PageDetailResponse struct {
 	LastModified       time.Time                  `json:"last_modified"`
 	CreatedAt          time.Time                  `json:"created_at"`
 	UpdatedAt          time.Time                  `json:"updated_at"`
-	PageDetail         *PageContentDetailResponse `json:"page_detail,omitempty"`
+	PageDetail         *PageContentDetailResponse `gorm:"-" json:"page_detail,omitempty"`
 }
 
 type PageHeroImageContent struct {

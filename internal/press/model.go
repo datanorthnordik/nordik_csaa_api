@@ -98,14 +98,22 @@ type PressMediaResponse struct {
 }
 
 type PressSummaryItem struct {
-	ID            int       `json:"id"`
-	Title         string    `json:"title"`
-	ReleaseDate   time.Time `json:"release_date"`
-	Status        string    `json:"status"`
-	Visibility    string    `json:"visibility"`
-	CoverImageURL string    `json:"cover_image_url,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID               int                  `json:"id"`
+	Title            string               `json:"title"`
+	ReleaseDate      time.Time            `json:"release_date"`
+	CategoryID       *int                 `json:"category_id,omitempty"`
+	SourceURL        string               `json:"source_url"`
+	ContentHTML      string               `json:"content_html"`
+	Status           string               `json:"status"`
+	Visibility       string               `json:"visibility"`
+	CoverImageURL    string               `json:"cover_image_url,omitempty"`
+	CoverImageGCPKey string               `json:"cover_image_gcp_key,omitempty"`
+	PublishAt        *time.Time           `json:"publish_at,omitempty"`
+	Media            []PressMediaResponse `json:"media"`
+	CreatedBy        *int                 `json:"created_by,omitempty"`
+	UpdatedBy        *int                 `json:"updated_by,omitempty"`
+	CreatedAt        time.Time            `json:"created_at"`
+	UpdatedAt        time.Time            `json:"updated_at"`
 }
 
 type PressListResponse struct {
