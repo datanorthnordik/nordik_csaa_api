@@ -561,6 +561,45 @@ func TestPageValidationAndHelpers(t *testing.T) {
 	}
 }
 
+func TestNormalizeSavePageSectionRequestAcceptsIconsGalleryViewMode(t *testing.T) {
+	galleryID := 14
+
+	section, err := normalizeSavePageSectionRequest(
+		SavePageSectionRequest{
+			SectionType: PageSectionTypeGallery,
+			Gallery: &PageGallerySectionInput{
+				GalleryID: &galleryID,
+				ViewMode:  " Icons ",
+			},
+		},
+		0,
+	)
+	if err != nil {
+		t.Fatalf("expected icons gallery view mode to be accepted, got %v", err)
+	}
+	if section.Gallery == nil {
+		t.Fatal("expected gallery section payload to be initialized")
+	}
+	if section.Gallery.ViewMode != PageGalleryViewIcons {
+		t.Fatalf("expected normalized view mode %q, got %q", PageGalleryViewIcons, section.Gallery.ViewMode)
+	}
+}
+
+func TestNormalizeSavePageSectionRequestRejectsUnknownGalleryViewMode(t *testing.T) {
+	_, err := normalizeSavePageSectionRequest(
+		SavePageSectionRequest{
+			SectionType: PageSectionTypeGallery,
+			Gallery: &PageGallerySectionInput{
+				ViewMode: "slideshow",
+			},
+		},
+		0,
+	)
+	if err == nil || err.Error() != "invalid page_detail.sections[0].gallery.view_mode" {
+		t.Fatalf("expected invalid gallery view mode error, got %v", err)
+	}
+}
+
 func TestGetPageDocumentContent(t *testing.T) {
 	db, mock, cleanup := setupMockDB(t)
 	defer cleanup()

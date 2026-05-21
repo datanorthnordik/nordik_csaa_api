@@ -22,6 +22,7 @@ const (
 	PageGalleryViewCarousel = "carousel"
 	PageGalleryViewMasonry  = "masonry"
 	PageGalleryViewFocus    = "focus"
+	PageGalleryViewIcons    = "icons"
 
 	PageTypographyAlignLeft   = "left"
 	PageTypographyAlignCenter = "center"

@@ -126,7 +126,14 @@ func normalizeSavePageSectionRequest(input SavePageSectionRequest, index int) (S
 		if input.Gallery.ViewMode == "" {
 			input.Gallery.ViewMode = PageGalleryViewGrid
 		}
-		if !isAllowed(input.Gallery.ViewMode, PageGalleryViewGrid, PageGalleryViewCarousel, PageGalleryViewMasonry, PageGalleryViewFocus) {
+		if !isAllowed(
+			input.Gallery.ViewMode,
+			PageGalleryViewGrid,
+			PageGalleryViewCarousel,
+			PageGalleryViewMasonry,
+			PageGalleryViewFocus,
+			PageGalleryViewIcons,
+		) {
 			return input, fmt.Errorf("invalid page_detail.sections[%d].gallery.view_mode", index)
 		}
 	case PageSectionTypeDocument:
