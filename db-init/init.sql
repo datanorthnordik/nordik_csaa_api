@@ -826,6 +826,7 @@ CREATE TABLE IF NOT EXISTS page_section_header_modules (
     main_header_text VARCHAR(255) NOT NULL,
     sub_header_text VARCHAR(255),
     hierarchy VARCHAR(20) NOT NULL DEFAULT 'h1_hero',
+    text_align VARCHAR(20) NOT NULL DEFAULT 'left',
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -838,8 +839,35 @@ CREATE TABLE IF NOT EXISTS page_section_header_modules (
         CHECK (btrim(main_header_text) <> ''),
 
     CONSTRAINT chk_page_section_header_modules_hierarchy
-        CHECK (hierarchy IN ('h1_hero', 'h2_section'))
+        CHECK (hierarchy IN ('h1_hero', 'h2_section')),
+
+    CONSTRAINT chk_page_section_header_modules_text_align
+        CHECK (text_align IN ('left', 'center', 'right'))
 );
+
+ALTER TABLE page_section_header_modules
+    ADD COLUMN IF NOT EXISTS text_align VARCHAR(20);
+
+UPDATE page_section_header_modules
+SET text_align = 'left'
+WHERE text_align IS NULL OR btrim(text_align) = '';
+
+ALTER TABLE page_section_header_modules
+    ALTER COLUMN text_align SET DEFAULT 'left',
+    ALTER COLUMN text_align SET NOT NULL;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_page_section_header_modules_text_align'
+    ) THEN
+        ALTER TABLE page_section_header_modules
+            ADD CONSTRAINT chk_page_section_header_modules_text_align
+            CHECK (text_align IN ('left', 'center', 'right'));
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS page_section_typography_modules (
     page_section_id INT PRIMARY KEY,
@@ -879,7 +907,7 @@ CREATE TABLE IF NOT EXISTS page_section_gallery_modules (
         ON DELETE RESTRICT,
 
     CONSTRAINT chk_page_section_gallery_modules_view_mode
-        CHECK (view_mode IN ('grid', 'carousel', 'masonry', 'focus'))
+        CHECK (view_mode IN ('grid', 'carousel', 'masonry', 'focus', 'icons'))
 );
 
 CREATE TABLE IF NOT EXISTS page_section_quote_modules (

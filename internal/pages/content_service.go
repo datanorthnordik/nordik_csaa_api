@@ -96,11 +96,18 @@ func normalizeSavePageSectionRequest(input SavePageSectionRequest, index int) (S
 		input.Header.MainHeaderText = strings.TrimSpace(input.Header.MainHeaderText)
 		input.Header.SubHeaderText = strings.TrimSpace(input.Header.SubHeaderText)
 		input.Header.Hierarchy = strings.ToLower(strings.TrimSpace(input.Header.Hierarchy))
+		input.Header.TextAlign = strings.ToLower(strings.TrimSpace(input.Header.TextAlign))
 		if input.Header.Hierarchy == "" {
 			input.Header.Hierarchy = PageHeaderHierarchyHero
 		}
 		if !isAllowed(input.Header.Hierarchy, PageHeaderHierarchyHero, PageHeaderHierarchySection) {
 			return input, fmt.Errorf("invalid page_detail.sections[%d].header.hierarchy", index)
+		}
+		if input.Header.TextAlign == "" {
+			input.Header.TextAlign = PageTextAlignLeft
+		}
+		if !isAllowed(input.Header.TextAlign, PageTextAlignLeft, PageTextAlignCenter, PageTextAlignRight) {
+			return input, fmt.Errorf("invalid page_detail.sections[%d].header.text_align", index)
 		}
 	case PageSectionTypeTypography:
 		if input.Typography == nil {
@@ -382,6 +389,7 @@ func (s *PageService) getPageContentDetail(pageID int) (*PageContentDetailRespon
 				MainHeaderText: header.MainHeaderText,
 				SubHeaderText:  header.SubHeaderText,
 				Hierarchy:      header.Hierarchy,
+				TextAlign:      header.TextAlign,
 			}
 		}
 		if typography, ok := typographyBySection[section.ID]; ok {
@@ -641,6 +649,7 @@ func (s *PageService) savePageContentDetail(tx *gorm.DB, pageID int, input *Save
 				MainHeaderText: section.Header.MainHeaderText,
 				SubHeaderText:  section.Header.SubHeaderText,
 				Hierarchy:      section.Header.Hierarchy,
+				TextAlign:      section.Header.TextAlign,
 			}
 			if err := tx.Create(&module).Error; err != nil {
 				return nil, nil, err
