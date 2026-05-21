@@ -222,6 +222,50 @@ func TestStoreGalleryImageFromMultipartContent(t *testing.T) {
 	}
 }
 
+func TestGalleryLinkURLNormalizationAndResponseMapping(t *testing.T) {
+	req, err := normalizeAddGalleryImagesRequest(AddGalleryImagesRequest{
+		Images: []GalleryUploadInput{{
+			Title:      " Partner Logo ",
+			AltText:    " Logo ",
+			LinkURL:    " https://partner.example.com ",
+			FileName:   "logo.png",
+			MimeType:   "image/png",
+			DataBase64: "aGVsbG8=",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("normalizeAddGalleryImagesRequest returned error: %v", err)
+	}
+	if req.Images[0].LinkURL != "https://partner.example.com" {
+		t.Fatalf("expected trimmed upload link_url, got %#v", req.Images[0])
+	}
+
+	updateReq, err := normalizeUpdateGalleryImageRequest(UpdateGalleryImageRequest{
+		Title:   " Partner Logo ",
+		AltText: " Logo ",
+		LinkURL: " https://partner.example.com/path ",
+	})
+	if err != nil {
+		t.Fatalf("normalizeUpdateGalleryImageRequest returned error: %v", err)
+	}
+	if updateReq.LinkURL != "https://partner.example.com/path" {
+		t.Fatalf("expected trimmed update link_url, got %#v", updateReq)
+	}
+
+	resp := mapGalleryAssetResponse(GalleryImage{
+		ID:        11,
+		GalleryID: 5,
+		Title:     "Partner Logo",
+		AltText:   "Partner Logo",
+		LinkURL:   "https://partner.example.com",
+		FileURL:   "gs://drive-bucket/galleries/5/images/logo.png",
+		MimeType:  "image/png",
+	})
+	if resp.LinkURL != "https://partner.example.com" {
+		t.Fatalf("expected response link_url to round-trip, got %#v", resp)
+	}
+}
+
 func stubHooks() func() {
 	prevUpload := uploadBase64ToGCSHook
 	prevUploadBytes := uploadBytesToGCSHook

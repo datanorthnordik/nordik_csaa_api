@@ -21,6 +21,7 @@ type GalleryImage struct {
 	GalleryID    int       `gorm:"not null;column:gallery_id" json:"gallery_id"`
 	Title        string    `gorm:"size:255;column:title" json:"title"`
 	AltText      string    `gorm:"size:255;column:alt_text" json:"alt_text"`
+	LinkURL      string    `gorm:"column:link_url" json:"link_url"`
 	GCPObjectKey string    `gorm:"column:gcp_object_key" json:"gcp_object_key"`
 	FileURL      string    `gorm:"not null;column:file_url" json:"file_url"`
 	MimeType     string    `gorm:"size:255;column:mime_type" json:"mime_type"`
@@ -34,6 +35,7 @@ type GalleryImage struct {
 type GalleryUploadInput struct {
 	Title        string `json:"title"`
 	AltText      string `json:"alt_text"`
+	LinkURL      string `json:"link_url"`
 	FileName     string `json:"file_name"`
 	MimeType     string `json:"mime_type"`
 	DataBase64   string `json:"data_base64"`
@@ -59,6 +61,7 @@ type AddGalleryImagesRequest struct {
 type UpdateGalleryImageRequest struct {
 	Title   string `json:"title"`
 	AltText string `json:"alt_text"`
+	LinkURL string `json:"link_url"`
 }
 
 type ReorderGalleryImagesRequest struct {
@@ -88,6 +91,7 @@ type GalleryAssetResponse struct {
 	GalleryID    int       `json:"gallery_id"`
 	Title        string    `json:"title"`
 	AltText      string    `json:"alt_text"`
+	LinkURL      string    `json:"link_url"`
 	FileName     string    `json:"file_name"`
 	GCPObjectKey string    `json:"gcp_object_key,omitempty"`
 	FileURL      string    `json:"file_url"`

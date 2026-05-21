@@ -93,6 +93,7 @@ CREATE TABLE IF NOT EXISTS gallery_images (
     gallery_id INT NOT NULL,
     title VARCHAR(255),
     alt_text VARCHAR(255),
+    link_url TEXT,
     gcp_object_key TEXT,
     file_url TEXT NOT NULL,
     mime_type VARCHAR(255),
@@ -123,6 +124,7 @@ CREATE TABLE IF NOT EXISTS gallery_images (
 );
 
 ALTER TABLE gallery_images
+    ADD COLUMN IF NOT EXISTS link_url TEXT,
     ADD COLUMN IF NOT EXISTS sort_order INT NOT NULL DEFAULT 0;
 
 DO $$

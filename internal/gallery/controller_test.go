@@ -335,7 +335,7 @@ func TestAddAndDeleteGalleryImagesEndpoints(t *testing.T) {
 	router := setupProtectedRouter(service)
 
 	res := httptest.NewRecorder()
-	req := newGalleryMultipartRequest(t, http.MethodPost, "/api/galleries/4/images", `{"images":[{"title":"Opening banner","alt_text":"Banner","mime_type":"image/png"}]}`, map[string]multipartUploadTestFile{
+	req := newGalleryMultipartRequest(t, http.MethodPost, "/api/galleries/4/images", `{"images":[{"title":"Opening banner","alt_text":"Banner","link_url":"https://partner.example.com","mime_type":"image/png"}]}`, map[string]multipartUploadTestFile{
 		"images[0].file": {Filename: "banner.png", Data: []byte("hello")},
 	})
 	req.Header.Set("Authorization", "Bearer "+signToken(t))
@@ -345,6 +345,9 @@ func TestAddAndDeleteGalleryImagesEndpoints(t *testing.T) {
 	}
 	if service.gotAddReq.Images[0].Title != "Opening banner" {
 		t.Fatalf("expected image title to be forwarded, got %#v", service.gotAddReq.Images[0])
+	}
+	if service.gotAddReq.Images[0].LinkURL != "https://partner.example.com" {
+		t.Fatalf("expected image link_url to be forwarded, got %#v", service.gotAddReq.Images[0])
 	}
 	if string(service.gotAddReq.Images[0].Content) != "hello" {
 		t.Fatalf("expected uploaded image bytes, got %#v", service.gotAddReq.Images[0])
@@ -364,7 +367,7 @@ func TestUpdateAndReorderGalleryImagesEndpoints(t *testing.T) {
 	router := setupProtectedRouter(service)
 
 	res := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPatch, "/api/galleries/4/images/12", strings.NewReader(`{"title":"Opening banner","alt_text":"Banner details"}`))
+	req := httptest.NewRequest(http.MethodPatch, "/api/galleries/4/images/12", strings.NewReader(`{"title":"Opening banner","alt_text":"Banner details","link_url":"https://partner.example.com"}`))
 	req.Header.Set("Authorization", "Bearer "+signToken(t))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(res, req)
@@ -375,6 +378,9 @@ func TestUpdateAndReorderGalleryImagesEndpoints(t *testing.T) {
 			service.gotUpdateID,
 			service.gotUpdateImgID,
 		)
+	}
+	if service.gotUpdateImgReq.LinkURL != "https://partner.example.com" {
+		t.Fatalf("expected update image link_url to be forwarded, got %#v", service.gotUpdateImgReq)
 	}
 
 	res = httptest.NewRecorder()

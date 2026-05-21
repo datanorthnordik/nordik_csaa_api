@@ -467,6 +467,7 @@ func (s *GalleryService) AddGalleryImages(id int, req AddGalleryImagesRequest, u
 			GalleryID:    id,
 			Title:        input.Title,
 			AltText:      input.AltText,
+			LinkURL:      input.LinkURL,
 			GCPObjectKey: objectKey,
 			FileURL:      fileURL,
 			MimeType:     input.MimeType,
@@ -522,6 +523,7 @@ func (s *GalleryService) UpdateGalleryImage(id int, imageID int, req UpdateGalle
 
 	row.Title = req.Title
 	row.AltText = req.AltText
+	row.LinkURL = req.LinkURL
 
 	if err := tx.Save(&row).Error; err != nil {
 		tx.Rollback()
@@ -700,6 +702,7 @@ func normalizeAddGalleryImagesRequest(req AddGalleryImagesRequest) (AddGalleryIm
 func normalizeUpdateGalleryImageRequest(req UpdateGalleryImageRequest) (UpdateGalleryImageRequest, error) {
 	req.Title = strings.TrimSpace(req.Title)
 	req.AltText = strings.TrimSpace(req.AltText)
+	req.LinkURL = strings.TrimSpace(req.LinkURL)
 	if req.Title == "" {
 		return req, errors.New("title is required")
 	}
@@ -730,6 +733,7 @@ func normalizeGalleryImageOrder(imageIDs []int) ([]int, error) {
 func sanitizeGalleryUploadInput(value GalleryUploadInput) GalleryUploadInput {
 	value.Title = strings.TrimSpace(value.Title)
 	value.AltText = strings.TrimSpace(value.AltText)
+	value.LinkURL = strings.TrimSpace(value.LinkURL)
 	value.FileName = strings.TrimSpace(value.FileName)
 	value.MimeType = strings.TrimSpace(value.MimeType)
 	value.DataBase64 = strings.TrimSpace(value.DataBase64)
@@ -767,6 +771,7 @@ func mapGalleryAssetResponse(row GalleryImage) GalleryAssetResponse {
 		GalleryID:    row.GalleryID,
 		Title:        row.Title,
 		AltText:      row.AltText,
+		LinkURL:      row.LinkURL,
 		FileName:     buildGalleryContentFileName(row.Title, row.GCPObjectKey, row.FileURL, row.MimeType, "gallery-image"),
 		GCPObjectKey: row.GCPObjectKey,
 		FileURL:      buildGalleryImageFetchURL(row.GalleryID, row.ID),
