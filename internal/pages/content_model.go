@@ -24,9 +24,13 @@ const (
 	PageGalleryViewFocus    = "focus"
 	PageGalleryViewIcons    = "icons"
 
-	PageTypographyAlignLeft   = "left"
-	PageTypographyAlignCenter = "center"
-	PageTypographyAlignRight  = "right"
+	PageTextAlignLeft   = "left"
+	PageTextAlignCenter = "center"
+	PageTextAlignRight  = "right"
+
+	PageTypographyAlignLeft   = PageTextAlignLeft
+	PageTypographyAlignCenter = PageTextAlignCenter
+	PageTypographyAlignRight  = PageTextAlignRight
 )
 
 type JSONRawMessage json.RawMessage
@@ -105,6 +109,7 @@ type PageSectionHeaderModule struct {
 	MainHeaderText string    `gorm:"size:255;column:main_header_text" json:"main_header_text"`
 	SubHeaderText  string    `gorm:"size:255;column:sub_header_text" json:"sub_header_text"`
 	Hierarchy      string    `gorm:"size:20;column:hierarchy" json:"hierarchy"`
+	TextAlign      string    `gorm:"size:20;column:text_align" json:"text_align"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }
@@ -175,6 +180,7 @@ type PageHeaderSectionInput struct {
 	MainHeaderText string `json:"main_header_text"`
 	SubHeaderText  string `json:"sub_header_text"`
 	Hierarchy      string `json:"hierarchy"`
+	TextAlign      string `json:"text_align"`
 }
 
 type PageTypographySectionInput struct {
@@ -245,6 +251,7 @@ type PageHeaderSectionResponse struct {
 	MainHeaderText string `json:"main_header_text"`
 	SubHeaderText  string `json:"sub_header_text"`
 	Hierarchy      string `json:"hierarchy"`
+	TextAlign      string `json:"text_align"`
 }
 
 type PageTypographySectionResponse struct {
