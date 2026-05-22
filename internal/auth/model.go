@@ -23,6 +23,31 @@ type LoginResponse struct {
 	Role         string `json:"role"`
 }
 
+type PasswordResetOTP struct {
+	ID        int       `gorm:"primaryKey;autoIncrement" json:"id"`
+	UserID    int       `gorm:"not null;index" json:"user_id"`
+	Email     string    `gorm:"not null;index" json:"email"`
+	OTP       string    `gorm:"not null" json:"-"`
+	ExpiresAt time.Time `gorm:"not null;index" json:"expires_at"`
+	IsUsed    bool      `gorm:"default:false" json:"is_used"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type ForgotPasswordRequest struct {
+	Email string `json:"email" binding:"required,email"`
+}
+
+type ResetPasswordRequest struct {
+	Email    string `json:"email" binding:"required,email"`
+	OTP      string `json:"otp" binding:"required,len=6"`
+	Password string `json:"password" binding:"required,min=6"`
+}
+
 func (Auth) TableName() string {
 	return "users"
+}
+
+func (PasswordResetOTP) TableName() string {
+	return "password_reset_otps"
 }

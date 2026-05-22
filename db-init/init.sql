@@ -1679,4 +1679,43 @@ BEFORE INSERT OR UPDATE ON newsletter_media
 FOR EACH ROW
 EXECUTE FUNCTION assign_newsletter_media_sort_order();
 
+-- Password Reset OTP Table for Forgot Password Functionality
+CREATE TABLE IF NOT EXISTS password_reset_otps (
+    id SERIAL PRIMARY KEY,
+    user_id INT NOT NULL,
+    email VARCHAR(100) NOT NULL,
+    otp VARCHAR(6) NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    is_used BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    CONSTRAINT fk_password_reset_otps_user
+        FOREIGN KEY (user_id) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    
+    CONSTRAINT chk_password_reset_otps_otp_length
+        CHECK (LENGTH(otp) = 6 AND otp ~ '^\d+$')
+);
+
+CREATE INDEX IF NOT EXISTS idx_password_reset_otps_user_id 
+    ON password_reset_otps(user_id);
+
+CREATE INDEX IF NOT EXISTS idx_password_reset_otps_email 
+    ON password_reset_otps(email);
+
+CREATE INDEX IF NOT EXISTS idx_password_reset_otps_expires_at 
+    ON password_reset_otps(expires_at);
+
+CREATE INDEX IF NOT EXISTS idx_password_reset_otps_email_unused 
+    ON password_reset_otps(email, is_used, expires_at);
+
+-- Trigger for auto-updating updated_at on password_reset_otps
+DROP TRIGGER IF EXISTS trg_password_reset_otps_set_updated_at ON password_reset_otps;
+CREATE TRIGGER trg_password_reset_otps_set_updated_at
+BEFORE UPDATE ON password_reset_otps
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
 COMMIT;

@@ -20,6 +20,16 @@ type AuthController struct {
 	CFG         *config.Config
 }
 
+type passwordResetEmailSender interface {
+	SendPasswordResetEmail(email, otp, firstName string) error
+}
+
+var newPasswordResetEmailSender = func(cfg *config.Config) passwordResetEmailSender {
+	return util.NewEmailService(cfg)
+}
+
+const passwordResetSentMessage = "If an account with this email exists, a password reset OTP has been sent"
+
 type signUpRequest struct {
 	FirstName string `json:"firstname" binding:"required"`
 	LastName  string `json:"lastname" binding:"required"`
@@ -191,6 +201,101 @@ func (ac *AuthController) Refresh(c *gin.Context) {
 		"message":     "Access token refreshed",
 		"accessToken": accessToken,
 	})
+}
+
+func (ac *AuthController) ForgotPassword(c *gin.Context) {
+	var req ForgotPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		apiresponse.WriteBindingError(c, err, req)
+		return
+	}
+
+	// Create OTP
+	passwordReset, err := ac.AuthService.CreatePasswordResetOTP(req.Email)
+	if err != nil {
+		if errors.Is(err, ErrStoreUnavailable) {
+			httpapi.HandleError(c, "auth", err,
+				httpapi.ServiceUnavailableRule("Authentication service is temporarily unavailable", ErrStoreUnavailable),
+			)
+			return
+		}
+		if errors.Is(err, ErrUserNotFound) {
+			c.JSON(http.StatusOK, gin.H{
+				"message": passwordResetSentMessage,
+			})
+			return
+		}
+		httpapi.LogRequestError(c, "auth", err)
+		apiresponse.WriteInternalError(c)
+		return
+	}
+
+	firstName := ""
+	user, err := ac.AuthService.GetUser(req.Email)
+	if err != nil {
+		httpapi.LogRequestError(c, "auth", err)
+	} else {
+		firstName = user.FirstName
+	}
+
+	emailService := newPasswordResetEmailSender(ac.CFG)
+	_ = emailService.SendPasswordResetEmail(req.Email, passwordReset.OTP, firstName)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": passwordResetSentMessage,
+	})
+}
+
+func (ac *AuthController) ResetPassword(c *gin.Context) {
+	var req ResetPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		apiresponse.WriteBindingError(c, err, req)
+		return
+	}
+
+	// Verify OTP and reset password
+	user, err := ac.AuthService.VerifyPasswordResetOTP(req.Email, req.OTP, req.Password)
+	if err != nil {
+		httpapi.HandleError(c, "auth", err,
+			httpapi.ServiceUnavailableRule("Authentication service is temporarily unavailable", ErrStoreUnavailable),
+			httpapi.ErrorRule{
+				Match: isPasswordResetValidationError,
+				Handle: func(c *gin.Context, err error) {
+					apiresponse.WriteValidationError(c, passwordResetValidationMessage(err))
+				},
+			},
+		)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Password reset successfully",
+		"user": gin.H{
+			"id":        user.ID,
+			"firstname": user.FirstName,
+			"lastname":  user.LastName,
+			"email":     user.Email,
+			"role":      user.Role,
+		},
+	})
+}
+
+func isPasswordResetValidationError(err error) bool {
+	return errors.Is(err, ErrInvalidOTP) ||
+		errors.Is(err, ErrOTPAlreadyUsed) ||
+		errors.Is(err, ErrOTPExpired) ||
+		errors.Is(err, ErrUserNotFound)
+}
+
+func passwordResetValidationMessage(err error) string {
+	switch {
+	case errors.Is(err, ErrOTPAlreadyUsed):
+		return "OTP has already been used. Please request a new OTP"
+	case errors.Is(err, ErrOTPExpired):
+		return "OTP has expired. Please request a new OTP"
+	default:
+		return "Invalid OTP"
+	}
 }
 
 func (ac *AuthController) signToken(user *Auth, duration time.Duration) (string, error) {

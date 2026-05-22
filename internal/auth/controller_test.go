@@ -18,17 +18,21 @@ import (
 )
 
 type fakeAuthService struct {
-	usersByEmail   map[string]*Auth
-	usersByID      map[int]*Auth
-	createErr      error
-	getUserErr     error
-	getUserByIDErr error
+	usersByEmail              map[string]*Auth
+	usersByID                 map[int]*Auth
+	createErr                 error
+	getUserErr                error
+	getUserByIDErr            error
+	createPasswordResetOTPErr error
+	verifyPasswordResetOTPErr error
+	otpsByEmail               map[string]*PasswordResetOTP
 }
 
 func newFakeAuthService() *fakeAuthService {
 	return &fakeAuthService{
 		usersByEmail: map[string]*Auth{},
 		usersByID:    map[int]*Auth{},
+		otpsByEmail:  map[string]*PasswordResetOTP{},
 	}
 }
 
@@ -66,6 +70,86 @@ func (s *fakeAuthService) GetUserByID(id int) (*Auth, error) {
 		return nil, errors.New("not found")
 	}
 	return user, nil
+}
+
+func (s *fakeAuthService) CreatePasswordResetOTP(email string) (*PasswordResetOTP, error) {
+	if s.createPasswordResetOTPErr != nil {
+		return nil, s.createPasswordResetOTPErr
+	}
+	user, ok := s.usersByEmail[email]
+	if !ok {
+		return nil, ErrUserNotFound
+	}
+	otp := &PasswordResetOTP{
+		UserID:    user.ID,
+		Email:     email,
+		OTP:       "123456",
+		ExpiresAt: time.Now().Add(10 * time.Minute),
+		IsUsed:    false,
+	}
+	s.otpsByEmail[email] = otp
+	return otp, nil
+}
+
+type fakePasswordResetEmailSender struct {
+	sent []sentPasswordResetEmail
+}
+
+type sentPasswordResetEmail struct {
+	email     string
+	otp       string
+	firstName string
+}
+
+func (s *fakePasswordResetEmailSender) SendPasswordResetEmail(email, otp, firstName string) error {
+	s.sent = append(s.sent, sentPasswordResetEmail{
+		email:     email,
+		otp:       otp,
+		firstName: firstName,
+	})
+	return nil
+}
+
+func stubPasswordResetEmailSender(t *testing.T, sender passwordResetEmailSender) {
+	t.Helper()
+
+	prev := newPasswordResetEmailSender
+	newPasswordResetEmailSender = func(*config.Config) passwordResetEmailSender {
+		return sender
+	}
+	t.Cleanup(func() {
+		newPasswordResetEmailSender = prev
+	})
+}
+
+func (s *fakeAuthService) VerifyPasswordResetOTP(email, otp, newPassword string) (*Auth, error) {
+	if s.verifyPasswordResetOTPErr != nil {
+		return nil, s.verifyPasswordResetOTPErr
+	}
+	user, ok := s.usersByEmail[email]
+	if !ok {
+		return nil, ErrUserNotFound
+	}
+	otpRecord, ok := s.otpsByEmail[email]
+	if !ok || otpRecord.OTP != otp {
+		return nil, ErrInvalidOTP
+	}
+	if otpRecord.IsUsed {
+		return nil, ErrOTPAlreadyUsed
+	}
+	if time.Now().After(otpRecord.ExpiresAt) {
+		return nil, ErrOTPExpired
+	}
+	otpRecord.IsUsed = true
+	return user, nil
+}
+
+func (s *fakeAuthService) GetUnusedOTPByEmail(email string) (*PasswordResetOTP, error) {
+	otp, ok := s.otpsByEmail[email]
+	if !ok || otp.IsUsed || time.Now().After(otp.ExpiresAt) {
+		return nil, ErrInvalidOTP
+	}
+	return otp, nil
 }
 
 func setupRouter(service AuthServicePort) *gin.Engine {
@@ -302,6 +386,214 @@ func TestRefreshEndpointRequiresBearerToken(t *testing.T) {
 	}
 
 	assertAPIError(t, res, http.StatusUnauthorized, "missing_bearer_token", "Missing bearer token")
+}
+
+func TestForgotPasswordEndpointReturnsSuccessAndSendsOTP(t *testing.T) {
+	service := newFakeAuthService()
+	service.usersByEmail["ada@example.com"] = &Auth{
+		ID:        7,
+		FirstName: "Ada",
+		LastName:  "Lovelace",
+		Email:     "ada@example.com",
+		Role:      "User",
+	}
+	emailSender := &fakePasswordResetEmailSender{}
+	stubPasswordResetEmailSender(t, emailSender)
+
+	router := setupRouter(service)
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/user/forgot-password", strings.NewReader(`{"email":"ada@example.com"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", res.Code, res.Body.String())
+	}
+
+	var payload map[string]string
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload["message"] != passwordResetSentMessage {
+		t.Fatalf("unexpected response payload: %#v", payload)
+	}
+
+	if len(emailSender.sent) != 1 {
+		t.Fatalf("expected one password reset email to be sent, got %#v", emailSender.sent)
+	}
+	if emailSender.sent[0].email != "ada@example.com" || emailSender.sent[0].otp != "123456" || emailSender.sent[0].firstName != "Ada" {
+		t.Fatalf("unexpected email send payload: %#v", emailSender.sent[0])
+	}
+}
+
+func TestForgotPasswordEndpointReturnsSuccessForUnknownUser(t *testing.T) {
+	emailSender := &fakePasswordResetEmailSender{}
+	stubPasswordResetEmailSender(t, emailSender)
+
+	router := setupRouter(newFakeAuthService())
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/user/forgot-password", strings.NewReader(`{"email":"missing@example.com"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", res.Code, res.Body.String())
+	}
+
+	var payload map[string]string
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload["message"] != passwordResetSentMessage {
+		t.Fatalf("unexpected response payload: %#v", payload)
+	}
+	if len(emailSender.sent) != 0 {
+		t.Fatalf("expected no email to be sent for unknown user, got %#v", emailSender.sent)
+	}
+}
+
+func TestForgotPasswordEndpointRejectsInvalidPayload(t *testing.T) {
+	router := setupRouter(newFakeAuthService())
+
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/user/forgot-password", strings.NewReader(`{"email":"bad"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(res, req)
+
+	payload := assertAPIError(t, res, http.StatusBadRequest, "validation_error", "Request validation failed")
+	if len(payload.Error.Details) == 0 {
+		t.Fatal("expected validation details in error response")
+	}
+}
+
+func TestForgotPasswordEndpointReturnsServiceUnavailableWhenStoreUnavailable(t *testing.T) {
+	service := newFakeAuthService()
+	service.createPasswordResetOTPErr = ErrStoreUnavailable
+	router := setupRouter(service)
+
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/user/forgot-password", strings.NewReader(`{"email":"ada@example.com"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(res, req)
+
+	assertAPIError(t, res, http.StatusServiceUnavailable, "service_unavailable", "Authentication service is temporarily unavailable")
+}
+
+func TestForgotPasswordEndpointReturnsInternalErrorForUnexpectedFailure(t *testing.T) {
+	service := newFakeAuthService()
+	service.createPasswordResetOTPErr = errors.New("boom")
+	router := setupRouter(service)
+
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/user/forgot-password", strings.NewReader(`{"email":"ada@example.com"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(res, req)
+
+	assertAPIError(t, res, http.StatusInternalServerError, "internal_error", "Internal server error")
+}
+
+func TestResetPasswordEndpointResetsPassword(t *testing.T) {
+	service := newFakeAuthService()
+	service.usersByEmail["ada@example.com"] = &Auth{
+		ID:        7,
+		FirstName: "Ada",
+		LastName:  "Lovelace",
+		Email:     "ada@example.com",
+		Role:      "Admin",
+	}
+	service.otpsByEmail["ada@example.com"] = &PasswordResetOTP{
+		UserID:    7,
+		Email:     "ada@example.com",
+		OTP:       "123456",
+		ExpiresAt: time.Now().Add(10 * time.Minute),
+	}
+	router := setupRouter(service)
+
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/user/reset-password", strings.NewReader(`{"email":"ada@example.com","otp":"123456","password":"newSecret123"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", res.Code, res.Body.String())
+	}
+
+	var payload map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	user := payload["user"].(map[string]any)
+	if payload["message"] != "Password reset successfully" || user["email"] != "ada@example.com" || user["role"] != "Admin" {
+		t.Fatalf("unexpected response payload: %#v", payload)
+	}
+}
+
+func TestResetPasswordEndpointRejectsInvalidPayload(t *testing.T) {
+	router := setupRouter(newFakeAuthService())
+
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/user/reset-password", strings.NewReader(`{"email":"ada@example.com","otp":"123","password":"short"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(res, req)
+
+	payload := assertAPIError(t, res, http.StatusBadRequest, "validation_error", "Request validation failed")
+	if len(payload.Error.Details) == 0 {
+		t.Fatal("expected validation details in error response")
+	}
+}
+
+func TestResetPasswordEndpointReturnsValidationErrorsForOTPFailures(t *testing.T) {
+	tests := []struct {
+		name        string
+		serviceErr  error
+		wantMessage string
+	}{
+		{name: "invalid otp", serviceErr: ErrInvalidOTP, wantMessage: "Invalid OTP"},
+		{name: "used otp", serviceErr: ErrOTPAlreadyUsed, wantMessage: "OTP has already been used. Please request a new OTP"},
+		{name: "expired otp", serviceErr: ErrOTPExpired, wantMessage: "OTP has expired. Please request a new OTP"},
+		{name: "missing user", serviceErr: ErrUserNotFound, wantMessage: "Invalid OTP"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service := newFakeAuthService()
+			service.verifyPasswordResetOTPErr = tt.serviceErr
+			router := setupRouter(service)
+
+			res := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/user/reset-password", strings.NewReader(`{"email":"ada@example.com","otp":"123456","password":"newSecret123"}`))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(res, req)
+
+			assertAPIError(t, res, http.StatusBadRequest, "validation_error", tt.wantMessage)
+		})
+	}
+}
+
+func TestResetPasswordEndpointReturnsServiceUnavailableWhenStoreUnavailable(t *testing.T) {
+	service := newFakeAuthService()
+	service.verifyPasswordResetOTPErr = ErrStoreUnavailable
+	router := setupRouter(service)
+
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/user/reset-password", strings.NewReader(`{"email":"ada@example.com","otp":"123456","password":"newSecret123"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(res, req)
+
+	assertAPIError(t, res, http.StatusServiceUnavailable, "service_unavailable", "Authentication service is temporarily unavailable")
+}
+
+func TestResetPasswordEndpointReturnsInternalErrorForUnexpectedFailure(t *testing.T) {
+	service := newFakeAuthService()
+	service.verifyPasswordResetOTPErr = errors.New("boom")
+	router := setupRouter(service)
+
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/user/reset-password", strings.NewReader(`{"email":"ada@example.com","otp":"123456","password":"newSecret123"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(res, req)
+
+	assertAPIError(t, res, http.StatusInternalServerError, "internal_error", "Internal server error")
 }
 
 func TestBearerToken(t *testing.T) {
