@@ -14,5 +14,7 @@ func RegisterRoutes(r *gin.Engine, as AuthServicePort, cfg *config.Config) {
 		userGroup.POST("/login", controller.Login)
 		userGroup.POST("/signup", controller.SignUp)
 		userGroup.POST("/refresh", controller.Refresh)
+		userGroup.POST("/forgot-password", controller.ForgotPassword)
+		userGroup.POST("/reset-password", controller.ResetPassword)
 	}
 }
