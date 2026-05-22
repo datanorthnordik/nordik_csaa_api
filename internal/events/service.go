@@ -79,21 +79,9 @@ func (s *EventService) ListEvents(filter ListEventsFilter) (*EventListResponse, 
 		return nil, err
 	}
 
-	items := make([]EventListItem, 0, len(rows))
-	for _, row := range rows {
-		items = append(items, EventListItem{
-			ID:          row.ID,
-			Title:       row.Title,
-			Categories:  []string(row.Categories),
-			Status:      eventStatus(row.Published),
-			Published:   row.Published,
-			EventType:   row.EventType,
-			StartAt:     row.StartAt,
-			EndAt:       row.EndAt,
-			DateDisplay: buildEventDateDisplay(row.EventType, row.StartAt, row.EndAt),
-			CreatedAt:   row.CreatedAt,
-			UpdatedAt:   row.UpdatedAt,
-		})
+	items, err := s.buildEventListItems(rows)
+	if err != nil {
+		return nil, err
 	}
 
 	totalPages := 0
@@ -165,11 +153,119 @@ func (s *EventService) GetEvent(id int) (*EventDetailResponse, error) {
 		}
 	}
 
-	return &EventDetailResponse{
+	resp := buildEventDetailResponse(event, address, occurrences, displayImage, attachments)
+	return &resp, nil
+}
+
+func (s *EventService) buildEventListItems(rows []Event) ([]EventListItem, error) {
+	if len(rows) == 0 {
+		return []EventListItem{}, nil
+	}
+
+	eventIDs := make([]int, 0, len(rows))
+	addressSet := make(map[int]struct{}, len(rows))
+	for _, row := range rows {
+		eventIDs = append(eventIDs, row.ID)
+		if row.AddressID != nil {
+			addressSet[*row.AddressID] = struct{}{}
+		}
+	}
+
+	addressIDs := make([]int, 0, len(addressSet))
+	for addressID := range addressSet {
+		addressIDs = append(addressIDs, addressID)
+	}
+
+	addressByID, mediaByEventID, occurrencesByEventID, err := s.loadEventResponseRelations(eventIDs, addressIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]EventListItem, 0, len(rows))
+	for _, row := range rows {
+		var address *Address
+		if row.AddressID != nil {
+			if loadedAddress, exists := addressByID[*row.AddressID]; exists {
+				addressCopy := loadedAddress
+				address = &addressCopy
+			}
+		}
+
+		displayImage, attachments := buildEventMediaCollections(mediaByEventID[row.ID])
+		items = append(items, buildEventDetailResponse(
+			row,
+			address,
+			occurrencesByEventID[row.ID],
+			displayImage,
+			attachments,
+		))
+	}
+
+	return items, nil
+}
+
+func (s *EventService) loadEventResponseRelations(eventIDs []int, addressIDs []int) (map[int]Address, map[int][]EventMedia, map[int][]EventOccurrence, error) {
+	addressByID := make(map[int]Address, len(addressIDs))
+	mediaByEventID := make(map[int][]EventMedia, len(eventIDs))
+	occurrencesByEventID := make(map[int][]EventOccurrence, len(eventIDs))
+
+	if len(addressIDs) > 0 {
+		var addressRows []Address
+		if err := s.DB.Where("id IN ?", addressIDs).Find(&addressRows).Error; err != nil {
+			return nil, nil, nil, err
+		}
+		for _, address := range addressRows {
+			addressByID[address.ID] = address
+		}
+	}
+
+	if len(eventIDs) == 0 {
+		return addressByID, mediaByEventID, occurrencesByEventID, nil
+	}
+
+	var mediaRows []EventMedia
+	if err := s.DB.
+		Where("event_id IN ?", eventIDs).
+		Order("event_id ASC").
+		Order("sort_order ASC").
+		Order("id ASC").
+		Find(&mediaRows).Error; err != nil {
+		return nil, nil, nil, err
+	}
+	for _, media := range mediaRows {
+		mediaByEventID[media.EventID] = append(mediaByEventID[media.EventID], media)
+	}
+
+	var occurrenceRows []EventOccurrence
+	if err := s.DB.
+		Where("event_id IN ?", eventIDs).
+		Order("event_id ASC").
+		Order("occurrence_start_at ASC").
+		Order("id ASC").
+		Find(&occurrenceRows).Error; err != nil {
+		return nil, nil, nil, err
+	}
+	for _, occurrence := range occurrenceRows {
+		occurrencesByEventID[occurrence.EventID] = append(occurrencesByEventID[occurrence.EventID], occurrence)
+	}
+
+	return addressByID, mediaByEventID, occurrencesByEventID, nil
+}
+
+func buildEventDetailResponse(event Event, address *Address, occurrences []EventOccurrence, displayImage *EventMedia, attachments []EventMedia) EventDetailResponse {
+	if occurrences == nil {
+		occurrences = []EventOccurrence{}
+	}
+	if attachments == nil {
+		attachments = []EventMedia{}
+	}
+
+	return EventDetailResponse{
 		ID:                          event.ID,
 		Title:                       event.Title,
 		ShowTitle:                   event.ShowTitle,
 		Categories:                  []string(event.Categories),
+		Status:                      eventStatus(event.Published),
 		EventType:                   event.EventType,
 		StartAt:                     event.StartAt,
 		EndAt:                       event.EndAt,
@@ -206,7 +302,32 @@ func (s *EventService) GetEvent(id int) (*EventDetailResponse, error) {
 		CreatedBy:                   event.CreatedBy,
 		CreatedAt:                   event.CreatedAt,
 		UpdatedAt:                   event.UpdatedAt,
-	}, nil
+	}
+}
+
+func buildEventMediaCollections(media []EventMedia) (*EventMedia, []EventMedia) {
+	var displayImage *EventMedia
+	attachments := make([]EventMedia, 0, len(media))
+
+	for _, item := range media {
+		responseMedia := buildEventMediaResponseItem(item)
+		switch responseMedia.MediaRole {
+		case MediaRoleDisplayImage:
+			copyItem := responseMedia
+			displayImage = &copyItem
+		case MediaRoleAttachment:
+			attachments = append(attachments, responseMedia)
+		}
+	}
+
+	return displayImage, attachments
+}
+
+func buildEventMediaResponseItem(item EventMedia) EventMedia {
+	item.StorageURI = item.FileURL
+	item.FetchURL = buildEventMediaFetchURL(item.EventID, item.ID)
+	item.FileURL = item.FetchURL
+	return item
 }
 
 func (s *EventService) GetEventMediaContent(eventID int, mediaID int) (*EventMediaContent, error) {

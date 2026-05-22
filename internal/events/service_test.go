@@ -109,8 +109,29 @@ func TestListEventsSuccessAndValidation(t *testing.T) {
 			"recurrence_rule", "created_by", "created_at", "updated_at",
 		}).AddRow(
 			9, "Spring Fair", true, pq.Array([]string{"Events"}), "single_day_all_day", time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC), nil, "public", pq.Array([]string{}),
-			true, false, pq.Array([]string{}), "Teaser", "", "", "", "", "", "", "none", nil, true,
-			nil, false, nil, nil, "", false, "", "", 1, nil, []byte(`null`), nil, time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC),
+			true, false, pq.Array([]string{}), "Teaser", "<p>Hello</p>", "", "", "", "", "", "address", 7, true,
+			nil, true, time.Date(2026, 5, 8, 9, 0, 0, 0, time.UTC), time.Date(2026, 5, 9, 17, 0, 0, 0, time.UTC), "https://example.com/register", true, "scheduled", "", 1, nil, []byte(`null`), nil, time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC),
+		))
+	mock.ExpectQuery(`SELECT \* FROM "addresses" WHERE id IN \(\$1\)`).
+		WithArgs(7).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "name", "address_line_1", "address_line_2", "city", "province_state", "postal_code", "country", "is_saved", "created_at", "updated_at",
+		}).AddRow(
+			7, "Community Hall", "1 Main", "", "Toronto", "Ontario", "A1A 1A1", "Canada", true, time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC),
+		))
+	mock.ExpectQuery(`SELECT \* FROM "event_media" WHERE event_id IN \(\$1\) ORDER BY event_id ASC,sort_order ASC,id ASC`).
+		WithArgs(9).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "event_id", "media_role", "display_name", "gcp_object_key", "file_url", "mime_type", "file_size", "sort_order", "created_at", "updated_at",
+		}).
+			AddRow(3, 9, MediaRoleDisplayImage, "Banner", "events/9/banner.png", "gs://drive-bucket/events/9/banner.png", "image/png", 10, 0, time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)).
+			AddRow(4, 9, MediaRoleAttachment, "Agenda", "events/9/agenda.pdf", "gs://drive-bucket/events/9/agenda.pdf", "application/pdf", 20, 1, time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)))
+	mock.ExpectQuery(`SELECT \* FROM "event_occurrences" WHERE event_id IN \(\$1\) ORDER BY event_id ASC,occurrence_start_at ASC,id ASC`).
+		WithArgs(9).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "event_id", "occurrence_start_at", "occurrence_end_at", "occurrence_kind", "created_at", "updated_at",
+		}).AddRow(
+			5, 9, time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC), time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC), "scheduled", time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
 		))
 
 	resp, err := service.ListEvents(filter)
@@ -122,6 +143,18 @@ func TestListEventsSuccessAndValidation(t *testing.T) {
 	}
 	if resp.Items[0].DateDisplay != "2026-05-10" {
 		t.Fatalf("unexpected date display: %q", resp.Items[0].DateDisplay)
+	}
+	if resp.Items[0].Address == nil || resp.Items[0].Address.Name != "Community Hall" {
+		t.Fatalf("expected list address details, got %#v", resp.Items[0].Address)
+	}
+	if resp.Items[0].DisplayImage == nil || resp.Items[0].DisplayImage.FileURL != "/api/events/9/media/3/content" {
+		t.Fatalf("expected list display image, got %#v", resp.Items[0].DisplayImage)
+	}
+	if len(resp.Items[0].Attachments) != 1 || resp.Items[0].Attachments[0].FileURL != "/api/events/9/media/4/content" {
+		t.Fatalf("expected list attachments, got %#v", resp.Items[0].Attachments)
+	}
+	if len(resp.Items[0].Occurrences) != 1 || !resp.Items[0].RegistrationEnabled {
+		t.Fatalf("expected list occurrences and registration fields, got %#v", resp.Items[0])
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {

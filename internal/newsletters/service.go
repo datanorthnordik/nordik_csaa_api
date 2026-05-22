@@ -96,9 +96,34 @@ func (s *NewsletterService) ListNewsletterEntries(filter ListNewsletterFilter) (
 		return nil, err
 	}
 
+	mediaByEntryID := make(map[int][]NewsletterMediaResponse, len(entries))
+	if len(entries) > 0 {
+		entryIDs := make([]int, 0, len(entries))
+		for _, entry := range entries {
+			entryIDs = append(entryIDs, entry.ID)
+		}
+
+		var mediaList []NewsletterMedia
+		if err := s.DB.
+			Where("newsletter_entry_id IN ?", entryIDs).
+			Order("newsletter_entry_id ASC").
+			Order("sort_order ASC").
+			Order("id ASC").
+			Find(&mediaList).Error; err != nil {
+			return nil, err
+		}
+
+		for _, media := range mediaList {
+			mediaByEntryID[media.NewsletterEntryID] = append(
+				mediaByEntryID[media.NewsletterEntryID],
+				newsletterMediaFromModel(media),
+			)
+		}
+	}
+
 	items := make([]NewsletterSummaryItem, 0, len(entries))
 	for _, entry := range entries {
-		items = append(items, newsletterSummaryFromModel(entry))
+		items = append(items, newsletterSummaryFromModel(entry, mediaByEntryID[entry.ID]))
 	}
 
 	return &NewsletterListResponse{
@@ -130,21 +155,8 @@ func (s *NewsletterService) GetNewsletterEntry(id int) (*NewsletterDetailRespons
 		mediaResponses = append(mediaResponses, newsletterMediaFromModel(media))
 	}
 
-	return &NewsletterDetailResponse{
-		ID:          entry.ID,
-		Title:       entry.Title,
-		Category:    entry.Category,
-		SendDate:    entry.SendDate,
-		ContentHTML: entry.ContentHTML,
-		Status:      entry.Status,
-		Visibility:  entry.Visibility,
-		PublishAt:   entry.PublishAt,
-		Media:       mediaResponses,
-		CreatedBy:   entry.CreatedBy,
-		UpdatedBy:   entry.UpdatedBy,
-		CreatedAt:   entry.CreatedAt,
-		UpdatedAt:   entry.UpdatedAt,
-	}, nil
+	resp := newsletterDetailFromModel(entry, mediaResponses)
+	return &resp, nil
 }
 
 func (s *NewsletterService) GetNewsletterMediaContent(id int, mediaID int) (*NewsletterMediaContent, error) {
@@ -794,16 +806,47 @@ func allowedNewsletterSortColumn(sortBy string) string {
 	}
 }
 
-func newsletterSummaryFromModel(entry NewsletterEntry) NewsletterSummaryItem {
+func newsletterSummaryFromModel(entry NewsletterEntry, media []NewsletterMediaResponse) NewsletterSummaryItem {
+	if media == nil {
+		media = []NewsletterMediaResponse{}
+	}
+
 	return NewsletterSummaryItem{
-		ID:         entry.ID,
-		Title:      entry.Title,
-		Category:   entry.Category,
-		SendDate:   entry.SendDate,
-		Status:     entry.Status,
-		Visibility: entry.Visibility,
-		CreatedAt:  entry.CreatedAt,
-		UpdatedAt:  entry.UpdatedAt,
+		ID:          entry.ID,
+		Title:       entry.Title,
+		Category:    entry.Category,
+		SendDate:    entry.SendDate,
+		ContentHTML: entry.ContentHTML,
+		Status:      entry.Status,
+		Visibility:  entry.Visibility,
+		PublishAt:   entry.PublishAt,
+		Media:       media,
+		CreatedBy:   entry.CreatedBy,
+		UpdatedBy:   entry.UpdatedBy,
+		CreatedAt:   entry.CreatedAt,
+		UpdatedAt:   entry.UpdatedAt,
+	}
+}
+
+func newsletterDetailFromModel(entry NewsletterEntry, media []NewsletterMediaResponse) NewsletterDetailResponse {
+	if media == nil {
+		media = []NewsletterMediaResponse{}
+	}
+
+	return NewsletterDetailResponse{
+		ID:          entry.ID,
+		Title:       entry.Title,
+		Category:    entry.Category,
+		SendDate:    entry.SendDate,
+		ContentHTML: entry.ContentHTML,
+		Status:      entry.Status,
+		Visibility:  entry.Visibility,
+		PublishAt:   entry.PublishAt,
+		Media:       media,
+		CreatedBy:   entry.CreatedBy,
+		UpdatedBy:   entry.UpdatedBy,
+		CreatedAt:   entry.CreatedAt,
+		UpdatedAt:   entry.UpdatedAt,
 	}
 }
 
