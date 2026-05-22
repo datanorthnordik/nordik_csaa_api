@@ -219,19 +219,7 @@ type ListEventsFilter struct {
 	SortOrder  string     `json:"sort_order"`
 }
 
-type EventListItem struct {
-	ID          int        `json:"id"`
-	Title       string     `json:"title"`
-	Categories  []string   `json:"categories"`
-	Status      string     `json:"status"`
-	Published   bool       `json:"published"`
-	EventType   string     `json:"event_type"`
-	StartAt     time.Time  `json:"start_at"`
-	EndAt       *time.Time `json:"end_at,omitempty"`
-	DateDisplay string     `json:"date_display"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
-}
+type EventListItem = EventDetailResponse
 
 type EventListResponse struct {
 	Items      []EventListItem   `json:"items"`
@@ -244,6 +232,7 @@ type EventDetailResponse struct {
 	Title                       string            `json:"title"`
 	ShowTitle                   bool              `json:"show_title"`
 	Categories                  []string          `json:"categories"`
+	Status                      string            `json:"status"`
 	EventType                   string            `json:"event_type"`
 	StartAt                     time.Time         `json:"start_at"`
 	EndAt                       *time.Time        `json:"end_at,omitempty"`

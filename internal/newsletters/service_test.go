@@ -133,6 +133,12 @@ func TestListNewsletterEntriesSuccessAndValidation(t *testing.T) {
 			9, "Spring Update", "csaa", time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), "<p>Hello</p>", "published", "public",
 			nil, 7, 7, time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC),
 		))
+	mock.ExpectQuery(`SELECT \* FROM "newsletter_media" WHERE newsletter_entry_id IN \(\$1\) ORDER BY newsletter_entry_id ASC,sort_order ASC,id ASC`).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "newsletter_entry_id", "display_name", "file_name", "gcp_object_key", "file_url", "mime_type", "file_size", "media_role", "sort_order", "created_by", "updated_by", "created_at", "updated_at",
+		}).AddRow(
+			4, 9, "Agenda", "agenda.pdf", "news-letters/documents/agenda.pdf", "gs://drive-bucket/news-letters/documents/agenda.pdf", "application/pdf", 1024, "attachment", 0, 7, 7, time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
+		))
 
 	resp, err := svc.ListNewsletterEntries(ListNewsletterFilter{
 		Status:     "published",
@@ -151,6 +157,12 @@ func TestListNewsletterEntriesSuccessAndValidation(t *testing.T) {
 	}
 	if resp.Items[0].Title != "Spring Update" || resp.Items[0].Status != "published" || resp.Items[0].Category != "csaa" {
 		t.Fatalf("unexpected summary item: %#v", resp.Items[0])
+	}
+	if resp.Items[0].ContentHTML != "<p>Hello</p>" {
+		t.Fatalf("expected list content_html, got %#v", resp.Items[0])
+	}
+	if len(resp.Items[0].Media) != 1 || resp.Items[0].Media[0].DisplayName != "Agenda" {
+		t.Fatalf("expected list media, got %#v", resp.Items[0].Media)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -1069,11 +1081,17 @@ func TestNewsletterHelpersAndValidation(t *testing.T) {
 	}
 
 	entry := NewsletterEntry{ID: 9, Title: "Spring Update", Category: "csaa", SendDate: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), Status: "published", Visibility: "public"}
-	if summary := newsletterSummaryFromModel(entry); summary.Title != "Spring Update" {
+	if summary := newsletterSummaryFromModel(entry, nil); summary.Title != "Spring Update" {
 		t.Fatalf("unexpected summary conversion: %#v", summary)
+	}
+	if summary := newsletterSummaryFromModel(entry, nil); summary.Media == nil {
+		t.Fatalf("expected summary media to default to empty slice, got %#v", summary)
 	}
 	if mutation := newsletterMutationFromModel(entry); mutation.ID != 9 {
 		t.Fatalf("unexpected mutation conversion: %#v", mutation)
+	}
+	if detail := newsletterDetailFromModel(entry, nil); detail.Media == nil || detail.Title != "Spring Update" {
+		t.Fatalf("unexpected detail conversion: %#v", detail)
 	}
 	if mediaResp := newsletterMediaFromModel(NewsletterMedia{ID: 4, DisplayName: "Agenda"}); mediaResp.DisplayName != "Agenda" {
 		t.Fatalf("unexpected media conversion: %#v", mediaResp)

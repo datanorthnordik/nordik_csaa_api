@@ -88,14 +88,19 @@ type NewsletterMediaResponse struct {
 }
 
 type NewsletterSummaryItem struct {
-	ID         int       `json:"id"`
-	Title      string    `json:"title"`
-	Category   string    `json:"category"`
-	SendDate   time.Time `json:"send_date"`
-	Status     string    `json:"status"`
-	Visibility string    `json:"visibility"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID          int                       `json:"id"`
+	Title       string                    `json:"title"`
+	Category    string                    `json:"category"`
+	SendDate    time.Time                 `json:"send_date"`
+	ContentHTML string                    `json:"content_html"`
+	Status      string                    `json:"status"`
+	Visibility  string                    `json:"visibility"`
+	PublishAt   *time.Time                `json:"publish_at,omitempty"`
+	Media       []NewsletterMediaResponse `json:"media"`
+	CreatedBy   *int                      `json:"created_by,omitempty"`
+	UpdatedBy   *int                      `json:"updated_by,omitempty"`
+	CreatedAt   time.Time                 `json:"created_at"`
+	UpdatedAt   time.Time                 `json:"updated_at"`
 }
 
 type NewsletterListResponse struct {
