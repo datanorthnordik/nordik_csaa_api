@@ -1679,6 +1679,74 @@ BEFORE INSERT OR UPDATE ON newsletter_media
 FOR EACH ROW
 EXECUTE FUNCTION assign_newsletter_media_sort_order();
 
+-- Resources Migration
+-- Prerequisites: tables users(id) must already exist.
+
+CREATE TABLE IF NOT EXISTS resource_entries (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    category VARCHAR(50) NOT NULL,
+    visibility VARCHAR(20) NOT NULL DEFAULT 'public',
+    file_name VARCHAR(255) NOT NULL,
+    gcp_object_key TEXT,
+    file_url TEXT NOT NULL,
+    mime_type VARCHAR(255),
+    file_size BIGINT,
+    created_by INT,
+    updated_by INT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_resource_entries_created_by
+        FOREIGN KEY (created_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT fk_resource_entries_updated_by
+        FOREIGN KEY (updated_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT chk_resource_entries_name_not_blank
+        CHECK (btrim(name) <> ''),
+
+    CONSTRAINT chk_resource_entries_category
+        CHECK (category IN ('brand_identity', 'governance_legal', 'training_manuals', 'media_kits')),
+
+    CONSTRAINT chk_resource_entries_visibility
+        CHECK (visibility IN ('public', 'internal')),
+
+    CONSTRAINT chk_resource_entries_file_name_not_blank
+        CHECK (btrim(file_name) <> ''),
+
+    CONSTRAINT chk_resource_entries_file_url_not_blank
+        CHECK (btrim(file_url) <> ''),
+
+    CONSTRAINT chk_resource_entries_file_size
+        CHECK (file_size IS NULL OR file_size >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_resource_entries_category
+    ON resource_entries(category);
+
+CREATE INDEX IF NOT EXISTS idx_resource_entries_visibility
+    ON resource_entries(visibility);
+
+CREATE INDEX IF NOT EXISTS idx_resource_entries_updated_at
+    ON resource_entries(updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_resource_entries_created_by
+    ON resource_entries(created_by);
+
+CREATE INDEX IF NOT EXISTS idx_resource_entries_updated_by
+    ON resource_entries(updated_by);
+
+DROP TRIGGER IF EXISTS trg_resource_entries_set_updated_at ON resource_entries;
+CREATE TRIGGER trg_resource_entries_set_updated_at
+BEFORE UPDATE ON resource_entries
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
 -- Password Reset OTP Table for Forgot Password Functionality
 CREATE TABLE IF NOT EXISTS password_reset_otps (
     id SERIAL PRIMARY KEY,

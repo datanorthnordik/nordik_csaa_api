@@ -12,6 +12,7 @@ import (
 	"nordikcsaaapi/internal/newsletters"
 	"nordikcsaaapi/internal/pages"
 	"nordikcsaaapi/internal/press"
+	"nordikcsaaapi/internal/resources"
 	"os"
 	"time"
 
@@ -86,6 +87,8 @@ func main() {
 	newsletters.RegisterRoutes(r, newsletterService, auth.RequireBearerAuth(&cfg))
 	pressService := &press.PressService{DB: db, BucketName: cfg.DriveBucketName, BucketPrefix: cfg.DriveBucketPrefix}
 	press.RegisterRoutes(r, pressService, auth.RequireBearerAuth(&cfg))
+	resourceService := &resources.ResourceService{DB: db, BucketName: cfg.DriveBucketName, BucketPrefix: cfg.DriveBucketPrefix}
+	resources.RegisterRoutes(r, resourceService, auth.RequireBearerAuth(&cfg))
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
