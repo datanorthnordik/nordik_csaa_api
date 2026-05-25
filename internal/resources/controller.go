@@ -250,7 +250,8 @@ func isClientSafeResourceError(err error) bool {
 		strings.Contains(message, "at least one document is required"),
 		strings.Contains(message, "resource does not have downloadable content"),
 		strings.Contains(message, "resource content is not available from storage"),
-		strings.Contains(message, "use multipart/form-data"):
+		strings.Contains(message, "use multipart/form-data"),
+		strings.Contains(message, "resource upload returned an empty file url"):
 		return true
 	default:
 		return false
