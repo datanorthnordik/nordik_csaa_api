@@ -1747,6 +1747,137 @@ BEFORE UPDATE ON resource_entries
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
+-- Memorial Migration
+-- Prerequisites: table users(id) must already exist.
+
+CREATE TABLE IF NOT EXISTS memorial_entries (
+    id SERIAL PRIMARY KEY,
+    full_name VARCHAR(255) NOT NULL,
+    affiliation VARCHAR(255),
+    category VARCHAR(50) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'draft',
+    biography TEXT,
+    date_of_birth DATE,
+    date_of_passing DATE,
+    published_at TIMESTAMP,
+    portrait_file_name VARCHAR(255),
+    portrait_gcp_object_key TEXT,
+    portrait_file_url TEXT,
+    portrait_mime_type VARCHAR(255),
+    portrait_file_size BIGINT,
+    created_by INT,
+    updated_by INT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_memorial_entries_created_by
+        FOREIGN KEY (created_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT fk_memorial_entries_updated_by
+        FOREIGN KEY (updated_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT chk_memorial_entries_full_name_not_blank
+        CHECK (btrim(full_name) <> ''),
+
+    CONSTRAINT chk_memorial_entries_category
+        CHECK (category IN ('alumnus', 'veteran', 'founder', 'friend')),
+
+    CONSTRAINT chk_memorial_entries_status
+        CHECK (status IN ('draft', 'review', 'published')),
+
+    CONSTRAINT chk_memorial_entries_dates
+        CHECK (
+            date_of_birth IS NULL
+            OR date_of_passing IS NULL
+            OR date_of_passing >= date_of_birth
+        ),
+
+    CONSTRAINT chk_memorial_entries_portrait_file_name
+        CHECK (portrait_file_name IS NULL OR btrim(portrait_file_name) <> ''),
+
+    CONSTRAINT chk_memorial_entries_portrait_file_size
+        CHECK (portrait_file_size IS NULL OR portrait_file_size >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_memorial_entries_category
+    ON memorial_entries(category);
+
+CREATE INDEX IF NOT EXISTS idx_memorial_entries_status
+    ON memorial_entries(status);
+
+CREATE INDEX IF NOT EXISTS idx_memorial_entries_updated_at
+    ON memorial_entries(updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_memorial_entries_published_at
+    ON memorial_entries(published_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_memorial_entries_created_by
+    ON memorial_entries(created_by);
+
+CREATE INDEX IF NOT EXISTS idx_memorial_entries_updated_by
+    ON memorial_entries(updated_by);
+
+DROP TRIGGER IF EXISTS trg_memorial_entries_set_updated_at ON memorial_entries;
+CREATE TRIGGER trg_memorial_entries_set_updated_at
+BEFORE UPDATE ON memorial_entries
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+CREATE TABLE IF NOT EXISTS memorial_gallery_images (
+    id SERIAL PRIMARY KEY,
+    memorial_entry_id INT NOT NULL,
+    file_name VARCHAR(255) NOT NULL,
+    gcp_object_key TEXT,
+    file_url TEXT NOT NULL,
+    mime_type VARCHAR(255),
+    file_size BIGINT,
+    sort_order INT NOT NULL DEFAULT 0,
+    uploaded_by INT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_memorial_gallery_images_entry
+        FOREIGN KEY (memorial_entry_id) REFERENCES memorial_entries(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_memorial_gallery_images_uploaded_by
+        FOREIGN KEY (uploaded_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT chk_memorial_gallery_images_file_name
+        CHECK (btrim(file_name) <> ''),
+
+    CONSTRAINT chk_memorial_gallery_images_file_url
+        CHECK (btrim(file_url) <> ''),
+
+    CONSTRAINT chk_memorial_gallery_images_file_size
+        CHECK (file_size IS NULL OR file_size >= 0),
+
+    CONSTRAINT chk_memorial_gallery_images_sort_order
+        CHECK (sort_order >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_memorial_gallery_images_entry_id
+    ON memorial_gallery_images(memorial_entry_id);
+
+CREATE INDEX IF NOT EXISTS idx_memorial_gallery_images_sort_order
+    ON memorial_gallery_images(memorial_entry_id, sort_order, id);
+
+CREATE INDEX IF NOT EXISTS idx_memorial_gallery_images_uploaded_by
+    ON memorial_gallery_images(uploaded_by);
+
+DROP TRIGGER IF EXISTS trg_memorial_gallery_images_set_updated_at ON memorial_gallery_images;
+CREATE TRIGGER trg_memorial_gallery_images_set_updated_at
+BEFORE UPDATE ON memorial_gallery_images
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
 -- Password Reset OTP Table for Forgot Password Functionality
 CREATE TABLE IF NOT EXISTS password_reset_otps (
     id SERIAL PRIMARY KEY,
