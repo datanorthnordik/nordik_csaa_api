@@ -8,6 +8,7 @@ import (
 	"nordikcsaaapi/internal/config"
 	"nordikcsaaapi/internal/events"
 	"nordikcsaaapi/internal/gallery"
+	"nordikcsaaapi/internal/memorial"
 	"nordikcsaaapi/internal/menus"
 	"nordikcsaaapi/internal/newsletters"
 	"nordikcsaaapi/internal/pages"
@@ -89,6 +90,8 @@ func main() {
 	press.RegisterRoutes(r, pressService, auth.RequireBearerAuth(&cfg))
 	resourceService := &resources.ResourceService{DB: db, BucketName: cfg.DriveBucketName, BucketPrefix: cfg.DriveBucketPrefix}
 	resources.RegisterRoutes(r, resourceService, auth.RequireBearerAuth(&cfg))
+	memorialService := &memorial.MemorialService{DB: db, BucketName: cfg.DriveBucketName, BucketPrefix: cfg.DriveBucketPrefix}
+	memorial.RegisterRoutes(r, memorialService, auth.RequireBearerAuth(&cfg))
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
