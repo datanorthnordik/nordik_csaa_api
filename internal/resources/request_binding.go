@@ -63,7 +63,7 @@ func bindSaveResourceRequest(c *gin.Context) (SaveResourceRequest, bool) {
 func readOptionalResourceFile(c *gin.Context) (*httpapi.UploadedFile, bool, error) {
 	file, err := httpapi.ReadMultipartFile(c, "resource_file")
 	if err == nil {
-		return file, true, nil
+		return file, file != nil, nil
 	}
 
 	message := strings.ToLower(strings.TrimSpace(err.Error()))
