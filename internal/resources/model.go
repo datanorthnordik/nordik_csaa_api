@@ -3,10 +3,10 @@ package resources
 import "time"
 
 const (
-	ResourceCategoryBrandIdentity   = "brand_identity"
-	ResourceCategoryGovernanceLegal = "governance_legal"
-	ResourceCategoryTrainingManuals = "training_manuals"
-	ResourceCategoryMediaKits       = "media_kits"
+	ResourceCategoryEducational = "educational"
+	ResourceCategoryMedia       = "media"
+	ResourceCategoryLink        = "link"
+	ResourceCategoryReport      = "report"
 
 	ResourceVisibilityPublic   = "public"
 	ResourceVisibilityInternal = "internal"
@@ -15,11 +15,13 @@ const (
 type ResourceEntry struct {
 	ID           int       `gorm:"primaryKey;autoIncrement" json:"id"`
 	Name         string    `gorm:"size:255;not null" json:"name"`
+	Description  string    `gorm:"type:text;not null;default:''" json:"description"`
 	Category     string    `gorm:"size:50;not null" json:"category"`
 	Visibility   string    `gorm:"size:20;not null;default:public" json:"visibility"`
-	FileName     string    `gorm:"size:255;not null;column:file_name" json:"file_name"`
+	LinkURL      string    `gorm:"column:link_url" json:"link_url"`
+	FileName     string    `gorm:"size:255;column:file_name" json:"file_name"`
 	GCPObjectKey string    `gorm:"column:gcp_object_key" json:"gcp_object_key,omitempty"`
-	FileURL      string    `gorm:"not null;column:file_url" json:"file_url"`
+	FileURL      string    `gorm:"column:file_url" json:"file_url"`
 	MimeType     string    `gorm:"size:255;column:mime_type" json:"mime_type"`
 	FileSize     int64     `gorm:"column:file_size" json:"file_size,omitempty"`
 	CreatedBy    *int      `gorm:"column:created_by" json:"created_by,omitempty"`
@@ -39,17 +41,21 @@ type ResourceUploadInput struct {
 
 type SaveResourceRequest struct {
 	Name       string               `json:"name" binding:"required"`
+	Description string              `json:"description" binding:"required"`
 	Category   string               `json:"category" binding:"required"`
 	Visibility string               `json:"visibility" binding:"required"`
+	LinkURL    string               `json:"link_url"`
 	Document   *ResourceUploadInput `json:"document,omitempty"`
 }
 
 type ResourceMutationResponse struct {
-	ID         int       `json:"id"`
-	Name       string    `json:"name"`
-	Category   string    `json:"category"`
-	Visibility string    `json:"visibility"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID          int       `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Category    string    `json:"category"`
+	Visibility  string    `json:"visibility"`
+	LinkURL     string    `json:"link_url"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type ResourceCategoryCount struct {
@@ -61,12 +67,15 @@ type ResourceCategoryCount struct {
 type ResourceListItem struct {
 	ID            int       `json:"id"`
 	Name          string    `json:"name"`
+	Description   string    `json:"description"`
 	Category      string    `json:"category"`
 	CategoryLabel string    `json:"category_label"`
 	Visibility    string    `json:"visibility"`
+	LinkURL       string    `json:"link_url"`
 	FileName      string    `json:"file_name"`
 	MimeType      string    `json:"mime_type"`
 	FileSize      int64     `json:"file_size"`
+	HasDocument   bool      `json:"has_document"`
 	ContentURL    string    `json:"content_url"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`

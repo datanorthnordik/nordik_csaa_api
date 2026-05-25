@@ -1679,17 +1679,16 @@ BEFORE INSERT OR UPDATE ON newsletter_media
 FOR EACH ROW
 EXECUTE FUNCTION assign_newsletter_media_sort_order();
 
--- Resources Migration
--- Prerequisites: tables users(id) must already exist.
-
 CREATE TABLE IF NOT EXISTS resource_entries (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
     category VARCHAR(50) NOT NULL,
     visibility VARCHAR(20) NOT NULL DEFAULT 'public',
-    file_name VARCHAR(255) NOT NULL,
+    link_url TEXT,
+    file_name VARCHAR(255),
     gcp_object_key TEXT,
-    file_url TEXT NOT NULL,
+    file_url TEXT,
     mime_type VARCHAR(255),
     file_size BIGINT,
     created_by INT,
@@ -1705,26 +1704,137 @@ CREATE TABLE IF NOT EXISTS resource_entries (
     CONSTRAINT fk_resource_entries_updated_by
         FOREIGN KEY (updated_by) REFERENCES users(id)
         ON UPDATE CASCADE
-        ON DELETE SET NULL,
-
-    CONSTRAINT chk_resource_entries_name_not_blank
-        CHECK (btrim(name) <> ''),
-
-    CONSTRAINT chk_resource_entries_category
-        CHECK (category IN ('brand_identity', 'governance_legal', 'training_manuals', 'media_kits')),
-
-    CONSTRAINT chk_resource_entries_visibility
-        CHECK (visibility IN ('public', 'internal')),
-
-    CONSTRAINT chk_resource_entries_file_name_not_blank
-        CHECK (btrim(file_name) <> ''),
-
-    CONSTRAINT chk_resource_entries_file_url_not_blank
-        CHECK (btrim(file_url) <> ''),
-
-    CONSTRAINT chk_resource_entries_file_size
-        CHECK (file_size IS NULL OR file_size >= 0)
+        ON DELETE SET NULL
 );
+
+ALTER TABLE resource_entries
+    ADD COLUMN IF NOT EXISTS description TEXT;
+
+ALTER TABLE resource_entries
+    ADD COLUMN IF NOT EXISTS link_url TEXT;
+
+ALTER TABLE resource_entries
+    ADD COLUMN IF NOT EXISTS gcp_object_key TEXT;
+
+UPDATE resource_entries
+SET category = CASE category
+    WHEN 'brand_identity' THEN 'media'
+    WHEN 'governance_legal' THEN 'report'
+    WHEN 'training_manuals' THEN 'educational'
+    WHEN 'media_kits' THEN 'media'
+    ELSE category
+END;
+
+UPDATE resource_entries
+SET category = 'report'
+WHERE category NOT IN ('educational', 'media', 'link', 'report');
+
+UPDATE resource_entries
+SET description = COALESCE(NULLIF(BTRIM(description), ''), NULLIF(BTRIM(name), ''), 'Resource');
+
+UPDATE resource_entries
+SET link_url = NULLIF(BTRIM(link_url), '');
+
+UPDATE resource_entries
+SET file_name = NULLIF(BTRIM(file_name), '');
+
+UPDATE resource_entries
+SET file_url = NULLIF(BTRIM(file_url), '');
+
+UPDATE resource_entries
+SET gcp_object_key = NULLIF(BTRIM(gcp_object_key), '');
+
+UPDATE resource_entries
+SET mime_type = NULLIF(BTRIM(mime_type), '');
+
+ALTER TABLE resource_entries
+    ALTER COLUMN description SET DEFAULT '';
+
+ALTER TABLE resource_entries
+    ALTER COLUMN description SET NOT NULL;
+
+ALTER TABLE resource_entries
+    ALTER COLUMN file_name DROP NOT NULL;
+
+ALTER TABLE resource_entries
+    ALTER COLUMN file_url DROP NOT NULL;
+
+ALTER TABLE resource_entries
+    ALTER COLUMN mime_type DROP NOT NULL;
+
+ALTER TABLE resource_entries
+    ALTER COLUMN file_size DROP NOT NULL;
+
+ALTER TABLE resource_entries
+    DROP CONSTRAINT IF EXISTS chk_resource_entries_name_not_blank;
+
+ALTER TABLE resource_entries
+    DROP CONSTRAINT IF EXISTS chk_resource_entries_description_not_blank;
+
+ALTER TABLE resource_entries
+    DROP CONSTRAINT IF EXISTS chk_resource_entries_category;
+
+ALTER TABLE resource_entries
+    DROP CONSTRAINT IF EXISTS chk_resource_entries_visibility;
+
+ALTER TABLE resource_entries
+    DROP CONSTRAINT IF EXISTS chk_resource_entries_file_name_not_blank;
+
+ALTER TABLE resource_entries
+    DROP CONSTRAINT IF EXISTS chk_resource_entries_file_url_not_blank;
+
+ALTER TABLE resource_entries
+    DROP CONSTRAINT IF EXISTS chk_resource_entries_link_or_document;
+
+ALTER TABLE resource_entries
+    DROP CONSTRAINT IF EXISTS chk_resource_entries_file_size;
+
+ALTER TABLE resource_entries
+    ADD CONSTRAINT chk_resource_entries_name_not_blank
+        CHECK (BTRIM(name) <> '');
+
+ALTER TABLE resource_entries
+    ADD CONSTRAINT chk_resource_entries_description_not_blank
+        CHECK (BTRIM(description) <> '');
+
+ALTER TABLE resource_entries
+    ADD CONSTRAINT chk_resource_entries_category
+        CHECK (category IN ('educational', 'media', 'link', 'report'));
+
+ALTER TABLE resource_entries
+    ADD CONSTRAINT chk_resource_entries_visibility
+        CHECK (visibility IN ('public', 'internal'));
+
+ALTER TABLE resource_entries
+    ADD CONSTRAINT chk_resource_entries_file_size
+        CHECK (file_size IS NULL OR file_size >= 0);
+
+ALTER TABLE resource_entries
+    ADD CONSTRAINT chk_resource_entries_link_or_document
+        CHECK (
+            (
+                category = 'link'
+                AND BTRIM(COALESCE(link_url, '')) <> ''
+                AND BTRIM(COALESCE(file_name, '')) = ''
+                AND BTRIM(COALESCE(file_url, '')) = ''
+            )
+            OR
+            (
+                category <> 'link'
+                AND BTRIM(COALESCE(link_url, '')) = ''
+                AND BTRIM(COALESCE(file_name, '')) <> ''
+                AND BTRIM(COALESCE(file_url, '')) <> ''
+            )
+        );
+
+CREATE INDEX IF NOT EXISTS idx_resource_entries_category
+    ON resource_entries(category);
+
+CREATE INDEX IF NOT EXISTS idx_resource_entries_visibility
+    ON resource_entries(visibility);
+
+CREATE INDEX IF NOT EXISTS idx_resource_entries_updated_at
+    ON resource_entries(updated_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_resource_entries_category
     ON resource_entries(category);

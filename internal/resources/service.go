@@ -3,6 +3,7 @@ package resources
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"path"
 	"path/filepath"
 	"strconv"
@@ -135,6 +136,9 @@ func (s *ResourceService) GetResourceContent(id int) (*ResourceContent, error) {
 	if err != nil {
 		return nil, err
 	}
+	if !resourceHasDocument(entry) {
+		return nil, fmt.Errorf("resource does not have downloadable content")
+	}
 
 	bucketName, objectKey, err := s.resolveStoredObjectReference(entry.GCPObjectKey, entry.FileURL)
 	if err != nil {
@@ -167,27 +171,44 @@ func (s *ResourceService) CreateResource(req SaveResourceRequest, userID *int) (
 		return nil, ErrStoreUnavailable
 	}
 
-	cleanReq, err := normalizeSaveResourceRequest(req, true)
-	if err != nil {
-		return nil, err
-	}
-
-	fileURL, objectKey, fileName, mimeType, fileSize, uploadedKey, err := s.resolveDocument(cleanReq.Document, userID)
+	cleanReq, err := normalizeSaveResourceRequest(req)
 	if err != nil {
 		return nil, err
 	}
 
 	entry := ResourceEntry{
-		Name:         cleanReq.Name,
-		Category:     cleanReq.Category,
-		Visibility:   cleanReq.Visibility,
-		FileName:     fileName,
-		GCPObjectKey: objectKey,
-		FileURL:      fileURL,
-		MimeType:     mimeType,
-		FileSize:     fileSize,
-		CreatedBy:    userID,
-		UpdatedBy:    userID,
+		Name:        cleanReq.Name,
+		Description: cleanReq.Description,
+		Category:    cleanReq.Category,
+		Visibility:  cleanReq.Visibility,
+		LinkURL:     cleanReq.LinkURL,
+		CreatedBy:   userID,
+		UpdatedBy:   userID,
+	}
+
+	uploadedKey := ""
+	if cleanReq.Category == ResourceCategoryLink {
+		if hasResourceUploadInput(cleanReq.Document) {
+			return nil, fmt.Errorf("document must be omitted when category is link")
+		}
+	} else {
+		if strings.TrimSpace(cleanReq.LinkURL) != "" {
+			return nil, fmt.Errorf("link_url must be omitted unless category is link")
+		}
+		if !hasResourceUploadInput(cleanReq.Document) {
+			return nil, fmt.Errorf("at least one document is required for this category")
+		}
+
+		fileURL, objectKey, fileName, mimeType, fileSize, nextUploadedKey, resolveErr := s.resolveDocument(cleanReq.Document, userID)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		entry.FileURL = fileURL
+		entry.GCPObjectKey = objectKey
+		entry.FileName = fileName
+		entry.MimeType = mimeType
+		entry.FileSize = fileSize
+		uploadedKey = nextUploadedKey
 	}
 
 	if err := s.DB.Create(&entry).Error; err != nil {
@@ -208,7 +229,7 @@ func (s *ResourceService) UpdateResource(id int, req SaveResourceRequest, userID
 		return nil, err
 	}
 
-	cleanReq, err := normalizeSaveResourceRequest(req, false)
+	cleanReq, err := normalizeSaveResourceRequest(req)
 	if err != nil {
 		return nil, err
 	}
@@ -216,23 +237,43 @@ func (s *ResourceService) UpdateResource(id int, req SaveResourceRequest, userID
 	oldObjectKey := entry.GCPObjectKey
 	oldFileURL := entry.FileURL
 	newUploadedKey := ""
+	shouldDeleteOldDocument := false
 
 	entry.Name = cleanReq.Name
+	entry.Description = cleanReq.Description
 	entry.Category = cleanReq.Category
 	entry.Visibility = cleanReq.Visibility
 	entry.UpdatedBy = userID
 
-	if cleanReq.Document != nil {
-		fileURL, objectKey, fileName, mimeType, fileSize, uploadedKey, err := s.resolveDocument(cleanReq.Document, userID)
-		if err != nil {
-			return nil, err
+	if cleanReq.Category == ResourceCategoryLink {
+		if hasResourceUploadInput(cleanReq.Document) {
+			return nil, fmt.Errorf("document must be omitted when category is link")
 		}
-		entry.FileURL = fileURL
-		entry.GCPObjectKey = objectKey
-		entry.FileName = fileName
-		entry.MimeType = mimeType
-		entry.FileSize = fileSize
-		newUploadedKey = uploadedKey
+
+		shouldDeleteOldDocument = resourceHasDocument(entry)
+		clearResourceDocumentFields(&entry)
+		entry.LinkURL = cleanReq.LinkURL
+	} else {
+		if strings.TrimSpace(cleanReq.LinkURL) != "" {
+			return nil, fmt.Errorf("link_url must be omitted unless category is link")
+		}
+
+		entry.LinkURL = ""
+		if hasResourceUploadInput(cleanReq.Document) {
+			fileURL, objectKey, fileName, mimeType, fileSize, uploadedKey, resolveErr := s.resolveDocument(cleanReq.Document, userID)
+			if resolveErr != nil {
+				return nil, resolveErr
+			}
+			shouldDeleteOldDocument = resourceHasDocument(entry)
+			entry.FileURL = fileURL
+			entry.GCPObjectKey = objectKey
+			entry.FileName = fileName
+			entry.MimeType = mimeType
+			entry.FileSize = fileSize
+			newUploadedKey = uploadedKey
+		} else if !resourceHasDocument(entry) {
+			return nil, fmt.Errorf("at least one document is required for this category")
+		}
 	}
 
 	if err := s.DB.Save(&entry).Error; err != nil {
@@ -240,7 +281,7 @@ func (s *ResourceService) UpdateResource(id int, req SaveResourceRequest, userID
 		return nil, err
 	}
 
-	if newUploadedKey != "" && (strings.TrimSpace(oldObjectKey) != "" || strings.TrimSpace(oldFileURL) != "") {
+	if shouldDeleteOldDocument && (newUploadedKey == "" || oldObjectKey != entry.GCPObjectKey || oldFileURL != entry.FileURL) {
 		s.deleteStoredObjectBestEffort(oldObjectKey, oldFileURL)
 	}
 
@@ -261,7 +302,9 @@ func (s *ResourceService) DeleteResource(id int) error {
 		return err
 	}
 
-	s.deleteStoredObjectBestEffort(entry.GCPObjectKey, entry.FileURL)
+	if resourceHasDocument(entry) {
+		s.deleteStoredObjectBestEffort(entry.GCPObjectKey, entry.FileURL)
+	}
 	return nil
 }
 
@@ -277,7 +320,7 @@ func normalizeListResourcesFilter(filter ListResourcesFilter) (ListResourcesFilt
 	filter.FileType = normalizeResourceFileType(filter.FileType)
 
 	if filter.Category != "" && !isAllowedResourceCategory(filter.Category) {
-		return filter, fmt.Errorf("category must be one of brand_identity, governance_legal, training_manuals, media_kits")
+		return filter, fmt.Errorf("category must be one of educational, media, link, report")
 	}
 	if filter.FileType == "" {
 		filter.FileType = "all"
@@ -289,10 +332,12 @@ func normalizeListResourcesFilter(filter ListResourcesFilter) (ListResourcesFilt
 	return filter, nil
 }
 
-func normalizeSaveResourceRequest(req SaveResourceRequest, requireDocument bool) (SaveResourceRequest, error) {
+func normalizeSaveResourceRequest(req SaveResourceRequest) (SaveResourceRequest, error) {
 	req.Name = strings.TrimSpace(req.Name)
+	req.Description = strings.TrimSpace(req.Description)
 	req.Category = normalizeResourceCategory(req.Category)
 	req.Visibility = strings.ToLower(strings.TrimSpace(req.Visibility))
+	req.LinkURL = strings.TrimSpace(req.LinkURL)
 
 	if req.Name == "" {
 		return req, fmt.Errorf("name is required")
@@ -300,8 +345,11 @@ func normalizeSaveResourceRequest(req SaveResourceRequest, requireDocument bool)
 	if len(req.Name) > 255 {
 		return req, fmt.Errorf("name must be 255 characters or fewer")
 	}
+	if req.Description == "" {
+		return req, fmt.Errorf("description is required")
+	}
 	if !isAllowedResourceCategory(req.Category) {
-		return req, fmt.Errorf("category must be one of brand_identity, governance_legal, training_manuals, media_kits")
+		return req, fmt.Errorf("category must be one of educational, media, link, report")
 	}
 	if req.Visibility == "" {
 		req.Visibility = ResourceVisibilityPublic
@@ -309,17 +357,33 @@ func normalizeSaveResourceRequest(req SaveResourceRequest, requireDocument bool)
 	if !isAllowedResourceVisibility(req.Visibility) {
 		return req, fmt.Errorf("visibility must be one of public, internal")
 	}
-	if requireDocument {
-		if req.Document == nil {
-			return req, fmt.Errorf("document is required")
+	if req.Category == ResourceCategoryLink {
+		if req.LinkURL == "" {
+			return req, fmt.Errorf("link_url is required when category is link")
 		}
-		if len(req.Document.Content) == 0 &&
-			strings.TrimSpace(req.Document.FileURL) == "" &&
-			strings.TrimSpace(req.Document.GCPObjectKey) == "" {
-			return req, fmt.Errorf("document file is required")
+		normalizedURL, err := normalizeExternalURL(req.LinkURL)
+		if err != nil {
+			return req, err
 		}
+		req.LinkURL = normalizedURL
+	} else if req.LinkURL != "" {
+		return req, fmt.Errorf("link_url must be omitted unless category is link")
 	}
+
 	return req, nil
+}
+
+func normalizeExternalURL(value string) (string, error) {
+	parsed, err := url.ParseRequestURI(strings.TrimSpace(value))
+	if err != nil || parsed == nil || strings.TrimSpace(parsed.Scheme) == "" || strings.TrimSpace(parsed.Host) == "" {
+		return "", fmt.Errorf("link_url must be a valid absolute URL")
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https":
+		return parsed.String(), nil
+	default:
+		return "", fmt.Errorf("link_url must be a valid absolute URL")
+	}
 }
 
 func (s *ResourceService) resolveDocument(input *ResourceUploadInput, userID *int) (fileURL string, objectKey string, fileName string, mimeType string, fileSize int64, uploadedKey string, err error) {
@@ -370,7 +434,9 @@ func (s *ResourceService) applyListFilters(query *gorm.DB, filter ListResourcesF
 	if searchTerm := strings.TrimSpace(filter.SearchTerm); searchTerm != "" {
 		pattern := "%" + strings.ToLower(searchTerm) + "%"
 		query = query.Where(
-			"LOWER(COALESCE(name, '')) LIKE ? OR LOWER(COALESCE(file_name, '')) LIKE ? OR LOWER(COALESCE(mime_type, '')) LIKE ?",
+			"LOWER(COALESCE(name, '')) LIKE ? OR LOWER(COALESCE(description, '')) LIKE ? OR LOWER(COALESCE(file_name, '')) LIKE ? OR LOWER(COALESCE(mime_type, '')) LIKE ? OR LOWER(COALESCE(link_url, '')) LIKE ?",
+			pattern,
+			pattern,
 			pattern,
 			pattern,
 			pattern,
@@ -498,28 +564,36 @@ func (s *ResourceService) getResourceEntryModel(id int) (ResourceEntry, error) {
 }
 
 func resourceListItemFromModel(entry ResourceEntry) ResourceListItem {
-	return ResourceListItem{
+	item := ResourceListItem{
 		ID:            entry.ID,
 		Name:          entry.Name,
+		Description:   entry.Description,
 		Category:      entry.Category,
 		CategoryLabel: resourceCategoryLabel(entry.Category),
 		Visibility:    entry.Visibility,
+		LinkURL:       entry.LinkURL,
 		FileName:      entry.FileName,
 		MimeType:      entry.MimeType,
 		FileSize:      entry.FileSize,
-		ContentURL:    buildResourceContentURL(entry.ID),
+		HasDocument:   resourceHasDocument(entry),
 		CreatedAt:     entry.CreatedAt,
 		UpdatedAt:     entry.UpdatedAt,
 	}
+	if item.HasDocument {
+		item.ContentURL = buildResourceContentURL(entry.ID)
+	}
+	return item
 }
 
 func resourceMutationFromModel(entry ResourceEntry) *ResourceMutationResponse {
 	return &ResourceMutationResponse{
-		ID:         entry.ID,
-		Name:       entry.Name,
-		Category:   entry.Category,
-		Visibility: entry.Visibility,
-		UpdatedAt:  entry.UpdatedAt,
+		ID:          entry.ID,
+		Name:        entry.Name,
+		Description: entry.Description,
+		Category:    entry.Category,
+		Visibility:  entry.Visibility,
+		LinkURL:     entry.LinkURL,
+		UpdatedAt:   entry.UpdatedAt,
 	}
 }
 
@@ -528,22 +602,22 @@ func buildResourceContentURL(id int) string {
 }
 
 var resourceCategoryOrder = []string{
-	ResourceCategoryBrandIdentity,
-	ResourceCategoryGovernanceLegal,
-	ResourceCategoryTrainingManuals,
-	ResourceCategoryMediaKits,
+	ResourceCategoryEducational,
+	ResourceCategoryMedia,
+	ResourceCategoryLink,
+	ResourceCategoryReport,
 }
 
 func resourceCategoryLabel(category string) string {
 	switch normalizeResourceCategory(category) {
-	case ResourceCategoryBrandIdentity:
-		return "Brand Identity"
-	case ResourceCategoryGovernanceLegal:
-		return "Governance & Legal"
-	case ResourceCategoryTrainingManuals:
-		return "Training & Manuals"
-	case ResourceCategoryMediaKits:
-		return "Media Kits"
+	case ResourceCategoryEducational:
+		return "Educational"
+	case ResourceCategoryMedia:
+		return "Media"
+	case ResourceCategoryLink:
+		return "Link"
+	case ResourceCategoryReport:
+		return "Report"
 	default:
 		return "Resources"
 	}
@@ -555,10 +629,10 @@ func normalizeResourceCategory(category string) string {
 
 func isAllowedResourceCategory(category string) bool {
 	switch normalizeResourceCategory(category) {
-	case ResourceCategoryBrandIdentity,
-		ResourceCategoryGovernanceLegal,
-		ResourceCategoryTrainingManuals,
-		ResourceCategoryMediaKits:
+	case ResourceCategoryEducational,
+		ResourceCategoryMedia,
+		ResourceCategoryLink,
+		ResourceCategoryReport:
 		return true
 	default:
 		return false
@@ -584,7 +658,7 @@ func normalizeResourceFileType(fileType string) string {
 
 func isAllowedResourceFileType(fileType string) bool {
 	switch normalizeResourceFileType(fileType) {
-	case "all", "pdf", "document", "presentation", "spreadsheet", "image", "vector", "other":
+	case "all", "link", "pdf", "document", "presentation", "spreadsheet", "image", "vector", "other":
 		return true
 	default:
 		return false
@@ -593,6 +667,8 @@ func isAllowedResourceFileType(fileType string) bool {
 
 func resourceFileTypeCondition(fileType string) (string, []interface{}, error) {
 	switch normalizeResourceFileType(fileType) {
+	case "link":
+		return "category = ?", []interface{}{ResourceCategoryLink}, nil
 	case "pdf":
 		return "(LOWER(COALESCE(file_name, '')) LIKE ? OR LOWER(COALESCE(mime_type, '')) LIKE ?)", []interface{}{"%.pdf", "%pdf%"}, nil
 	case "document":
@@ -606,8 +682,9 @@ func resourceFileTypeCondition(fileType string) (string, []interface{}, error) {
 	case "vector":
 		return "(LOWER(COALESCE(file_name, '')) LIKE ? OR LOWER(COALESCE(mime_type, '')) LIKE ?)", []interface{}{"%.svg", "%svg%"}, nil
 	case "other":
-		return "NOT ((LOWER(COALESCE(file_name, '')) LIKE ? OR LOWER(COALESCE(mime_type, '')) LIKE ?) OR (LOWER(COALESCE(file_name, '')) LIKE ? OR LOWER(COALESCE(file_name, '')) LIKE ? OR LOWER(COALESCE(mime_type, '')) LIKE ? OR LOWER(COALESCE(mime_type, '')) LIKE ?) OR (LOWER(COALESCE(file_name, '')) LIKE ? OR LOWER(COALESCE(file_name, '')) LIKE ? OR LOWER(COALESCE(mime_type, '')) LIKE ? OR LOWER(COALESCE(mime_type, '')) LIKE ?) OR (LOWER(COALESCE(file_name, '')) LIKE ? OR LOWER(COALESCE(file_name, '')) LIKE ? OR LOWER(COALESCE(mime_type, '')) LIKE ? OR LOWER(COALESCE(mime_type, '')) LIKE ?) OR (LOWER(COALESCE(mime_type, '')) LIKE ? OR LOWER(COALESCE(file_name, '')) LIKE ? OR LOWER(COALESCE(file_name, '')) LIKE ? OR LOWER(COALESCE(file_name, '')) LIKE ? OR LOWER(COALESCE(file_name, '')) LIKE ?) OR (LOWER(COALESCE(file_name, '')) LIKE ? OR LOWER(COALESCE(mime_type, '')) LIKE ?))",
+		return "category <> ? AND NOT ((LOWER(COALESCE(file_name, '')) LIKE ? OR LOWER(COALESCE(mime_type, '')) LIKE ?) OR (LOWER(COALESCE(file_name, '')) LIKE ? OR LOWER(COALESCE(file_name, '')) LIKE ? OR LOWER(COALESCE(mime_type, '')) LIKE ? OR LOWER(COALESCE(mime_type, '')) LIKE ?) OR (LOWER(COALESCE(file_name, '')) LIKE ? OR LOWER(COALESCE(file_name, '')) LIKE ? OR LOWER(COALESCE(mime_type, '')) LIKE ? OR LOWER(COALESCE(mime_type, '')) LIKE ?) OR (LOWER(COALESCE(file_name, '')) LIKE ? OR LOWER(COALESCE(file_name, '')) LIKE ? OR LOWER(COALESCE(mime_type, '')) LIKE ? OR LOWER(COALESCE(mime_type, '')) LIKE ?) OR (LOWER(COALESCE(mime_type, '')) LIKE ? OR LOWER(COALESCE(file_name, '')) LIKE ? OR LOWER(COALESCE(file_name, '')) LIKE ? OR LOWER(COALESCE(file_name, '')) LIKE ? OR LOWER(COALESCE(file_name, '')) LIKE ?) OR (LOWER(COALESCE(file_name, '')) LIKE ? OR LOWER(COALESCE(mime_type, '')) LIKE ?))",
 			[]interface{}{
+				ResourceCategoryLink,
 				"%.pdf", "%pdf%",
 				"%.doc", "%.docx", "%word%", "%document%",
 				"%.ppt", "%.pptx", "%powerpoint%", "%presentation%",
@@ -618,6 +695,31 @@ func resourceFileTypeCondition(fileType string) (string, []interface{}, error) {
 	default:
 		return "", nil, fmt.Errorf("file_type is invalid")
 	}
+}
+
+func resourceHasDocument(entry ResourceEntry) bool {
+	return strings.TrimSpace(entry.FileName) != "" || strings.TrimSpace(entry.FileURL) != ""
+}
+
+func hasResourceUploadInput(input *ResourceUploadInput) bool {
+	if input == nil {
+		return false
+	}
+	return len(input.Content) > 0 ||
+		strings.TrimSpace(input.FileURL) != "" ||
+		strings.TrimSpace(input.GCPObjectKey) != "" ||
+		strings.TrimSpace(input.FileName) != ""
+}
+
+func clearResourceDocumentFields(entry *ResourceEntry) {
+	if entry == nil {
+		return
+	}
+	entry.FileName = ""
+	entry.GCPObjectKey = ""
+	entry.FileURL = ""
+	entry.MimeType = ""
+	entry.FileSize = 0
 }
 
 func normalizeMimeType(mimeType string) string {
