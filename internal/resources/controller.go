@@ -244,7 +244,11 @@ func isClientSafeResourceError(err error) bool {
 	case strings.Contains(message, " is required"),
 		strings.Contains(message, " must be "),
 		strings.Contains(message, " must be one of "),
+		strings.Contains(message, " must be omitted"),
+		strings.Contains(message, "valid absolute url"),
 		strings.Contains(message, "file_type is invalid"),
+		strings.Contains(message, "at least one document is required"),
+		strings.Contains(message, "resource does not have downloadable content"),
 		strings.Contains(message, "resource content is not available from storage"),
 		strings.Contains(message, "use multipart/form-data"):
 		return true
