@@ -118,7 +118,7 @@ func (s *ResourceService) GetResource(id int) (*ResourceDetailResponse, error) {
 		return nil, ErrStoreUnavailable
 	}
 
-	entry, err := s.getResourceEntryModel(id)
+	entry, err := s.getResourceEntryModelPublic(id)
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +132,7 @@ func (s *ResourceService) GetResourceContent(id int) (*ResourceContent, error) {
 		return nil, ErrStoreUnavailable
 	}
 
-	entry, err := s.getResourceEntryModel(id)
+	entry, err := s.getResourceEntryModelPublic(id)
 	if err != nil {
 		return nil, err
 	}
@@ -431,6 +431,9 @@ func (s *ResourceService) resolveDocument(input *ResourceUploadInput, userID *in
 }
 
 func (s *ResourceService) applyListFilters(query *gorm.DB, filter ListResourcesFilter, includeCategory bool) (*gorm.DB, error) {
+	// Filter to show only public resources for list endpoint
+	query = query.Where("visibility = ?", ResourceVisibilityPublic)
+
 	if searchTerm := strings.TrimSpace(filter.SearchTerm); searchTerm != "" {
 		pattern := "%" + strings.ToLower(searchTerm) + "%"
 		query = query.Where(
@@ -555,6 +558,17 @@ func (s *ResourceService) resolveStoredObjectReference(objectKey string, fileURL
 func (s *ResourceService) getResourceEntryModel(id int) (ResourceEntry, error) {
 	var entry ResourceEntry
 	if err := s.DB.First(&entry, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ResourceEntry{}, ErrResourceNotFound
+		}
+		return ResourceEntry{}, err
+	}
+	return entry, nil
+}
+
+func (s *ResourceService) getResourceEntryModelPublic(id int) (ResourceEntry, error) {
+	var entry ResourceEntry
+	if err := s.DB.Where("visibility = ?", ResourceVisibilityPublic).First(&entry, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ResourceEntry{}, ErrResourceNotFound
 		}
