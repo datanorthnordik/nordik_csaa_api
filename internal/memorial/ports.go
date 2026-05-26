@@ -16,6 +16,9 @@ type ListMemorialsFilter struct {
 	SearchTerm string
 	Status     string
 	Category   string
+	SortBy     string
+	SortOrder  string
+	PublicOnly bool
 }
 
 var _ MemorialServicePort = (*MemorialService)(nil)

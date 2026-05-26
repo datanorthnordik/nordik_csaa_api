@@ -222,7 +222,7 @@ func TestMemorialListDetailAndMediaEndpoints(t *testing.T) {
 	router := setupMemorialRouter(service)
 
 	res := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/memorial?page=2&page_size=5&search=Ada&status=published&category=founder", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/memorial?page=2&page_size=5&search=Ada&status=published&category=founder&sort_by=full_name&sort_order=asc", nil)
 	router.ServeHTTP(res, req)
 
 	if res.Code != http.StatusOK {
@@ -234,6 +234,9 @@ func TestMemorialListDetailAndMediaEndpoints(t *testing.T) {
 		SearchTerm: "Ada",
 		Status:     "published",
 		Category:   "founder",
+		SortBy:     "full_name",
+		SortOrder:  "asc",
+		PublicOnly: true,
 	}) {
 		t.Fatalf("unexpected filter: %#v", service.gotListFilter)
 	}
@@ -291,6 +294,20 @@ func TestMemorialListDetailAndMediaEndpoints(t *testing.T) {
 
 func TestMemorialProtectedWriteEndpointsAndAuth(t *testing.T) {
 	router := setupProtectedMemorialRouter(&fakeMemorialService{})
+
+	for _, path := range []string{
+		"/api/memorial",
+		"/api/memorial/7",
+		"/api/memorial/7/portrait/content",
+		"/api/memorial/7/gallery/3/content",
+	} {
+		res := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		router.ServeHTTP(res, req)
+		if res.Code != http.StatusOK {
+			t.Fatalf("expected public read endpoint %s to be accessible without auth, got %d: %s", path, res.Code, res.Body.String())
+		}
+	}
 
 	tests := []struct {
 		method string

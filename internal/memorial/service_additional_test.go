@@ -356,9 +356,9 @@ func TestMemorialServiceAdditionalMediaAndHelperBranches(t *testing.T) {
 		svc := &MemorialService{DB: db, BucketName: "drive-bucket"}
 		now := time.Date(2026, 5, 25, 10, 0, 0, 0, time.UTC)
 
-		mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "memorial_entries" WHERE "memorial_entries"."id" = $1 ORDER BY "memorial_entries"."id" LIMIT $2`)).
+		mock.ExpectQuery(publishedMemorialEntryLookupQuery()).
 			WillReturnRows(memorialEntryRows().AddRow(
-				11, "Ada Lovelace", "Analytical Engine", MemorialCategoryFounder, MemorialStatusDraft, "<p>Hello</p>",
+				11, "Ada Lovelace", "Analytical Engine", MemorialCategoryFounder, MemorialStatusPublished, "<p>Hello</p>",
 				nil, nil, nil,
 				"", "memorial/entry-11/portrait/generated.jpg", "gs://drive-bucket/memorial/entry-11/portrait/generated.jpg", "", 0,
 				7, 7, now, now,
@@ -371,6 +371,13 @@ func TestMemorialServiceAdditionalMediaAndHelperBranches(t *testing.T) {
 			t.Fatalf("unexpected portrait fallback response: %#v", portraitResp)
 		}
 
+		mock.ExpectQuery(publishedMemorialEntryLookupQuery()).
+			WillReturnRows(memorialEntryRows().AddRow(
+				11, "Ada Lovelace", "Analytical Engine", MemorialCategoryFounder, MemorialStatusPublished, "<p>Hello</p>",
+				nil, nil, nil,
+				"", "memorial/entry-11/portrait/generated.jpg", "gs://drive-bucket/memorial/entry-11/portrait/generated.jpg", "", 0,
+				7, 7, now, now,
+			))
 		mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "memorial_gallery_images" WHERE memorial_entry_id = $1 AND id = $2 ORDER BY "memorial_gallery_images"."id" LIMIT $3`)).
 			WillReturnRows(memorialGalleryRows().AddRow(
 				31, 11, "", "memorial/entry-11/gallery/generated.png", "gs://drive-bucket/memorial/entry-11/gallery/generated.png",

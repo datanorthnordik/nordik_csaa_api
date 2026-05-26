@@ -88,9 +88,7 @@ func (s *MemorialService) ListMemorials(filter ListMemorialsFilter) (*MemorialLi
 	}
 
 	var rows []MemorialEntry
-	if err := itemQuery.
-		Order(clause.OrderByColumn{Column: clause.Column{Name: "updated_at"}, Desc: true}).
-		Order(clause.OrderByColumn{Column: clause.Column{Name: "id"}, Desc: true}).
+	if err := s.applyListSort(itemQuery, normalizedFilter).
 		Offset((normalizedFilter.Page - 1) * normalizedFilter.PageSize).
 		Limit(normalizedFilter.PageSize).
 		Find(&rows).Error; err != nil {
@@ -127,6 +125,8 @@ func (s *MemorialService) ListMemorials(filter ListMemorialsFilter) (*MemorialLi
 			SearchTerm: normalizedFilter.SearchTerm,
 			Status:     normalizedFilter.Status,
 			Category:   normalizedFilter.Category,
+			SortBy:     normalizedFilter.SortBy,
+			SortOrder:  normalizedFilter.SortOrder,
 		},
 	}, nil
 }
@@ -136,7 +136,7 @@ func (s *MemorialService) GetMemorial(id int) (*MemorialDetailResponse, error) {
 		return nil, ErrStoreUnavailable
 	}
 
-	entry, err := s.getMemorialEntryModel(id)
+	entry, err := s.getPublishedMemorialEntryModel(id)
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +159,7 @@ func (s *MemorialService) GetMemorialPortraitContent(id int) (*MemorialMediaCont
 		return nil, ErrStoreUnavailable
 	}
 
-	entry, err := s.getMemorialEntryModel(id)
+	entry, err := s.getPublishedMemorialEntryModel(id)
 	if err != nil {
 		return nil, err
 	}
@@ -196,6 +196,10 @@ func (s *MemorialService) GetMemorialPortraitContent(id int) (*MemorialMediaCont
 func (s *MemorialService) GetMemorialGalleryImageContent(id int, mediaID int) (*MemorialMediaContent, error) {
 	if s.DB == nil {
 		return nil, ErrStoreUnavailable
+	}
+
+	if _, err := s.getPublishedMemorialEntryModel(id); err != nil {
+		return nil, err
 	}
 
 	var image MemorialGalleryImage
@@ -545,14 +549,38 @@ func normalizeListMemorialsFilter(filter ListMemorialsFilter) (ListMemorialsFilt
 	}
 
 	filter.SearchTerm = strings.TrimSpace(filter.SearchTerm)
-	filter.Status = normalizeMemorialStatusFilter(filter.Status)
 	filter.Category = normalizeMemorialCategory(filter.Category)
+	filter.SortBy = normalizeMemorialSortBy(filter.SortBy)
+	filter.SortOrder = normalizeMemorialSortOrder(filter.SortOrder)
 
-	if !isAllowedMemorialStatusFilter(filter.Status) {
+	if filter.PublicOnly {
+		filter.Status = MemorialStatusPublished
+	} else {
+		filter.Status = normalizeMemorialStatusFilter(filter.Status)
+	}
+
+	if filter.SortBy == "" {
+		if filter.PublicOnly {
+			filter.SortBy = "date_of_passing"
+		} else {
+			filter.SortBy = "updated_at"
+		}
+	}
+	if filter.SortOrder == "" {
+		filter.SortOrder = "desc"
+	}
+
+	if !filter.PublicOnly && !isAllowedMemorialStatusFilter(filter.Status) {
 		return filter, fmt.Errorf("status must be one of all, draft, review, published")
 	}
 	if filter.Category != "" && !isAllowedMemorialCategory(filter.Category) {
 		return filter, fmt.Errorf("category must be one of alumnus, veteran, founder, friend")
+	}
+	if !isAllowedMemorialSortBy(filter.SortBy) {
+		return filter, fmt.Errorf("sort_by must be one of date_of_passing, full_name, created_at, updated_at, published_at, date_of_birth")
+	}
+	if !isAllowedMemorialSortOrder(filter.SortOrder) {
+		return filter, fmt.Errorf("sort_order must be one of asc, desc")
 	}
 
 	return filter, nil
@@ -620,6 +648,10 @@ func normalizeSaveMemorialRequest(req SaveMemorialRequest) (normalizedSaveMemori
 }
 
 func (s *MemorialService) applyListFilters(query *gorm.DB, filter ListMemorialsFilter, includeTaxonomy bool) *gorm.DB {
+	if filter.PublicOnly {
+		query = query.Where("status = ?", MemorialStatusPublished)
+	}
+
 	if searchTerm := strings.TrimSpace(filter.SearchTerm); searchTerm != "" {
 		pattern := "%" + strings.ToLower(searchTerm) + "%"
 		query = query.Where(
@@ -631,7 +663,7 @@ func (s *MemorialService) applyListFilters(query *gorm.DB, filter ListMemorialsF
 	}
 
 	if includeTaxonomy {
-		if filter.Status != "" && filter.Status != "all" {
+		if !filter.PublicOnly && filter.Status != "" && filter.Status != "all" {
 			query = query.Where("status = ?", filter.Status)
 		}
 		if filter.Category != "" {
@@ -640,6 +672,24 @@ func (s *MemorialService) applyListFilters(query *gorm.DB, filter ListMemorialsF
 	}
 
 	return query
+}
+
+func (s *MemorialService) applyListSort(query *gorm.DB, filter ListMemorialsFilter) *gorm.DB {
+	sortBy := allowedMemorialSortColumn(filter.SortBy)
+	desc := normalizeMemorialSortOrder(filter.SortOrder) != "asc"
+
+	switch sortBy {
+	case "date_of_birth", "date_of_passing", "published_at":
+		query = query.Order(sortBy + " IS NULL ASC")
+	}
+
+	query = query.Order(clause.OrderByColumn{Column: clause.Column{Name: sortBy}, Desc: desc})
+
+	if sortBy != "updated_at" {
+		query = query.Order(clause.OrderByColumn{Column: clause.Column{Name: "updated_at"}, Desc: true})
+	}
+
+	return query.Order(clause.OrderByColumn{Column: clause.Column{Name: "id"}, Desc: true})
 }
 
 func (s *MemorialService) listCategoryCounts(query *gorm.DB) ([]MemorialCategoryCount, error) {
@@ -707,6 +757,17 @@ func (s *MemorialService) listStatusCounts(query *gorm.DB) ([]MemorialStatusCoun
 func (s *MemorialService) getMemorialEntryModel(id int) (MemorialEntry, error) {
 	var entry MemorialEntry
 	if err := s.DB.First(&entry, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return MemorialEntry{}, ErrMemorialNotFound
+		}
+		return MemorialEntry{}, err
+	}
+	return entry, nil
+}
+
+func (s *MemorialService) getPublishedMemorialEntryModel(id int) (MemorialEntry, error) {
+	var entry MemorialEntry
+	if err := s.DB.Where("status = ?", MemorialStatusPublished).First(&entry, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return MemorialEntry{}, ErrMemorialNotFound
 		}
@@ -911,6 +972,14 @@ func normalizeMemorialStatusFilter(status string) string {
 	return status
 }
 
+func normalizeMemorialSortBy(sortBy string) string {
+	return strings.ToLower(strings.TrimSpace(sortBy))
+}
+
+func normalizeMemorialSortOrder(sortOrder string) string {
+	return strings.ToLower(strings.TrimSpace(sortOrder))
+}
+
 func isAllowedMemorialStatus(status string) bool {
 	switch normalizeMemorialStatus(status) {
 	case MemorialStatusDraft, MemorialStatusReview, MemorialStatusPublished:
@@ -926,6 +995,41 @@ func isAllowedMemorialStatusFilter(status string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func isAllowedMemorialSortBy(sortBy string) bool {
+	switch normalizeMemorialSortBy(sortBy) {
+	case "date_of_passing", "full_name", "created_at", "updated_at", "published_at", "date_of_birth":
+		return true
+	default:
+		return false
+	}
+}
+
+func isAllowedMemorialSortOrder(sortOrder string) bool {
+	switch normalizeMemorialSortOrder(sortOrder) {
+	case "asc", "desc":
+		return true
+	default:
+		return false
+	}
+}
+
+func allowedMemorialSortColumn(sortBy string) string {
+	switch normalizeMemorialSortBy(sortBy) {
+	case "full_name":
+		return "full_name"
+	case "created_at":
+		return "created_at"
+	case "updated_at":
+		return "updated_at"
+	case "published_at":
+		return "published_at"
+	case "date_of_birth":
+		return "date_of_birth"
+	default:
+		return "date_of_passing"
 	}
 }
 

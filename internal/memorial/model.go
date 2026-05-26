@@ -145,6 +145,8 @@ type MemorialListAppliedFilters struct {
 	SearchTerm string `json:"search_term"`
 	Status     string `json:"status"`
 	Category   string `json:"category"`
+	SortBy     string `json:"sort_by"`
+	SortOrder  string `json:"sort_order"`
 }
 
 type MemorialCategoryCount struct {
