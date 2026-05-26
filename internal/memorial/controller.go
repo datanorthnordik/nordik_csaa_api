@@ -27,6 +27,9 @@ func (mc *MemorialController) ListMemorials(c *gin.Context) {
 		SearchTerm: strings.TrimSpace(c.Query("search")),
 		Status:     strings.TrimSpace(c.DefaultQuery("status", "all")),
 		Category:   strings.TrimSpace(c.Query("category")),
+		SortBy:     strings.TrimSpace(c.DefaultQuery("sort_by", "date_of_passing")),
+		SortOrder:  strings.TrimSpace(c.DefaultQuery("sort_order", "desc")),
+		PublicOnly: true,
 	}
 
 	resp, err := mc.MemorialService.ListMemorials(filter)

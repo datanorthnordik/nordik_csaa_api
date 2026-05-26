@@ -7,18 +7,14 @@ func RegisterRoutes(r *gin.Engine, ms MemorialServicePort, protected ...gin.Hand
 
 	group := r.Group("/api/memorial")
 	{
-		listHandlers := withProtected(controller.ListMemorials, protected...)
-		getHandlers := withProtected(controller.GetMemorial, protected...)
-		portraitHandlers := withProtected(controller.GetMemorialPortraitContent, protected...)
-		galleryHandlers := withProtected(controller.GetMemorialGalleryImageContent, protected...)
 		postHandlers := withProtected(controller.CreateMemorial, protected...)
 		putHandlers := withProtected(controller.UpdateMemorial, protected...)
 		deleteHandlers := withProtected(controller.DeleteMemorial, protected...)
 
-		group.GET("", listHandlers...)
-		group.GET("/:id", getHandlers...)
-		group.GET("/:id/portrait/content", portraitHandlers...)
-		group.GET("/:id/gallery/:mediaId/content", galleryHandlers...)
+		group.GET("", controller.ListMemorials)
+		group.GET("/:id", controller.GetMemorial)
+		group.GET("/:id/portrait/content", controller.GetMemorialPortraitContent)
+		group.GET("/:id/gallery/:mediaId/content", controller.GetMemorialGalleryImageContent)
 		group.POST("", postHandlers...)
 		group.PUT("/:id", putHandlers...)
 		group.DELETE("/:id", deleteHandlers...)

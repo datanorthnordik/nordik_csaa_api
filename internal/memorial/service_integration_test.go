@@ -53,6 +53,10 @@ func memorialGalleryRows() *sqlmock.Rows {
 	})
 }
 
+func publishedMemorialEntryLookupQuery() string {
+	return regexp.QuoteMeta(`SELECT * FROM "memorial_entries" WHERE status = $1 AND "memorial_entries"."id" = $2 ORDER BY "memorial_entries"."id" LIMIT $3`)
+}
+
 func containsMemorialString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
@@ -166,6 +170,51 @@ func TestMemorialServiceListMemorialsWithFilters(t *testing.T) {
 	}
 }
 
+func TestMemorialServiceListMemorialsPublicRecentFirst(t *testing.T) {
+	db, mock, cleanup := setupMemorialMockDB(t)
+	defer cleanup()
+
+	svc := &MemorialService{DB: db}
+	now := time.Date(2026, 5, 25, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery(`SELECT category, COUNT\(\*\) AS count FROM "memorial_entries" WHERE status = \$1 GROUP BY "category"`).
+		WithArgs(MemorialStatusPublished).
+		WillReturnRows(sqlmock.NewRows([]string{"category", "count"}).
+			AddRow(MemorialCategoryFounder, 1))
+	mock.ExpectQuery(`SELECT status, COUNT\(\*\) AS count FROM "memorial_entries" WHERE status = \$1 GROUP BY "category","status"`).
+		WithArgs(MemorialStatusPublished).
+		WillReturnRows(sqlmock.NewRows([]string{"status", "count"}).
+			AddRow(MemorialStatusPublished, 1))
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "memorial_entries" WHERE status = \$1`).
+		WithArgs(MemorialStatusPublished).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery(`SELECT \* FROM "memorial_entries" WHERE status = \$1 ORDER BY date_of_passing IS NULL ASC,"date_of_passing" DESC,"updated_at" DESC,"id" DESC LIMIT`).
+		WillReturnRows(memorialEntryRows().AddRow(
+			15, "Recent Person", "Community", MemorialCategoryFounder, MemorialStatusPublished, "<p>Remembered</p>",
+			nil, time.Date(2026, 5, 20, 0, 0, 0, 0, time.UTC), now,
+			"portrait.jpg", "memorial/entry-15/portrait/file.jpg", "gs://drive-bucket/memorial/entry-15/portrait/file.jpg", "image/jpeg", 1024,
+			7, 7, now, now,
+		))
+
+	resp, err := svc.ListMemorials(ListMemorialsFilter{
+		Page:       1,
+		PageSize:   10,
+		PublicOnly: true,
+	})
+	if err != nil {
+		t.Fatalf("ListMemorials public listing returned error: %v", err)
+	}
+	if resp.Applied.Status != MemorialStatusPublished || resp.Applied.SortBy != "date_of_passing" || resp.Applied.SortOrder != "desc" {
+		t.Fatalf("unexpected applied filters: %#v", resp.Applied)
+	}
+	if len(resp.Items) != 1 || resp.Items[0].FullName != "Recent Person" {
+		t.Fatalf("unexpected public list response: %#v", resp)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sqlmock expectations: %v", err)
+	}
+}
+
 func TestMemorialServiceGetAndMediaContent(t *testing.T) {
 	t.Run("get memorial detail", func(t *testing.T) {
 		db, mock, cleanup := setupMemorialMockDB(t)
@@ -175,9 +224,9 @@ func TestMemorialServiceGetAndMediaContent(t *testing.T) {
 		createdAt := time.Date(2026, 5, 25, 10, 0, 0, 0, time.UTC)
 		updatedAt := createdAt.Add(2 * time.Hour)
 
-		mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "memorial_entries" WHERE "memorial_entries"."id" = $1 ORDER BY "memorial_entries"."id" LIMIT $2`)).
+		mock.ExpectQuery(publishedMemorialEntryLookupQuery()).
 			WillReturnRows(memorialEntryRows().AddRow(
-				11, "Ada Lovelace", "Analytical Engine", MemorialCategoryFounder, MemorialStatusDraft, "<p>Hello</p>",
+				11, "Ada Lovelace", "Analytical Engine", MemorialCategoryFounder, MemorialStatusPublished, "<p>Hello</p>",
 				time.Date(1815, 12, 10, 0, 0, 0, 0, time.UTC), nil, nil,
 				"portrait.jpg", "memorial/entry-11/portrait/file.jpg", "gs://drive-bucket/memorial/entry-11/portrait/file.jpg", "image/jpeg", 1024,
 				7, 7, createdAt, updatedAt,
@@ -221,9 +270,9 @@ func TestMemorialServiceGetAndMediaContent(t *testing.T) {
 			return []byte("portrait-bits"), "", nil
 		}
 
-		mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "memorial_entries" WHERE "memorial_entries"."id" = $1 ORDER BY "memorial_entries"."id" LIMIT $2`)).
+		mock.ExpectQuery(publishedMemorialEntryLookupQuery()).
 			WillReturnRows(memorialEntryRows().AddRow(
-				11, "Ada Lovelace", "Analytical Engine", MemorialCategoryFounder, MemorialStatusDraft, "<p>Hello</p>",
+				11, "Ada Lovelace", "Analytical Engine", MemorialCategoryFounder, MemorialStatusPublished, "<p>Hello</p>",
 				nil, nil, nil,
 				"portrait.jpg", "memorial/entry-11/portrait/file.jpg", "gs://drive-bucket/memorial/entry-11/portrait/file.jpg", "image/jpeg", 1024,
 				7, 7, createdAt, updatedAt,
@@ -237,9 +286,9 @@ func TestMemorialServiceGetAndMediaContent(t *testing.T) {
 			t.Fatalf("unexpected portrait content: %#v", resp)
 		}
 
-		mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "memorial_entries" WHERE "memorial_entries"."id" = $1 ORDER BY "memorial_entries"."id" LIMIT $2`)).
+		mock.ExpectQuery(publishedMemorialEntryLookupQuery()).
 			WillReturnRows(memorialEntryRows().AddRow(
-				12, "Ada Lovelace", "Analytical Engine", MemorialCategoryFounder, MemorialStatusDraft, "<p>Hello</p>",
+				12, "Ada Lovelace", "Analytical Engine", MemorialCategoryFounder, MemorialStatusPublished, "<p>Hello</p>",
 				nil, nil, nil,
 				"", "", "", "", 0,
 				7, 7, createdAt, updatedAt,
@@ -268,6 +317,13 @@ func TestMemorialServiceGetAndMediaContent(t *testing.T) {
 		}
 
 		now := time.Date(2026, 5, 25, 10, 0, 0, 0, time.UTC)
+		mock.ExpectQuery(publishedMemorialEntryLookupQuery()).
+			WillReturnRows(memorialEntryRows().AddRow(
+				11, "Ada Lovelace", "Analytical Engine", MemorialCategoryFounder, MemorialStatusPublished, "<p>Hello</p>",
+				nil, nil, nil,
+				"", "", "", "", 0,
+				7, 7, now, now,
+			))
 		mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "memorial_gallery_images" WHERE memorial_entry_id = $1 AND id = $2 ORDER BY "memorial_gallery_images"."id" LIMIT $3`)).
 			WillReturnRows(memorialGalleryRows().AddRow(
 				31, 11, "gallery.png", "memorial/entry-11/gallery/file.png", "gs://drive-bucket/memorial/entry-11/gallery/file.png",
@@ -282,6 +338,13 @@ func TestMemorialServiceGetAndMediaContent(t *testing.T) {
 			t.Fatalf("unexpected gallery content: %#v", resp)
 		}
 
+		mock.ExpectQuery(publishedMemorialEntryLookupQuery()).
+			WillReturnRows(memorialEntryRows().AddRow(
+				11, "Ada Lovelace", "Analytical Engine", MemorialCategoryFounder, MemorialStatusPublished, "<p>Hello</p>",
+				nil, nil, nil,
+				"", "", "", "", 0,
+				7, 7, now, now,
+			))
 		mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "memorial_gallery_images" WHERE memorial_entry_id = $1 AND id = $2 ORDER BY "memorial_gallery_images"."id" LIMIT $3`)).
 			WillReturnRows(memorialGalleryRows())
 		if _, err := svc.GetMemorialGalleryImageContent(11, 99); !errors.Is(err, ErrMemorialMediaNotFound) {
@@ -709,14 +772,27 @@ func TestMemorialServiceHelpersAndErrorBranches(t *testing.T) {
 		if err != nil {
 			t.Fatalf("normalizeListMemorialsFilter returned error: %v", err)
 		}
-		if filter.Page != 1 || filter.PageSize != 10 || filter.Status != "all" {
+		if filter.Page != 1 || filter.PageSize != 10 || filter.Status != "all" || filter.SortBy != "updated_at" || filter.SortOrder != "desc" {
 			t.Fatalf("unexpected normalized filter: %#v", filter)
+		}
+		publicFilter, err := normalizeListMemorialsFilter(ListMemorialsFilter{PublicOnly: true})
+		if err != nil {
+			t.Fatalf("normalizeListMemorialsFilter for public reads returned error: %v", err)
+		}
+		if publicFilter.Status != MemorialStatusPublished || publicFilter.SortBy != "date_of_passing" || publicFilter.SortOrder != "desc" {
+			t.Fatalf("unexpected public normalized filter: %#v", publicFilter)
 		}
 		if _, err := normalizeListMemorialsFilter(ListMemorialsFilter{Status: "bad"}); err == nil {
 			t.Fatal("expected invalid status filter to fail")
 		}
 		if _, err := normalizeListMemorialsFilter(ListMemorialsFilter{Category: "bad"}); err == nil {
 			t.Fatal("expected invalid category filter to fail")
+		}
+		if _, err := normalizeListMemorialsFilter(ListMemorialsFilter{SortBy: "bad"}); err == nil {
+			t.Fatal("expected invalid sort_by filter to fail")
+		}
+		if _, err := normalizeListMemorialsFilter(ListMemorialsFilter{SortOrder: "sideways"}); err == nil {
+			t.Fatal("expected invalid sort_order filter to fail")
 		}
 
 		if err := validateImageUploadInput(MemorialUploadInput{}); err == nil || err.Error() != "image file is required" {
@@ -740,6 +816,9 @@ func TestMemorialServiceHelpersAndErrorBranches(t *testing.T) {
 		}
 		if got := memorialStatusLabel("unknown"); got != "Draft" {
 			t.Fatalf("unexpected fallback status label: %q", got)
+		}
+		if got := allowedMemorialSortColumn("unknown"); got != "date_of_passing" {
+			t.Fatalf("unexpected fallback sort column: %q", got)
 		}
 	})
 
