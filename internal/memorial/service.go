@@ -263,7 +263,9 @@ func (s *MemorialService) CreateMemorial(req SaveMemorialRequest, userID *int) (
 		UpdatedBy:     userID,
 	}
 
-	if err := tx.Create(&entry).Error; err != nil {
+	if err := tx.
+		Omit("PortraitFileName", "PortraitGCPObjectKey", "PortraitFileURL", "PortraitMimeType", "PortraitFileSize").
+		Create(&entry).Error; err != nil {
 		tx.Rollback()
 		return nil, err
 	}
@@ -314,10 +316,12 @@ func (s *MemorialService) CreateMemorial(req SaveMemorialRequest, userID *int) (
 		}
 	}
 
-	if err := tx.Save(&entry).Error; err != nil {
-		tx.Rollback()
-		s.cleanupObjects(uploadedObjects)
-		return nil, err
+	if cleanReq.Portrait != nil {
+		if err := persistMemorialEntry(tx, entry); err != nil {
+			tx.Rollback()
+			s.cleanupObjects(uploadedObjects)
+			return nil, err
+		}
 	}
 
 	if err := tx.Commit().Error; err != nil {
@@ -465,7 +469,7 @@ func (s *MemorialService) UpdateMemorial(id int, req SaveMemorialRequest, userID
 		}
 	}
 
-	if err := tx.Save(&entry).Error; err != nil {
+	if err := persistMemorialEntry(tx, entry); err != nil {
 		tx.Rollback()
 		s.cleanupObjects(uploadedObjects)
 		return nil, err
@@ -1171,4 +1175,40 @@ func rollbackOnPanic(tx *gorm.DB) {
 		tx.Rollback()
 		panic("transaction panic")
 	}
+}
+
+func persistMemorialEntry(tx *gorm.DB, entry MemorialEntry) error {
+	updates := map[string]interface{}{
+		"full_name":               entry.FullName,
+		"affiliation":             entry.Affiliation,
+		"category":                entry.Category,
+		"status":                  entry.Status,
+		"biography":               entry.Biography,
+		"date_of_birth":           entry.DateOfBirth,
+		"date_of_passing":         entry.DateOfPassing,
+		"published_at":            entry.PublishedAt,
+		"updated_by":              entry.UpdatedBy,
+		"portrait_file_name":      nullableMemorialString(entry.PortraitFileName),
+		"portrait_gcp_object_key": nullableMemorialString(entry.PortraitGCPObjectKey),
+		"portrait_file_url":       nullableMemorialString(entry.PortraitFileURL),
+		"portrait_mime_type":      nullableMemorialString(entry.PortraitMimeType),
+		"portrait_file_size":      nullableMemorialInt64(entry.PortraitFileSize),
+	}
+
+	return tx.Model(&MemorialEntry{}).Where("id = ?", entry.ID).Updates(updates).Error
+}
+
+func nullableMemorialString(value string) interface{} {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
+func nullableMemorialInt64(value int64) interface{} {
+	if value <= 0 {
+		return nil
+	}
+	return value
 }
