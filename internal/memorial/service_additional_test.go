@@ -18,6 +18,16 @@ func TestMemorialServiceAdditionalCreateBranches(t *testing.T) {
 		Category: MemorialCategoryFounder,
 		Status:   MemorialStatusDraft,
 	}
+	portraitReq := SaveMemorialRequest{
+		FullName: "Ada Lovelace",
+		Category: MemorialCategoryFounder,
+		Status:   MemorialStatusDraft,
+		Portrait: &MemorialUploadInput{
+			FileName: "portrait.jpg",
+			MimeType: "image/jpeg",
+			FileURL:  "gs://drive-bucket/memorial/entry-21/portrait/file.jpg",
+		},
+	}
 
 	t.Run("validation error short circuits before opening a transaction", func(t *testing.T) {
 		db, _, cleanup := setupMemorialMockDB(t)
@@ -65,7 +75,7 @@ func TestMemorialServiceAdditionalCreateBranches(t *testing.T) {
 		}
 	})
 
-	t.Run("save error rolls back", func(t *testing.T) {
+	t.Run("portrait field update error rolls back", func(t *testing.T) {
 		db, mock, cleanup := setupMemorialMockDB(t)
 		defer cleanup()
 
@@ -77,7 +87,7 @@ func TestMemorialServiceAdditionalCreateBranches(t *testing.T) {
 			WillReturnError(errors.New("save failed"))
 		mock.ExpectRollback()
 
-		if _, err := svc.CreateMemorial(validReq, nil); err == nil || err.Error() != "save failed" {
+		if _, err := svc.CreateMemorial(portraitReq, nil); err == nil || err.Error() != "save failed" {
 			t.Fatalf("expected save failure, got %v", err)
 		}
 		if err := mock.ExpectationsWereMet(); err != nil {
@@ -93,8 +103,6 @@ func TestMemorialServiceAdditionalCreateBranches(t *testing.T) {
 		mock.ExpectBegin()
 		mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO "memorial_entries"`)).
 			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(22))
-		mock.ExpectExec(regexp.QuoteMeta(`UPDATE "memorial_entries" SET`)).
-			WillReturnResult(sqlmock.NewResult(0, 1))
 		mock.ExpectCommit().WillReturnError(errors.New("commit failed"))
 
 		if _, err := svc.CreateMemorial(validReq, nil); err == nil || err.Error() != "commit failed" {
@@ -120,10 +128,10 @@ func TestMemorialServiceAdditionalUpdateBranches(t *testing.T) {
 
 		svc := &MemorialService{DB: db}
 		if _, err := svc.UpdateMemorial(11, SaveMemorialRequest{
-			FullName: "Ada Lovelace",
-			Category: MemorialCategoryFounder,
-			Status:   MemorialStatusDraft,
-			DateOfBirth: "2026-02-01",
+			FullName:      "Ada Lovelace",
+			Category:      MemorialCategoryFounder,
+			Status:        MemorialStatusDraft,
+			DateOfBirth:   "2026-02-01",
 			DateOfPassing: "2026-01-01",
 		}, nil); err == nil || !strings.Contains(err.Error(), "date_of_passing must be on or after date_of_birth") {
 			t.Fatalf("expected date validation error, got %v", err)

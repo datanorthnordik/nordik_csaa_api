@@ -380,8 +380,6 @@ func TestMemorialServiceCreateUpdateAndDelete(t *testing.T) {
 			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(41))
 		mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO "memorial_gallery_images"`)).
 			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(42))
-		mock.ExpectExec(regexp.QuoteMeta(`UPDATE "memorial_entries" SET`)).
-			WillReturnResult(sqlmock.NewResult(0, 1))
 		mock.ExpectCommit()
 
 		resp, err := svc.CreateMemorial(SaveMemorialRequest{
