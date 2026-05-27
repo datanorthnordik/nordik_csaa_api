@@ -742,6 +742,30 @@ func TestNormalizeSavePageSectionRequestRejectsUnderlineOutsideH2(t *testing.T) 
 	}
 }
 
+func TestNormalizeSavePageDetailRequestRejectsMultipleHeroHeaders(t *testing.T) {
+	_, err := normalizeSavePageDetailRequest(&SavePageDetailRequest{
+		Sections: []SavePageSectionRequest{
+			{
+				SectionType: PageSectionTypeHeader,
+				Header: &PageHeaderSectionInput{
+					MainHeaderText: "Welcome",
+					Hierarchy:      PageHeaderHierarchyHero,
+				},
+			},
+			{
+				SectionType: PageSectionTypeHeader,
+				Header: &PageHeaderSectionInput{
+					MainHeaderText: "About",
+					Hierarchy:      PageHeaderHierarchyHero,
+				},
+			},
+		},
+	})
+	if err == nil || err.Error() != "page_detail.sections[1].header.hierarchy only one h1_hero header is allowed per page" {
+		t.Fatalf("expected duplicate h1 validation error, got %v", err)
+	}
+}
+
 func TestNormalizeSavePageSectionRequestRejectsUnknownGalleryViewMode(t *testing.T) {
 	_, err := normalizeSavePageSectionRequest(
 		SavePageSectionRequest{
