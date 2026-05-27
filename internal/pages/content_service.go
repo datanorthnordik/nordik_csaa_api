@@ -95,6 +95,7 @@ func normalizeSavePageSectionRequest(input SavePageSectionRequest, index int) (S
 		}
 		input.Header.MainHeaderText = strings.TrimSpace(input.Header.MainHeaderText)
 		input.Header.SubHeaderText = strings.TrimSpace(input.Header.SubHeaderText)
+		input.Header.Description = strings.TrimSpace(input.Header.Description)
 		input.Header.Hierarchy = strings.ToLower(strings.TrimSpace(input.Header.Hierarchy))
 		input.Header.TextAlign = strings.ToLower(strings.TrimSpace(input.Header.TextAlign))
 		if input.Header.Hierarchy == "" {
@@ -108,6 +109,12 @@ func normalizeSavePageSectionRequest(input SavePageSectionRequest, index int) (S
 		}
 		if !isAllowed(input.Header.TextAlign, PageTextAlignLeft, PageTextAlignCenter, PageTextAlignRight) {
 			return input, fmt.Errorf("invalid page_detail.sections[%d].header.text_align", index)
+		}
+		if input.Header.UnderlineEnabled == nil {
+			input.Header.UnderlineEnabled = boolPtr(false)
+		}
+		if boolValue(input.Header.UnderlineEnabled, false) && input.Header.Hierarchy != PageHeaderHierarchySection {
+			return input, fmt.Errorf("page_detail.sections[%d].header.underline_enabled can only be true when hierarchy is h2_section", index)
 		}
 	case PageSectionTypeTypography:
 		if input.Typography == nil {
@@ -392,10 +399,12 @@ func (s *PageService) getPageContentDetail(pageID int) (*PageContentDetailRespon
 
 		if header, ok := headersBySection[section.ID]; ok {
 			item.Header = &PageHeaderSectionResponse{
-				MainHeaderText: header.MainHeaderText,
-				SubHeaderText:  header.SubHeaderText,
-				Hierarchy:      header.Hierarchy,
-				TextAlign:      header.TextAlign,
+				MainHeaderText:   header.MainHeaderText,
+				SubHeaderText:    header.SubHeaderText,
+				Description:      header.Description,
+				Hierarchy:        header.Hierarchy,
+				TextAlign:        header.TextAlign,
+				UnderlineEnabled: header.UnderlineEnabled,
 			}
 		}
 		if typography, ok := typographyBySection[section.ID]; ok {
@@ -653,11 +662,13 @@ func (s *PageService) savePageContentDetail(tx *gorm.DB, pageID int, input *Save
 		switch section.SectionType {
 		case PageSectionTypeHeader:
 			module := PageSectionHeaderModule{
-				PageSectionID:  row.ID,
-				MainHeaderText: section.Header.MainHeaderText,
-				SubHeaderText:  section.Header.SubHeaderText,
-				Hierarchy:      section.Header.Hierarchy,
-				TextAlign:      section.Header.TextAlign,
+				PageSectionID:    row.ID,
+				MainHeaderText:   section.Header.MainHeaderText,
+				SubHeaderText:    section.Header.SubHeaderText,
+				Description:      section.Header.Description,
+				Hierarchy:        section.Header.Hierarchy,
+				TextAlign:        section.Header.TextAlign,
+				UnderlineEnabled: boolValue(section.Header.UnderlineEnabled, false),
 			}
 			if err := tx.Create(&module).Error; err != nil {
 				return nil, nil, err
