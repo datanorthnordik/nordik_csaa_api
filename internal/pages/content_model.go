@@ -124,11 +124,13 @@ type PageSectionTypographyModule struct {
 }
 
 type PageSectionGalleryModule struct {
-	PageSectionID int       `gorm:"primaryKey;column:page_section_id" json:"page_section_id"`
-	GalleryID     *int      `gorm:"column:gallery_id" json:"gallery_id,omitempty"`
-	ViewMode      string    `gorm:"size:20;column:view_mode" json:"view_mode"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	PageSectionID        int       `gorm:"primaryKey;column:page_section_id" json:"page_section_id"`
+	GalleryID            *int      `gorm:"column:gallery_id" json:"gallery_id,omitempty"`
+	ViewMode             string    `gorm:"size:20;column:view_mode" json:"view_mode"`
+	ShowTitleDescription bool      `gorm:"not null;default:true;column:show_title_description" json:"show_title_description"`
+	AutoScrollEnabled    bool      `gorm:"not null;default:false;column:auto_scroll_enabled" json:"auto_scroll_enabled"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
 }
 
 type PageSectionQuoteModule struct {
@@ -190,8 +192,10 @@ type PageTypographySectionInput struct {
 }
 
 type PageGallerySectionInput struct {
-	GalleryID *int   `json:"gallery_id"`
-	ViewMode  string `json:"view_mode"`
+	GalleryID            *int   `json:"gallery_id"`
+	ViewMode             string `json:"view_mode"`
+	ShowTitleDescription *bool  `json:"show_title_description,omitempty"`
+	AutoScrollEnabled    *bool  `json:"auto_scroll_enabled,omitempty"`
 }
 
 type PageQuoteSectionInput struct {
@@ -261,8 +265,10 @@ type PageTypographySectionResponse struct {
 }
 
 type PageGallerySectionResponse struct {
-	GalleryID *int   `json:"gallery_id,omitempty"`
-	ViewMode  string `json:"view_mode"`
+	GalleryID            *int   `json:"gallery_id,omitempty"`
+	ViewMode             string `json:"view_mode"`
+	ShowTitleDescription bool   `json:"show_title_description"`
+	AutoScrollEnabled    bool   `json:"auto_scroll_enabled"`
 }
 
 type PageQuoteSectionResponse struct {
