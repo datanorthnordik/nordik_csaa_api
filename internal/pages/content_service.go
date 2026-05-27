@@ -48,10 +48,22 @@ func normalizeSavePageDetailRequest(input *SavePageDetailRequest) (*SavePageDeta
 	next.Settings = settings
 
 	sections := make([]SavePageSectionRequest, 0, len(next.Sections))
+	heroHeaderIndex := -1
 	for idx, section := range next.Sections {
 		normalizedSection, err := normalizeSavePageSectionRequest(section, idx)
 		if err != nil {
 			return nil, err
+		}
+		if normalizedSection.SectionType == PageSectionTypeHeader &&
+			normalizedSection.Header != nil &&
+			normalizedSection.Header.Hierarchy == PageHeaderHierarchyHero {
+			if heroHeaderIndex >= 0 {
+				return nil, fmt.Errorf(
+					"page_detail.sections[%d].header.hierarchy only one h1_hero header is allowed per page",
+					idx,
+				)
+			}
+			heroHeaderIndex = idx
 		}
 		sections = append(sections, normalizedSection)
 	}
