@@ -144,14 +144,16 @@ type PageSectionQuoteModule struct {
 }
 
 type PageSectionCTABannerModule struct {
-	PageSectionID int       `gorm:"primaryKey;column:page_section_id" json:"page_section_id"`
-	BannerHeading string    `gorm:"size:255;column:banner_heading" json:"banner_heading"`
-	BannerMessage string    `gorm:"size:255;column:banner_message" json:"banner_message"`
-	ButtonText    string    `gorm:"size:100;column:button_text" json:"button_text"`
-	ButtonURL     string    `gorm:"column:button_url" json:"button_url"`
-	OpenInNewTab  bool      `gorm:"not null;default:false;column:open_in_new_tab" json:"open_in_new_tab"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	PageSectionID  int       `gorm:"primaryKey;column:page_section_id" json:"page_section_id"`
+	BannerHeading  string    `gorm:"size:255;column:banner_heading" json:"banner_heading"`
+	BannerMessage  string    `gorm:"size:255;column:banner_message" json:"banner_message"`
+	ButtonText     string    `gorm:"size:100;column:button_text" json:"button_text"`
+	ButtonURL      string    `gorm:"column:button_url" json:"button_url"`
+	OpenInNewTab   bool      `gorm:"not null;default:false;column:open_in_new_tab" json:"open_in_new_tab"`
+	ImageURL       string    `gorm:"column:image_url" json:"image_url"`
+	ImageObjectKey string    `gorm:"column:image_object_key" json:"image_object_key"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 type PageDocument struct {
@@ -208,11 +210,12 @@ type PageQuoteSectionInput struct {
 }
 
 type PageCTABannerSectionInput struct {
-	BannerHeading string `json:"banner_heading"`
-	BannerMessage string `json:"banner_message"`
-	ButtonText    string `json:"button_text"`
-	ButtonURL     string `json:"button_url"`
-	OpenInNewTab  bool   `json:"open_in_new_tab"`
+	BannerHeading string           `json:"banner_heading"`
+	BannerMessage string           `json:"banner_message"`
+	ButtonText    string           `json:"button_text"`
+	ButtonURL     string           `json:"button_url"`
+	OpenInNewTab  bool             `json:"open_in_new_tab"`
+	Image         *PageUploadInput `json:"image,omitempty"`
 }
 
 type PageDocumentInput struct {
@@ -283,11 +286,19 @@ type PageQuoteSectionResponse struct {
 }
 
 type PageCTABannerSectionResponse struct {
-	BannerHeading string `json:"banner_heading"`
-	BannerMessage string `json:"banner_message"`
-	ButtonText    string `json:"button_text"`
-	ButtonURL     string `json:"button_url"`
-	OpenInNewTab  bool   `json:"open_in_new_tab"`
+	BannerHeading string                    `json:"banner_heading"`
+	BannerMessage string                    `json:"banner_message"`
+	ButtonText    string                    `json:"button_text"`
+	ButtonURL     string                    `json:"button_url"`
+	OpenInNewTab  bool                      `json:"open_in_new_tab"`
+	Image         *PageSectionAssetResponse `json:"image,omitempty"`
+}
+
+type PageSectionAssetResponse struct {
+	FileURL      string `json:"file_url"`
+	FetchURL     string `json:"fetch_url"`
+	StorageURI   string `json:"storage_uri"`
+	GCPObjectKey string `json:"gcp_object_key"`
 }
 
 type PageDocumentResponse struct {
@@ -342,6 +353,12 @@ type PageContentDetailResponse struct {
 }
 
 type PageDocumentContent struct {
+	Content     []byte
+	ContentType string
+	FileName    string
+}
+
+type PageSectionImageContent struct {
 	Content     []byte
 	ContentType string
 	FileName    string

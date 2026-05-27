@@ -41,6 +41,14 @@ func bindSavePageRequest(c *gin.Context) (SavePageRequest, bool) {
 		if req.PageDetail != nil {
 			for sectionIdx := range req.PageDetail.Sections {
 				section := &req.PageDetail.Sections[sectionIdx]
+				if section.CTABanner != nil {
+					file, err := httpapi.ReadMultipartFile(c, pageCTABannerImageFileField(sectionIdx))
+					if err != nil {
+						apiresponse.WriteValidationError(c, "invalid multipart form data")
+						return req, false
+					}
+					applyPageUploadedFile(&section.CTABanner.Image, file)
+				}
 				if section.Documents == nil {
 					continue
 				}
@@ -77,6 +85,11 @@ func pageRequestUsesEmbeddedBase64(req SavePageRequest) bool {
 		return false
 	}
 	for _, section := range req.PageDetail.Sections {
+		if section.CTABanner != nil &&
+			section.CTABanner.Image != nil &&
+			strings.TrimSpace(section.CTABanner.Image.DataBase64) != "" {
+			return true
+		}
 		if section.Documents == nil {
 			continue
 		}
@@ -127,4 +140,8 @@ func applyPageDocumentUploadedFile(dst *PageDocumentInput, file *httpapi.Uploade
 
 func pageDocumentFileField(sectionIdx int, documentIdx int) string {
 	return fmt.Sprintf("page_detail.sections[%d].documents.items[%d].file", sectionIdx, documentIdx)
+}
+
+func pageCTABannerImageFileField(sectionIdx int) string {
+	return fmt.Sprintf("page_detail.sections[%d].cta_banner.image.file", sectionIdx)
 }

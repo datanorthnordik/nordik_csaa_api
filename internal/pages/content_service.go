@@ -195,6 +195,14 @@ func normalizeSavePageSectionRequest(input SavePageSectionRequest, index int) (S
 		input.CTABanner.BannerMessage = strings.TrimSpace(input.CTABanner.BannerMessage)
 		input.CTABanner.ButtonText = strings.TrimSpace(input.CTABanner.ButtonText)
 		input.CTABanner.ButtonURL = strings.TrimSpace(input.CTABanner.ButtonURL)
+		if input.CTABanner.Image != nil {
+			cleaned := sanitizeUploadInput(*input.CTABanner.Image)
+			if isEmptyPageUploadInput(cleaned) {
+				input.CTABanner.Image = nil
+			} else {
+				input.CTABanner.Image = &cleaned
+			}
+		}
 	}
 
 	return input, nil
@@ -448,6 +456,14 @@ func (s *PageService) getPageContentDetail(pageID int) (*PageContentDetailRespon
 				ButtonURL:     cta.ButtonURL,
 				OpenInNewTab:  cta.OpenInNewTab,
 			}
+			if strings.TrimSpace(cta.ImageURL) != "" || strings.TrimSpace(cta.ImageObjectKey) != "" {
+				item.CTABanner.Image = &PageSectionAssetResponse{
+					FileURL:      buildPageCTABannerImageFetchURL(section.ID),
+					FetchURL:     buildPageCTABannerImageFetchURL(section.ID),
+					StorageURI:   cta.ImageURL,
+					GCPObjectKey: cta.ImageObjectKey,
+				}
+			}
 		}
 		if documents, ok := documentsBySection[section.ID]; ok {
 			item.Documents = &PageDocumentsSectionResponse{Items: documents}
@@ -539,6 +555,37 @@ func loadPageSectionCTABanners(db *gorm.DB, sectionIDs []int) (map[int]PageSecti
 	for _, row := range rows {
 		items[row.PageSectionID] = row
 	}
+	return items, nil
+}
+
+func (s *PageService) loadPageDetailCTABannerReferences(tx *gorm.DB, pageDetailID int) ([]pageStoredObject, error) {
+	type ctaReferenceRow struct {
+		ImageURL       string `gorm:"column:image_url"`
+		ImageObjectKey string `gorm:"column:image_object_key"`
+	}
+
+	var rows []ctaReferenceRow
+	if err := tx.Table("page_sections").
+		Select(`
+			DISTINCT
+			COALESCE(page_section_cta_banner_modules.image_url, '') AS image_url,
+			COALESCE(page_section_cta_banner_modules.image_object_key, '') AS image_object_key
+		`).
+		Joins("JOIN page_section_cta_banner_modules ON page_section_cta_banner_modules.page_section_id = page_sections.id").
+		Where("page_sections.page_detail_id = ?", pageDetailID).
+		Where("COALESCE(page_section_cta_banner_modules.image_url, '') <> '' OR COALESCE(page_section_cta_banner_modules.image_object_key, '') <> ''").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	items := make([]pageStoredObject, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, pageStoredObject{
+			ObjectKey:  row.ImageObjectKey,
+			StorageURL: row.ImageURL,
+		})
+	}
+
 	return items, nil
 }
 
@@ -649,6 +696,10 @@ func (s *PageService) savePageContentDetail(tx *gorm.DB, pageID int, input *Save
 	if err != nil {
 		return nil, nil, err
 	}
+	candidateCTAImages, err := s.loadPageDetailCTABannerReferences(tx, detail.ID)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	if err := tx.Where("page_detail_id = ?", detail.ID).Delete(&PageSection{}).Error; err != nil {
 		return nil, nil, err
@@ -657,6 +708,7 @@ func (s *PageService) savePageContentDetail(tx *gorm.DB, pageID int, input *Save
 	uploadedObjects := make([]string, 0)
 	cleanupObjects := make([]pageStoredObject, 0)
 	reusedDocumentIDs := make(map[int]struct{})
+	reusedCTAImages := make(map[string]struct{})
 
 	for idx, section := range normalized.Sections {
 		row := PageSection{
@@ -724,6 +776,25 @@ func (s *PageService) savePageContentDetail(tx *gorm.DB, pageID int, input *Save
 				ButtonURL:     section.CTABanner.ButtonURL,
 				OpenInNewTab:  section.CTABanner.OpenInNewTab,
 			}
+			if section.CTABanner.Image != nil {
+				imageURL, imageObjectKey, uploadedObject, err := s.storePageSectionImageInput(
+					row.ID,
+					*section.CTABanner.Image,
+					"cta banner image",
+				)
+				if err != nil {
+					return nil, nil, err
+				}
+				if uploadedObject != "" {
+					uploadedObjects = append(uploadedObjects, uploadedObject)
+				}
+				module.ImageURL = imageURL
+				module.ImageObjectKey = imageObjectKey
+				reusedCTAImages[pageStoredObjectFingerprint(pageStoredObject{
+					ObjectKey:  imageObjectKey,
+					StorageURL: imageURL,
+				})] = struct{}{}
+			}
 			if err := tx.Create(&module).Error; err != nil {
 				return nil, nil, err
 			}
@@ -765,6 +836,12 @@ func (s *PageService) savePageContentDetail(tx *gorm.DB, pageID int, input *Save
 		if cleanupObject != nil {
 			cleanupObjects = append(cleanupObjects, *cleanupObject)
 		}
+	}
+	for _, candidate := range candidateCTAImages {
+		if _, ok := reusedCTAImages[pageStoredObjectFingerprint(candidate)]; ok {
+			continue
+		}
+		cleanupObjects = append(cleanupObjects, candidate)
 	}
 
 	return uploadedObjects, cleanupObjects, nil
@@ -1085,6 +1162,10 @@ func buildPageDocumentFetchURL(documentID int) string {
 	return fmt.Sprintf("/api/pages/documents/%d/content", documentID)
 }
 
+func buildPageCTABannerImageFetchURL(sectionID int) string {
+	return fmt.Sprintf("/api/pages/sections/%d/cta-image/content", sectionID)
+}
+
 func buildPageDocumentFileName(displayName string, originalFileName string, objectKey string, storageURL string, mimeType string) string {
 	if trimmed := strings.TrimSpace(originalFileName); trimmed != "" {
 		return trimmed
@@ -1135,6 +1216,40 @@ func firstNonBlank(values ...string) string {
 	return ""
 }
 
+func pageStoredObjectFingerprint(item pageStoredObject) string {
+	if trimmed := strings.TrimSpace(item.ObjectKey); trimmed != "" {
+		return trimmed
+	}
+	if trimmed := strings.TrimSpace(item.StorageURL); trimmed != "" {
+		if _, parsedObjectKey, err := util.ParseGCSObjectReference("", trimmed); err == nil {
+			return parsedObjectKey
+		}
+		return trimmed
+	}
+	return ""
+}
+
+func buildPageCTABannerImageFileName(objectKey string, storageURL string, mimeType string) string {
+	if trimmed := strings.TrimSpace(objectKey); trimmed != "" {
+		baseName := path.Base(trimmed)
+		if baseName != "." && baseName != "/" && baseName != "" {
+			return baseName
+		}
+	}
+
+	if trimmed := strings.TrimSpace(storageURL); trimmed != "" {
+		if _, parsedObjectKey, err := util.ParseGCSObjectReference("", trimmed); err == nil {
+			baseName := path.Base(parsedObjectKey)
+			if baseName != "." && baseName != "/" && baseName != "" {
+				return baseName
+			}
+		}
+	}
+
+	ext := util.ExtFromFilenameOrMime("", mimeType)
+	return "cta-image" + ext
+}
+
 func (s *PageService) GetPageDocumentContent(id int) (*PageDocumentContent, error) {
 	if s.DB == nil {
 		return nil, ErrStoreUnavailable
@@ -1169,6 +1284,43 @@ func (s *PageService) GetPageDocumentContent(id int) (*PageDocumentContent, erro
 			row.FileURL,
 			row.MimeType,
 		),
+	}, nil
+}
+
+func (s *PageService) GetPageCTABannerImageContent(sectionID int) (*PageSectionImageContent, error) {
+	if s.DB == nil {
+		return nil, ErrStoreUnavailable
+	}
+
+	var row PageSectionCTABannerModule
+	if err := s.DB.
+		Where("page_section_id = ?", sectionID).
+		First(&row).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrPageCTAImageNotFound
+		}
+		return nil, err
+	}
+
+	if strings.TrimSpace(row.ImageURL) == "" && strings.TrimSpace(row.ImageObjectKey) == "" {
+		return nil, ErrPageCTAImageNotFound
+	}
+
+	content, contentType, err := s.downloadStoredObject(pageStoredObject{
+		ObjectKey:  row.ImageObjectKey,
+		StorageURL: row.ImageURL,
+	})
+	if err != nil {
+		if errors.Is(err, util.ErrObjectNotFound) {
+			return nil, ErrPageCTAImageNotFound
+		}
+		return nil, err
+	}
+
+	return &PageSectionImageContent{
+		Content:     content,
+		ContentType: contentType,
+		FileName:    buildPageCTABannerImageFileName(row.ImageObjectKey, row.ImageURL, contentType),
 	}, nil
 }
 
