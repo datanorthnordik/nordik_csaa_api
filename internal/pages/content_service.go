@@ -143,6 +143,12 @@ func normalizeSavePageSectionRequest(input SavePageSectionRequest, index int) (S
 		) {
 			return input, fmt.Errorf("invalid page_detail.sections[%d].gallery.view_mode", index)
 		}
+		if input.Gallery.ShowTitleDescription == nil {
+			input.Gallery.ShowTitleDescription = boolPtr(true)
+		}
+		if input.Gallery.AutoScrollEnabled == nil {
+			input.Gallery.AutoScrollEnabled = boolPtr(false)
+		}
 	case PageSectionTypeDocument:
 		if input.Documents == nil {
 			input.Documents = &PageDocumentsSectionInput{}
@@ -401,8 +407,10 @@ func (s *PageService) getPageContentDetail(pageID int) (*PageContentDetailRespon
 		}
 		if gallery, ok := galleriesBySection[section.ID]; ok {
 			item.Gallery = &PageGallerySectionResponse{
-				GalleryID: gallery.GalleryID,
-				ViewMode:  gallery.ViewMode,
+				GalleryID:            gallery.GalleryID,
+				ViewMode:             gallery.ViewMode,
+				ShowTitleDescription: gallery.ShowTitleDescription,
+				AutoScrollEnabled:    gallery.AutoScrollEnabled,
 			}
 		}
 		if quote, ok := quotesBySection[section.ID]; ok {
@@ -666,9 +674,11 @@ func (s *PageService) savePageContentDetail(tx *gorm.DB, pageID int, input *Save
 			}
 		case PageSectionTypeGallery:
 			module := PageSectionGalleryModule{
-				PageSectionID: row.ID,
-				GalleryID:     section.Gallery.GalleryID,
-				ViewMode:      section.Gallery.ViewMode,
+				PageSectionID:        row.ID,
+				GalleryID:            section.Gallery.GalleryID,
+				ViewMode:             section.Gallery.ViewMode,
+				ShowTitleDescription: boolValue(section.Gallery.ShowTitleDescription, true),
+				AutoScrollEnabled:    boolValue(section.Gallery.AutoScrollEnabled, false),
 			}
 			if err := tx.Create(&module).Error; err != nil {
 				return nil, nil, err
@@ -867,6 +877,17 @@ func checksumPointer(value string) *string {
 		return nil
 	}
 	return &trimmed
+}
+
+func boolPtr(value bool) *bool {
+	return &value
+}
+
+func boolValue(value *bool, fallback bool) bool {
+	if value == nil {
+		return fallback
+	}
+	return *value
 }
 
 func (s *PageService) storePageDocumentInput(input PageDocumentInput) (string, string, int64, string, string, error) {

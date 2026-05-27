@@ -893,6 +893,8 @@ CREATE TABLE IF NOT EXISTS page_section_gallery_modules (
     page_section_id INT PRIMARY KEY,
     gallery_id INT NOT NULL,
     view_mode VARCHAR(20) NOT NULL DEFAULT 'grid',
+    show_title_description BOOLEAN NOT NULL DEFAULT TRUE,
+    auto_scroll_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -909,6 +911,24 @@ CREATE TABLE IF NOT EXISTS page_section_gallery_modules (
     CONSTRAINT chk_page_section_gallery_modules_view_mode
         CHECK (view_mode IN ('grid', 'carousel', 'masonry', 'focus', 'icons'))
 );
+
+ALTER TABLE page_section_gallery_modules
+    ADD COLUMN IF NOT EXISTS show_title_description BOOLEAN,
+    ADD COLUMN IF NOT EXISTS auto_scroll_enabled BOOLEAN;
+
+UPDATE page_section_gallery_modules
+SET show_title_description = TRUE
+WHERE show_title_description IS NULL;
+
+UPDATE page_section_gallery_modules
+SET auto_scroll_enabled = FALSE
+WHERE auto_scroll_enabled IS NULL;
+
+ALTER TABLE page_section_gallery_modules
+    ALTER COLUMN show_title_description SET DEFAULT TRUE,
+    ALTER COLUMN show_title_description SET NOT NULL,
+    ALTER COLUMN auto_scroll_enabled SET DEFAULT FALSE,
+    ALTER COLUMN auto_scroll_enabled SET NOT NULL;
 
 CREATE TABLE IF NOT EXISTS page_section_quote_modules (
     page_section_id INT PRIMARY KEY,
