@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -606,6 +607,29 @@ func TestNormalizeSavePageSectionRequestDefaultsGalleryDisplayFlags(t *testing.T
 	}
 	if section.Gallery.AutoScrollEnabled == nil || *section.Gallery.AutoScrollEnabled {
 		t.Fatalf("expected auto_scroll_enabled to default to false, got %#v", section.Gallery.AutoScrollEnabled)
+	}
+}
+
+func TestPageSectionGalleryModuleCreateIncludesFalseFlags(t *testing.T) {
+	db, _, cleanup := setupMockDB(t)
+	defer cleanup()
+
+	galleryID := 14
+	sql := db.ToSQL(func(tx *gorm.DB) *gorm.DB {
+		return tx.Create(&PageSectionGalleryModule{
+			PageSectionID:        42,
+			GalleryID:            &galleryID,
+			ViewMode:             PageGalleryViewCarousel,
+			ShowTitleDescription: false,
+			AutoScrollEnabled:    false,
+		})
+	})
+
+	if !strings.Contains(sql, `"show_title_description"`) {
+		t.Fatalf("expected show_title_description column in insert SQL, got %q", sql)
+	}
+	if !strings.Contains(sql, `"auto_scroll_enabled"`) {
+		t.Fatalf("expected auto_scroll_enabled column in insert SQL, got %q", sql)
 	}
 }
 
