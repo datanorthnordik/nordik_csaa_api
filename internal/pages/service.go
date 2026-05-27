@@ -17,6 +17,7 @@ var (
 	ErrStoreUnavailable         = errors.New("page store unavailable")
 	ErrPageNotFound             = errors.New("page not found")
 	ErrPageHeroImageNotFound    = errors.New("page hero image not found")
+	ErrPageCTAImageNotFound     = errors.New("page CTA image not found")
 	ErrPageModuleManaged        = errors.New("module pages are managed elsewhere in the CMS and cannot be edited here")
 	ErrMediaBucketNotConfigured = errors.New("drive bucket is not configured")
 )
@@ -634,6 +635,17 @@ func sanitizeUploadInput(value PageUploadInput) PageUploadInput {
 	return value
 }
 
+func isEmptyPageUploadInput(value PageUploadInput) bool {
+	return strings.TrimSpace(value.FileName) == "" &&
+		strings.TrimSpace(value.MimeType) == "" &&
+		strings.TrimSpace(value.DataBase64) == "" &&
+		len(value.Content) == 0 &&
+		strings.TrimSpace(value.FileURL) == "" &&
+		strings.TrimSpace(value.StorageURI) == "" &&
+		strings.TrimSpace(value.ObjectKey) == "" &&
+		strings.TrimSpace(value.GCPObjectKey) == ""
+}
+
 func normalizeURLSlug(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -757,6 +769,73 @@ func (s *PageService) heroImageObjectName(pageID int, fileName string, mimeType 
 	}
 	ext := util.ExtFromFilenameOrMime(fileName, mimeType)
 	return fmt.Sprintf("pages/%d/hero_%s_%s%s", pageID, timestamp, base, ext)
+}
+
+func (s *PageService) storePageSectionImageInput(sectionID int, input PageUploadInput, fieldName string) (string, string, string, error) {
+	referenceURL := strings.TrimSpace(input.StorageURI)
+	if referenceURL == "" {
+		referenceURL = strings.TrimSpace(input.FileURL)
+	}
+	objectKey := strings.TrimSpace(input.ObjectKey)
+	if objectKey == "" {
+		objectKey = strings.TrimSpace(input.GCPObjectKey)
+	}
+
+	if len(input.Content) == 0 && strings.TrimSpace(input.DataBase64) == "" {
+		if referenceURL == "" && objectKey == "" {
+			return "", "", "", fmt.Errorf("%s is missing both uploaded file and file_url", fieldName)
+		}
+		if objectKey == "" && referenceURL != "" {
+			_, parsedObjectKey, err := util.ParseGCSObjectReference(strings.TrimSpace(s.BucketName), referenceURL)
+			if err == nil {
+				objectKey = s.relativeObjectKey(parsedObjectKey)
+			}
+		}
+		return referenceURL, objectKey, "", nil
+	}
+
+	if strings.TrimSpace(s.BucketName) == "" {
+		return "", "", "", ErrMediaBucketNotConfigured
+	}
+
+	objectName := s.pageSectionImageObjectName(sectionID, input.FileName, input.MimeType)
+	storageObjectName := s.storageObjectName(objectName)
+
+	var (
+		fileURL string
+		err     error
+	)
+	if len(input.Content) > 0 {
+		fileURL, _, err = uploadBytesToGCSHook(
+			input.Content,
+			s.BucketName,
+			storageObjectName,
+			strings.TrimSpace(input.MimeType),
+		)
+	} else {
+		fileURL, _, err = uploadBase64ToGCSHook(
+			input.DataBase64,
+			s.BucketName,
+			storageObjectName,
+			strings.TrimSpace(input.MimeType),
+		)
+	}
+	if err != nil {
+		return "", "", "", err
+	}
+
+	return fileURL, objectName, storageObjectName, nil
+}
+
+func (s *PageService) pageSectionImageObjectName(sectionID int, fileName string, mimeType string) string {
+	timestamp := pagesNowFunc().UTC().Format("20060102150405")
+	base := strings.TrimSpace(strings.TrimSuffix(fileName, path.Ext(fileName)))
+	base = util.SanitizePart(base)
+	if base == "unknown" {
+		base = "cta-image"
+	}
+	ext := util.ExtFromFilenameOrMime(fileName, mimeType)
+	return fmt.Sprintf("pages/sections/%d/cta_image_%s_%s%s", sectionID, timestamp, base, ext)
 }
 
 func (s *PageService) cleanupSingleHeroObject(page Page) error {

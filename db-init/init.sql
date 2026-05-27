@@ -989,6 +989,8 @@ CREATE TABLE IF NOT EXISTS page_section_cta_banner_modules (
     button_text VARCHAR(100),
     button_url TEXT,
     open_in_new_tab BOOLEAN NOT NULL DEFAULT FALSE,
+    image_url TEXT,
+    image_object_key TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -1007,6 +1009,10 @@ CREATE TABLE IF NOT EXISTS page_section_cta_banner_modules (
             (btrim(COALESCE(button_text, '')) <> '' AND btrim(COALESCE(button_url, '')) <> '')
         )
 );
+
+ALTER TABLE page_section_cta_banner_modules
+    ADD COLUMN IF NOT EXISTS image_url TEXT,
+    ADD COLUMN IF NOT EXISTS image_object_key TEXT;
 
 CREATE TABLE IF NOT EXISTS page_section_documents (
     id SERIAL PRIMARY KEY,

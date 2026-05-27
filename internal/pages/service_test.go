@@ -49,6 +49,9 @@ func TestPageServiceReturnsStoreUnavailableWithoutDB(t *testing.T) {
 	if _, err := service.GetPageHeroImageContent(1); !errors.Is(err, ErrStoreUnavailable) {
 		t.Fatalf("expected GetPageHeroImageContent to return ErrStoreUnavailable, got %v", err)
 	}
+	if _, err := service.GetPageCTABannerImageContent(1); !errors.Is(err, ErrStoreUnavailable) {
+		t.Fatalf("expected GetPageCTABannerImageContent to return ErrStoreUnavailable, got %v", err)
+	}
 	if _, err := service.CreatePage(validSavePageRequest()); !errors.Is(err, ErrStoreUnavailable) {
 		t.Fatalf("expected CreatePage to return ErrStoreUnavailable, got %v", err)
 	}
@@ -247,6 +250,34 @@ func TestGetPageHeroImageContent(t *testing.T) {
 		t.Fatalf("unexpected content: %q", string(resp.Content))
 	}
 	if resp.FileName != "hero_20260501100000_banner.png" {
+		t.Fatalf("unexpected file name: %q", resp.FileName)
+	}
+}
+
+func TestGetPageCTABannerImageContent(t *testing.T) {
+	db, mock, cleanup := setupMockDB(t)
+	defer cleanup()
+
+	service := &PageService{DB: db, BucketName: "drive-bucket"}
+	restore := stubPageMediaHooks()
+	defer restore()
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "page_section_cta_banner_modules" WHERE page_section_id = $1 ORDER BY "page_section_cta_banner_modules"."page_section_id" LIMIT $2`)).
+		WithArgs(42, 1).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"page_section_id", "banner_heading", "banner_message", "button_text", "button_url", "open_in_new_tab", "image_url", "image_object_key", "created_at", "updated_at",
+		}).AddRow(
+			42, "Community Support", "Learn more", "Read more", "https://example.com", false, "gs://drive-bucket/pages/sections/42/cta_image_20260501100000_logo.png", "pages/sections/42/cta_image_20260501100000_logo.png", time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
+		))
+
+	resp, err := service.GetPageCTABannerImageContent(42)
+	if err != nil {
+		t.Fatalf("GetPageCTABannerImageContent returned error: %v", err)
+	}
+	if string(resp.Content) != "downloaded:drive-bucket/pages/sections/42/cta_image_20260501100000_logo.png" {
+		t.Fatalf("unexpected content: %q", string(resp.Content))
+	}
+	if resp.FileName != "cta_image_20260501100000_logo.png" {
 		t.Fatalf("unexpected file name: %q", resp.FileName)
 	}
 }
@@ -931,6 +962,83 @@ func TestGetPageContentDetailIncludesGalleryDisplayFlags(t *testing.T) {
 	}
 	if !resp.Sections[0].Gallery.AutoScrollEnabled {
 		t.Fatalf("expected auto_scroll_enabled=true, got %#v", resp.Sections[0].Gallery)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestGetPageContentDetailIncludesCTAImageFetchURL(t *testing.T) {
+	db, mock, cleanup := setupMockDB(t)
+	defer cleanup()
+
+	service := &PageService{DB: db}
+	createdAt := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	updatedAt := time.Date(2026, 5, 10, 9, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "page_details" WHERE page_id = $1 ORDER BY "page_details"."id" LIMIT $2`)).
+		WithArgs(12, 1).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "page_id", "template_key", "settings", "schema_version", "created_by", "updated_by", "created_at", "updated_at",
+		}).AddRow(
+			5, 12, "default", "{}", 1, 7, 7, createdAt, updatedAt,
+		))
+	mock.ExpectQuery(`SELECT .* FROM "page_sections" WHERE page_detail_id = \$1 ORDER BY sort_order ASC.*id ASC`).
+		WithArgs(5).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "page_detail_id", "section_name", "section_type", "sort_order", "is_enabled", "settings", "created_at", "updated_at",
+		}).AddRow(
+			42, 5, "CTA Banner", PageSectionTypeCTABanner, 0, true, "{}", createdAt, updatedAt,
+		))
+	mock.ExpectQuery(`SELECT .* FROM "page_section_header_modules" WHERE page_section_id IN \(\$1\)`).
+		WithArgs(42).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"page_section_id", "main_header_text", "sub_header_text", "description", "hierarchy", "text_align", "underline_enabled", "created_at", "updated_at",
+		}))
+	mock.ExpectQuery(`SELECT .* FROM "page_section_typography_modules" WHERE page_section_id IN \(\$1\)`).
+		WithArgs(42).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"page_section_id", "body_html", "body_text", "text_align", "created_at", "updated_at",
+		}))
+	mock.ExpectQuery(`SELECT .* FROM "page_section_gallery_modules" WHERE page_section_id IN \(\$1\)`).
+		WithArgs(42).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"page_section_id", "gallery_id", "view_mode", "show_title_description", "auto_scroll_enabled", "created_at", "updated_at",
+		}))
+	mock.ExpectQuery(`SELECT .* FROM "page_section_quote_modules" WHERE page_section_id IN \(\$1\)`).
+		WithArgs(42).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"page_section_id", "quote_content", "attribution", "created_at", "updated_at",
+		}))
+	mock.ExpectQuery(`SELECT .* FROM "page_section_cta_banner_modules" WHERE page_section_id IN \(\$1\)`).
+		WithArgs(42).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"page_section_id", "banner_heading", "banner_message", "button_text", "button_url", "open_in_new_tab", "image_url", "image_object_key", "created_at", "updated_at",
+		}).AddRow(
+			42, "Community Support", "We are here for the community.", "Learn more", "https://example.com", true, "gs://drive-bucket/pages/sections/42/cta_image_20260501100000_logo.png", "pages/sections/42/cta_image_20260501100000_logo.png", createdAt, updatedAt,
+		))
+	mock.ExpectQuery(`SELECT .*page_section_documents.*JOIN documents ON documents.id = page_section_documents.document_id.*page_section_documents.page_section_id IN \(\$1\).*`).
+		WithArgs(42).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"page_section_id", "document_id", "display_name", "description", "original_file_name", "file_url", "gcp_object_key", "mime_type", "file_size", "sort_order", "created_at", "updated_at",
+		}))
+
+	resp, err := service.getPageContentDetail(12)
+	if err != nil {
+		t.Fatalf("getPageContentDetail returned error: %v", err)
+	}
+	if resp == nil || len(resp.Sections) != 1 {
+		t.Fatalf("expected one section in content detail response, got %#v", resp)
+	}
+	if resp.Sections[0].CTABanner == nil || resp.Sections[0].CTABanner.Image == nil {
+		t.Fatalf("expected CTA image response, got %#v", resp.Sections[0].CTABanner)
+	}
+	if resp.Sections[0].CTABanner.Image.FetchURL != "/api/pages/sections/42/cta-image/content" {
+		t.Fatalf("unexpected CTA image fetch url: %#v", resp.Sections[0].CTABanner.Image)
+	}
+	if resp.Sections[0].CTABanner.Image.StorageURI != "gs://drive-bucket/pages/sections/42/cta_image_20260501100000_logo.png" {
+		t.Fatalf("unexpected CTA image storage uri: %#v", resp.Sections[0].CTABanner.Image)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {

@@ -24,6 +24,7 @@ type fakePageService struct {
 	detailResp    *PageDetailResponse
 	slugResp      *PageDetailResponse
 	heroResp      *PageHeroImageContent
+	ctaImageResp  *PageSectionImageContent
 	documentResp  *PageDocumentContent
 	createResp    *PageMutationResponse
 	updateResp    *PageMutationResponse
@@ -31,6 +32,7 @@ type fakePageService struct {
 	detailErr     error
 	slugErr       error
 	heroErr       error
+	ctaImageErr   error
 	documentErr   error
 	createErr     error
 	updateErr     error
@@ -39,6 +41,7 @@ type fakePageService struct {
 	gotGetID      int
 	gotGetSlug    string
 	gotHeroID     int
+	gotCTAImageID int
 	gotDocumentID int
 	gotCreateReq  SavePageRequest
 	gotUpdateID   int
@@ -88,6 +91,21 @@ func (s *fakePageService) GetPageHeroImageContent(id int) (*PageHeroImageContent
 		return &PageHeroImageContent{Content: []byte("ok"), ContentType: "image/png", FileName: "hero.png"}, nil
 	}
 	return s.heroResp, nil
+}
+
+func (s *fakePageService) GetPageCTABannerImageContent(sectionID int) (*PageSectionImageContent, error) {
+	s.gotCTAImageID = sectionID
+	if s.ctaImageErr != nil {
+		return nil, s.ctaImageErr
+	}
+	if s.ctaImageResp == nil {
+		return &PageSectionImageContent{
+			Content:     []byte("cta"),
+			ContentType: "image/png",
+			FileName:    "cta.png",
+		}, nil
+	}
+	return s.ctaImageResp, nil
 }
 
 func (s *fakePageService) GetPageDocumentContent(id int) (*PageDocumentContent, error) {
@@ -203,6 +221,11 @@ func TestGetPageAndHeroEndpoints(t *testing.T) {
 			ContentType: "image/png",
 			FileName:    "hero.png",
 		},
+		ctaImageResp: &PageSectionImageContent{
+			Content:     []byte("cta-image"),
+			ContentType: "image/png",
+			FileName:    "cta.png",
+		},
 		documentResp: &PageDocumentContent{
 			Content:     []byte("document"),
 			ContentType: "application/pdf",
@@ -242,6 +265,22 @@ func TestGetPageAndHeroEndpoints(t *testing.T) {
 	}
 	if got := res.Header().Get("Content-Disposition"); !strings.Contains(got, "hero.png") {
 		t.Fatalf("expected content disposition filename, got %q", got)
+	}
+
+	res = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/pages/sections/18/cta-image/content", nil)
+	router.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", res.Code, res.Body.String())
+	}
+	if service.gotCTAImageID != 18 {
+		t.Fatalf("expected CTA image section id 18, got %d", service.gotCTAImageID)
+	}
+	if res.Body.String() != "cta-image" {
+		t.Fatalf("unexpected CTA image body: %q", res.Body.String())
+	}
+	if got := res.Header().Get("Content-Disposition"); !strings.Contains(got, "cta.png") {
+		t.Fatalf("expected CTA image content disposition filename, got %q", got)
 	}
 
 	res = httptest.NewRecorder()
@@ -326,6 +365,42 @@ func TestCreatePageEndpointAcceptsMultipartHeroUpload(t *testing.T) {
 	}
 }
 
+func TestCreatePageEndpointAcceptsMultipartCTAImageUpload(t *testing.T) {
+	service := &fakePageService{}
+	router := setupProtectedPageRouter(service)
+
+	req := newPageMultipartRequest(
+		t,
+		http.MethodPost,
+		"/api/pages",
+		`{"page_title":"Homepage","url_slug":"/home","status":"draft","hero_image_enabled":false,"page_detail":{"template_key":"default","sections":[{"section_name":"CTA Banner","section_type":"cta_banner","sort_order":0,"is_enabled":true,"settings":{},"cta_banner":{"banner_heading":"Support","banner_message":"Learn more","button_text":"Read more","button_url":"https://example.com"}}]}}`,
+		map[string]multipartUploadTestFile{
+			"page_detail.sections[0].cta_banner.image.file": {Filename: "cta.png", Data: []byte("cta-image")},
+		},
+	)
+	req.Header.Set("Authorization", "Bearer "+signedPageTestToken(t, "test-secret", 7))
+
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusCreated {
+		t.Fatalf("expected status 201, got %d: %s", res.Code, res.Body.String())
+	}
+	if service.gotCreateReq.PageDetail == nil || len(service.gotCreateReq.PageDetail.Sections) != 1 {
+		t.Fatalf("expected CTA section payload, got %#v", service.gotCreateReq)
+	}
+	cta := service.gotCreateReq.PageDetail.Sections[0].CTABanner
+	if cta == nil || cta.Image == nil {
+		t.Fatalf("expected CTA image to be forwarded, got %#v", service.gotCreateReq.PageDetail.Sections[0])
+	}
+	if cta.Image.FileName != "cta.png" {
+		t.Fatalf("expected CTA image filename cta.png, got %#v", cta.Image)
+	}
+	if string(cta.Image.Content) != "cta-image" {
+		t.Fatalf("expected CTA image bytes to be forwarded, got %#v", cta.Image)
+	}
+}
+
 func TestCreatePageEndpointRejectsBase64UploadPayload(t *testing.T) {
 	service := &fakePageService{}
 	router := setupProtectedPageRouter(service)
@@ -371,6 +446,15 @@ func TestPageEndpointErrorsAndProtection(t *testing.T) {
 	payload := assertPageAPIError(t, res, http.StatusBadRequest, "validation_error", "Invalid path parameter")
 	if len(payload.Error.Details) != 1 || payload.Error.Details[0].Field != "id" {
 		t.Fatalf("expected id validation detail, got %#v", payload)
+	}
+
+	router = setupPageRouter(&fakePageService{})
+	res = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/pages/sections/bad/cta-image/content", nil)
+	router.ServeHTTP(res, req)
+	payload = assertPageAPIError(t, res, http.StatusBadRequest, "validation_error", "Invalid path parameter")
+	if len(payload.Error.Details) != 1 || payload.Error.Details[0].Field != "sectionId" {
+		t.Fatalf("expected sectionId validation detail, got %#v", payload)
 	}
 
 	router = setupPageRouter(&fakePageService{})

@@ -9,6 +9,7 @@ func RegisterRoutes(r *gin.Engine, ps PageServicePort, protected ...gin.HandlerF
 	{
 		publicGroup.GET("", controller.ListPages)
 		publicGroup.GET("/by-slug", controller.GetPageBySlug)
+		publicGroup.GET("/sections/:sectionId/cta-image/content", controller.GetPageCTABannerImageContent)
 		publicGroup.GET("/documents/:documentId/content", controller.GetPageDocumentContent)
 		publicGroup.GET("/:id", controller.GetPage)
 		publicGroup.GET("/:id/hero/content", controller.GetPageHeroImageContent)
