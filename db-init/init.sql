@@ -825,8 +825,10 @@ CREATE TABLE IF NOT EXISTS page_section_header_modules (
     page_section_id INT PRIMARY KEY,
     main_header_text VARCHAR(255) NOT NULL,
     sub_header_text VARCHAR(255),
+    description TEXT NOT NULL DEFAULT '',
     hierarchy VARCHAR(20) NOT NULL DEFAULT 'h1_hero',
     text_align VARCHAR(20) NOT NULL DEFAULT 'left',
+    underline_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -842,19 +844,40 @@ CREATE TABLE IF NOT EXISTS page_section_header_modules (
         CHECK (hierarchy IN ('h1_hero', 'h2_section')),
 
     CONSTRAINT chk_page_section_header_modules_text_align
-        CHECK (text_align IN ('left', 'center', 'right'))
+        CHECK (text_align IN ('left', 'center', 'right')),
+
+    CONSTRAINT chk_page_section_header_modules_underline_enabled
+        CHECK (NOT underline_enabled OR hierarchy = 'h2_section')
 );
 
 ALTER TABLE page_section_header_modules
     ADD COLUMN IF NOT EXISTS text_align VARCHAR(20);
 
+ALTER TABLE page_section_header_modules
+    ADD COLUMN IF NOT EXISTS description TEXT;
+
+ALTER TABLE page_section_header_modules
+    ADD COLUMN IF NOT EXISTS underline_enabled BOOLEAN;
+
+UPDATE page_section_header_modules
+SET description = ''
+WHERE description IS NULL;
+
 UPDATE page_section_header_modules
 SET text_align = 'left'
 WHERE text_align IS NULL OR btrim(text_align) = '';
 
+UPDATE page_section_header_modules
+SET underline_enabled = FALSE
+WHERE underline_enabled IS NULL;
+
 ALTER TABLE page_section_header_modules
+    ALTER COLUMN description SET DEFAULT '',
+    ALTER COLUMN description SET NOT NULL,
     ALTER COLUMN text_align SET DEFAULT 'left',
-    ALTER COLUMN text_align SET NOT NULL;
+    ALTER COLUMN text_align SET NOT NULL,
+    ALTER COLUMN underline_enabled SET DEFAULT FALSE,
+    ALTER COLUMN underline_enabled SET NOT NULL;
 
 DO $$
 BEGIN
@@ -866,6 +889,19 @@ BEGIN
         ALTER TABLE page_section_header_modules
             ADD CONSTRAINT chk_page_section_header_modules_text_align
             CHECK (text_align IN ('left', 'center', 'right'));
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_page_section_header_modules_underline_enabled'
+    ) THEN
+        ALTER TABLE page_section_header_modules
+            ADD CONSTRAINT chk_page_section_header_modules_underline_enabled
+            CHECK (NOT underline_enabled OR hierarchy = 'h2_section');
     END IF;
 END $$;
 

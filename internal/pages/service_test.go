@@ -677,6 +677,9 @@ func TestNormalizeSavePageSectionRequestDefaultsHeaderTextAlignToLeft(t *testing
 	if section.Header.TextAlign != PageTextAlignLeft {
 		t.Fatalf("expected default text alignment %q, got %q", PageTextAlignLeft, section.Header.TextAlign)
 	}
+	if section.Header.UnderlineEnabled == nil || *section.Header.UnderlineEnabled {
+		t.Fatalf("expected underline_enabled to default to false, got %#v", section.Header.UnderlineEnabled)
+	}
 }
 
 func TestNormalizeSavePageSectionRequestRejectsUnknownHeaderTextAlign(t *testing.T) {
@@ -692,6 +695,50 @@ func TestNormalizeSavePageSectionRequestRejectsUnknownHeaderTextAlign(t *testing
 	)
 	if err == nil || err.Error() != "invalid page_detail.sections[0].header.text_align" {
 		t.Fatalf("expected invalid header text alignment error, got %v", err)
+	}
+}
+
+func TestNormalizeSavePageSectionRequestAllowsHeaderDescriptionAndH2Underline(t *testing.T) {
+	section, err := normalizeSavePageSectionRequest(
+		SavePageSectionRequest{
+			SectionType: PageSectionTypeHeader,
+			Header: &PageHeaderSectionInput{
+				MainHeaderText:   "News & Media",
+				Description:      " Latest updates ",
+				Hierarchy:        PageHeaderHierarchySection,
+				UnderlineEnabled: boolPtr(true),
+			},
+		},
+		0,
+	)
+	if err != nil {
+		t.Fatalf("expected h2 underline support to be accepted, got %v", err)
+	}
+	if section.Header == nil {
+		t.Fatal("expected header payload to be initialized")
+	}
+	if section.Header.Description != "Latest updates" {
+		t.Fatalf("expected trimmed description, got %#v", section.Header)
+	}
+	if section.Header.UnderlineEnabled == nil || !*section.Header.UnderlineEnabled {
+		t.Fatalf("expected underline_enabled=true to be preserved, got %#v", section.Header.UnderlineEnabled)
+	}
+}
+
+func TestNormalizeSavePageSectionRequestRejectsUnderlineOutsideH2(t *testing.T) {
+	_, err := normalizeSavePageSectionRequest(
+		SavePageSectionRequest{
+			SectionType: PageSectionTypeHeader,
+			Header: &PageHeaderSectionInput{
+				MainHeaderText:   "News & Media",
+				Hierarchy:        PageHeaderHierarchyHero,
+				UnderlineEnabled: boolPtr(true),
+			},
+		},
+		0,
+	)
+	if err == nil || err.Error() != "page_detail.sections[0].header.underline_enabled can only be true when hierarchy is h2_section" {
+		t.Fatalf("expected h2-only underline validation error, got %v", err)
 	}
 }
 
@@ -735,9 +782,9 @@ func TestGetPageContentDetailIncludesHeaderTextAlign(t *testing.T) {
 	mock.ExpectQuery(`SELECT .* FROM "page_section_header_modules" WHERE page_section_id IN \(\$1\)`).
 		WithArgs(42).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"page_section_id", "main_header_text", "sub_header_text", "hierarchy", "text_align", "created_at", "updated_at",
+			"page_section_id", "main_header_text", "sub_header_text", "description", "hierarchy", "text_align", "underline_enabled", "created_at", "updated_at",
 		}).AddRow(
-			42, "News & Media", "Latest updates", PageHeaderHierarchyHero, PageTextAlignCenter, createdAt, updatedAt,
+			42, "News & Media", "Latest updates", "Community stories", PageHeaderHierarchySection, PageTextAlignCenter, true, createdAt, updatedAt,
 		))
 	mock.ExpectQuery(`SELECT .* FROM "page_section_typography_modules" WHERE page_section_id IN \(\$1\)`).
 		WithArgs(42).
@@ -778,6 +825,12 @@ func TestGetPageContentDetailIncludesHeaderTextAlign(t *testing.T) {
 	if resp.Sections[0].Header.TextAlign != PageTextAlignCenter {
 		t.Fatalf("expected header text alignment %q, got %#v", PageTextAlignCenter, resp.Sections[0].Header)
 	}
+	if resp.Sections[0].Header.Description != "Community stories" {
+		t.Fatalf("expected header description to round-trip, got %#v", resp.Sections[0].Header)
+	}
+	if !resp.Sections[0].Header.UnderlineEnabled {
+		t.Fatalf("expected underline_enabled=true in response, got %#v", resp.Sections[0].Header)
+	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
@@ -809,7 +862,7 @@ func TestGetPageContentDetailIncludesGalleryDisplayFlags(t *testing.T) {
 	mock.ExpectQuery(`SELECT .* FROM "page_section_header_modules" WHERE page_section_id IN \(\$1\)`).
 		WithArgs(42).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"page_section_id", "main_header_text", "sub_header_text", "hierarchy", "text_align", "created_at", "updated_at",
+			"page_section_id", "main_header_text", "sub_header_text", "description", "hierarchy", "text_align", "underline_enabled", "created_at", "updated_at",
 		}))
 	mock.ExpectQuery(`SELECT .* FROM "page_section_typography_modules" WHERE page_section_id IN \(\$1\)`).
 		WithArgs(42).

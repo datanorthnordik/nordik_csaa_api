@@ -105,13 +105,15 @@ type PageSection struct {
 }
 
 type PageSectionHeaderModule struct {
-	PageSectionID  int       `gorm:"primaryKey;column:page_section_id" json:"page_section_id"`
-	MainHeaderText string    `gorm:"size:255;column:main_header_text" json:"main_header_text"`
-	SubHeaderText  string    `gorm:"size:255;column:sub_header_text" json:"sub_header_text"`
-	Hierarchy      string    `gorm:"size:20;column:hierarchy" json:"hierarchy"`
-	TextAlign      string    `gorm:"size:20;column:text_align" json:"text_align"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	PageSectionID    int       `gorm:"primaryKey;column:page_section_id" json:"page_section_id"`
+	MainHeaderText   string    `gorm:"size:255;column:main_header_text" json:"main_header_text"`
+	SubHeaderText    string    `gorm:"size:255;column:sub_header_text" json:"sub_header_text"`
+	Description      string    `gorm:"column:description" json:"description"`
+	Hierarchy        string    `gorm:"size:20;column:hierarchy" json:"hierarchy"`
+	TextAlign        string    `gorm:"size:20;column:text_align" json:"text_align"`
+	UnderlineEnabled bool      `gorm:"not null;default:false;column:underline_enabled" json:"underline_enabled"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 type PageSectionTypographyModule struct {
@@ -179,10 +181,12 @@ type PageSectionDocument struct {
 }
 
 type PageHeaderSectionInput struct {
-	MainHeaderText string `json:"main_header_text"`
-	SubHeaderText  string `json:"sub_header_text"`
-	Hierarchy      string `json:"hierarchy"`
-	TextAlign      string `json:"text_align"`
+	MainHeaderText   string `json:"main_header_text"`
+	SubHeaderText    string `json:"sub_header_text"`
+	Description      string `json:"description"`
+	Hierarchy        string `json:"hierarchy"`
+	TextAlign        string `json:"text_align"`
+	UnderlineEnabled *bool  `json:"underline_enabled,omitempty"`
 }
 
 type PageTypographySectionInput struct {
@@ -252,10 +256,12 @@ type SavePageDetailRequest struct {
 }
 
 type PageHeaderSectionResponse struct {
-	MainHeaderText string `json:"main_header_text"`
-	SubHeaderText  string `json:"sub_header_text"`
-	Hierarchy      string `json:"hierarchy"`
-	TextAlign      string `json:"text_align"`
+	MainHeaderText   string `json:"main_header_text"`
+	SubHeaderText    string `json:"sub_header_text"`
+	Description      string `json:"description"`
+	Hierarchy        string `json:"hierarchy"`
+	TextAlign        string `json:"text_align"`
+	UnderlineEnabled bool   `json:"underline_enabled"`
 }
 
 type PageTypographySectionResponse struct {
