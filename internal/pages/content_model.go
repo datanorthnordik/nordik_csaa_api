@@ -127,8 +127,8 @@ type PageSectionGalleryModule struct {
 	PageSectionID        int       `gorm:"primaryKey;column:page_section_id" json:"page_section_id"`
 	GalleryID            *int      `gorm:"column:gallery_id" json:"gallery_id,omitempty"`
 	ViewMode             string    `gorm:"size:20;column:view_mode" json:"view_mode"`
-	ShowTitleDescription bool      `gorm:"not null;default:true;column:show_title_description" json:"show_title_description"`
-	AutoScrollEnabled    bool      `gorm:"not null;default:false;column:auto_scroll_enabled" json:"auto_scroll_enabled"`
+	ShowTitleDescription bool      `gorm:"not null;column:show_title_description" json:"show_title_description"`
+	AutoScrollEnabled    bool      `gorm:"not null;column:auto_scroll_enabled" json:"auto_scroll_enabled"`
 	CreatedAt            time.Time `json:"created_at"`
 	UpdatedAt            time.Time `json:"updated_at"`
 }
