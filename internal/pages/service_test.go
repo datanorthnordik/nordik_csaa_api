@@ -478,6 +478,61 @@ func TestCreateUpdateAndDeletePageSuccess(t *testing.T) {
 	}
 }
 
+func TestUpdatePageSyncsExistingMenuItemsToNewParent(t *testing.T) {
+	db, mock, cleanup := setupMockDB(t)
+	defer cleanup()
+
+	service := &PageService{DB: db}
+	req := validSavePageRequest()
+	req.HeroImageEnabled = false
+	parentID := 20
+	req.ParentID = &parentID
+	req.URLSlug = "/about/home"
+
+	pageID := 11
+	now := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "pages" WHERE "pages"."id" = $1 ORDER BY "pages"."id" LIMIT $2`)).
+		WithArgs(pageID, 1).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "page_title", "url_slug", "page_type", "status", "hero_image_enabled", "hero_image_url", "hero_image_object_key",
+			"seo_page_title", "seo_page_description", "created_by", "modified_by", "parent_id", "last_modified", "created_at", "updated_at",
+		}).AddRow(
+			pageID, "Homepage", "/home", PageTypePage, PageStatusDraft, false, "", "",
+			"Homepage SEO", "Desc", 7, 7, nil, now, now, now,
+		))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT "id","url_slug" FROM "pages" WHERE "pages"."id" = $1 LIMIT $2`)).
+		WithArgs(parentID, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "url_slug"}).AddRow(parentID, "/about"))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE "pages" SET`)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`SELECT .* FROM "menu_items" WHERE page_id = \$1 ORDER BY id ASC`).
+		WithArgs(pageID).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "menu_id", "parent_id"}).
+			AddRow(31, 5, nil).
+			AddRow(32, 6, 40))
+	mock.ExpectQuery(`SELECT .* FROM "menu_items" WHERE page_id = \$1 ORDER BY id ASC`).
+		WithArgs(parentID).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "menu_id"}).
+			AddRow(21, 5))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE "menu_items" SET "parent_id"=$1 WHERE id = $2`)).
+		WithArgs(21, 31).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE "menu_items" SET "parent_id"=NULL WHERE id = $1`)).
+		WithArgs(32).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	resp, err := service.UpdatePage(pageID, req)
+	if err != nil {
+		t.Fatalf("UpdatePage returned error: %v", err)
+	}
+	if resp.ParentID == nil || *resp.ParentID != parentID {
+		t.Fatalf("expected updated parent_id %d, got %#v", parentID, resp)
+	}
+}
+
 func TestCreatePageWithMissingParentPageReturnsValidationError(t *testing.T) {
 	db, mock, cleanup := setupMockDB(t)
 	defer cleanup()

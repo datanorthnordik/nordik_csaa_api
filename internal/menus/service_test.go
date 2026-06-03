@@ -447,6 +447,37 @@ func TestBuildMenuTreeIncludesChildrenAndHref(t *testing.T) {
 	}
 }
 
+func TestBuildMenuTreeRepairsStalePageParentLinksFromPageHierarchy(t *testing.T) {
+	rootID := 1
+	childID := 2
+	pageID := 10
+	childPageID := 11
+
+	flat := []MenuItem{
+		{ID: rootID, Label: "About", NavigationType: NavigationTypePage, PageID: &pageID, SortOrder: 0},
+		{ID: childID, Label: "Team", NavigationType: NavigationTypePage, PageID: &childPageID, SortOrder: 1},
+		{ID: 3, ParentID: &childID, Label: "Partner Site", NavigationType: NavigationTypeExternalLink, ExternalURL: "https://example.com", OpenInNewTab: true, SortOrder: 0},
+	}
+	pageMap := map[int]MenuPageReference{
+		10: {ID: 10, PageTitle: "About Us", URLSlug: "/about", PageType: "page", Status: "published"},
+		11: {ID: 11, PageTitle: "Team", URLSlug: "/about/team", ParentID: &pageID, PageType: "page", Status: "published"},
+	}
+
+	tree := buildMenuTree(flat, pageMap)
+	if len(tree) != 1 {
+		t.Fatalf("expected stale child page to be nested under its parent page, got %#v", tree)
+	}
+	if len(tree[0].Children) != 1 || tree[0].Children[0].ID != childID {
+		t.Fatalf("expected page child to be reattached under the page parent, got %#v", tree[0])
+	}
+	if tree[0].Children[0].ParentID == nil || *tree[0].Children[0].ParentID != rootID {
+		t.Fatalf("expected effective parent_id %d on repaired child, got %#v", rootID, tree[0].Children[0])
+	}
+	if len(tree[0].Children[0].Children) != 1 || tree[0].Children[0].Children[0].Href != "https://example.com" {
+		t.Fatalf("expected non-page descendants to move with the repaired page item, got %#v", tree[0].Children[0])
+	}
+}
+
 func TestMenuHelpersAndDirectMethods(t *testing.T) {
 	if normalize, err := normalizeMenuKey(" Main_Menu "); err != nil || normalize != "main_menu" {
 		t.Fatalf("expected normalized key main_menu, got %q err=%v", normalize, err)

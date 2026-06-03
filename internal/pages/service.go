@@ -46,6 +46,17 @@ type PageService struct {
 	BucketPrefix string
 }
 
+type pageMenuItemParentSyncRow struct {
+	ID       int
+	MenuID   int
+	ParentID *int
+}
+
+type pageMenuParentTargetRow struct {
+	ID     int
+	MenuID int
+}
+
 func (s *PageService) ListPages(filter PageListFilters) (*PageListResponse, error) {
 	if s.DB == nil {
 		return nil, ErrStoreUnavailable
@@ -363,6 +374,7 @@ func (s *PageService) UpdatePage(id int, req SavePageRequest) (*PageMutationResp
 	}
 
 	oldHero := page
+	oldParentID := copyOptionalInt(page.ParentID)
 	applyPageRequest(&page, normalized)
 	page.CreatedBy = oldHero.CreatedBy
 
@@ -388,6 +400,13 @@ func (s *PageService) UpdatePage(id int, req SavePageRequest) (*PageMutationResp
 		tx.Rollback()
 		s.cleanupObjects(uploadedObjects)
 		return nil, err
+	}
+	if !optionalIntsEqual(oldParentID, page.ParentID) {
+		if err := s.syncMenuItemsForPageParent(tx, page.ID, page.ParentID); err != nil {
+			tx.Rollback()
+			s.cleanupObjects(uploadedObjects)
+			return nil, err
+		}
 	}
 
 	detailUploadedObjects, detailCleanupObjects, err := s.savePageContentDetail(tx, page.ID, normalized.PageDetail, normalized.ModifiedBy)
@@ -663,6 +682,25 @@ func normalizeURLSlug(value string) string {
 	return "/" + value
 }
 
+func copyOptionalInt(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	return copyInt(*value)
+}
+
+func copyInt(value int) *int {
+	copied := value
+	return &copied
+}
+
+func optionalIntsEqual(left *int, right *int) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
+}
+
 func (s *PageService) validateParentPage(tx *gorm.DB, pageID int, req SavePageRequest) error {
 	if req.ParentID == nil {
 		return nil
@@ -687,6 +725,58 @@ func (s *PageService) validateParentPage(tx *gorm.DB, pageID int, req SavePageRe
 	}
 
 	return validatePageSlugParentPrefix(req.URLSlug, parent.URLSlug)
+}
+
+func (s *PageService) syncMenuItemsForPageParent(tx *gorm.DB, pageID int, parentPageID *int) error {
+	items := make([]pageMenuItemParentSyncRow, 0)
+	if err := tx.Table("menu_items").
+		Select("id", "menu_id", "parent_id").
+		Where("page_id = ?", pageID).
+		Order("id ASC").
+		Find(&items).Error; err != nil {
+		return err
+	}
+	if len(items) == 0 {
+		return nil
+	}
+
+	parentMenuItemIDByMenuID := make(map[int]int)
+	if parentPageID != nil {
+		parentItems := make([]pageMenuParentTargetRow, 0)
+		if err := tx.Table("menu_items").
+			Select("id", "menu_id").
+			Where("page_id = ?", *parentPageID).
+			Order("id ASC").
+			Find(&parentItems).Error; err != nil {
+			return err
+		}
+		for _, parentItem := range parentItems {
+			parentMenuItemIDByMenuID[parentItem.MenuID] = parentItem.ID
+		}
+	}
+
+	for _, item := range items {
+		var nextParentID *int
+		if parentMenuItemID, ok := parentMenuItemIDByMenuID[item.MenuID]; ok {
+			nextParentID = copyInt(parentMenuItemID)
+		}
+		if optionalIntsEqual(item.ParentID, nextParentID) {
+			continue
+		}
+
+		updateQuery := tx.Table("menu_items").Where("id = ?", item.ID)
+		if nextParentID == nil {
+			if err := updateQuery.Update("parent_id", gorm.Expr("NULL")).Error; err != nil {
+				return err
+			}
+			continue
+		}
+		if err := updateQuery.Update("parent_id", *nextParentID).Error; err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func validatePageSlugParentPrefix(pageSlug string, parentSlug string) error {
