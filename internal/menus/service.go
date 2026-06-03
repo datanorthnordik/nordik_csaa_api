@@ -469,6 +469,13 @@ func (s *MenuService) loadMenuResponse(menu Menu) (*MenuResponse, error) {
 }
 
 func buildMenuTree(items []MenuItem, pageMap map[int]MenuPageReference) []MenuItemResponse {
+	pageItemIDByPageID := make(map[int]int)
+	for _, item := range items {
+		if item.NavigationType == NavigationTypePage && item.PageID != nil {
+			pageItemIDByPageID[*item.PageID] = item.ID
+		}
+	}
+
 	buckets := make(map[string][]MenuItemResponse)
 	for _, item := range items {
 		var pageRef *MenuPageReference
@@ -480,10 +487,11 @@ func buildMenuTree(items []MenuItem, pageMap map[int]MenuPageReference) []MenuIt
 				href = page.URLSlug
 			}
 		}
+		effectiveParentID := resolveMenuItemParentID(item, pageRef, pageItemIDByPageID)
 
 		node := MenuItemResponse{
 			ID:             item.ID,
-			ParentID:       item.ParentID,
+			ParentID:       effectiveParentID,
 			Label:          item.Label,
 			NavigationType: item.NavigationType,
 			PageID:         item.PageID,
@@ -498,7 +506,7 @@ func buildMenuTree(items []MenuItem, pageMap map[int]MenuPageReference) []MenuIt
 		if pageRef != nil {
 			node.PageType = pageRef.PageType
 		}
-		buckets[parentBucketKey(item.ParentID)] = append(buckets[parentBucketKey(item.ParentID)], node)
+		buckets[parentBucketKey(effectiveParentID)] = append(buckets[parentBucketKey(effectiveParentID)], node)
 	}
 
 	for key := range buckets {
@@ -527,11 +535,32 @@ func buildMenuTree(items []MenuItem, pageMap map[int]MenuPageReference) []MenuIt
 	return attach(nil)
 }
 
+func resolveMenuItemParentID(item MenuItem, pageRef *MenuPageReference, pageItemIDByPageID map[int]int) *int {
+	if item.NavigationType != NavigationTypePage || pageRef == nil {
+		return item.ParentID
+	}
+	if pageRef.ParentID == nil {
+		return nil
+	}
+
+	parentMenuItemID, ok := pageItemIDByPageID[*pageRef.ParentID]
+	if !ok {
+		return nil
+	}
+
+	return copyMenuInt(parentMenuItemID)
+}
+
 func parentBucketKey(parentID *int) string {
 	if parentID == nil {
 		return "root"
 	}
 	return fmt.Sprintf("parent:%d", *parentID)
+}
+
+func copyMenuInt(value int) *int {
+	copied := value
+	return &copied
 }
 
 func rollbackOnPanic(tx *gorm.DB) {
