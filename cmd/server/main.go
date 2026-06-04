@@ -65,12 +65,7 @@ func main() {
 		log.Printf("panic recovered while handling %s %s: %v", c.Request.Method, c.Request.URL.Path, recovered)
 		apiresponse.WriteInternalError(c)
 	}))
-	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:3000", "http://localhost:5173", "https://nordikcsaacms-724838782318.us-west1.run.app", "https://nordikcsaawebsite-724838782318.us-west1.run.app"},
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
-		AllowCredentials: true,
-	}))
+	r.Use(cors.New(buildCORSConfig()))
 	r.NoRoute(apiresponse.WriteRouteNotFound)
 	r.NoMethod(apiresponse.WriteMethodNotAllowed)
 
@@ -102,4 +97,18 @@ func main() {
 	}
 	log.Printf("Starting server on 0.0.0.0:%s ...", port)
 	log.Fatal(r.Run("0.0.0.0:" + port))
+}
+
+func buildCORSConfig() cors.Config {
+	return cors.Config{
+		AllowOrigins: []string{
+			"http://localhost:3000",
+			"http://localhost:5173",
+			"https://nordikcsaacms-724838782318.us-west1.run.app",
+			"https://nordikcsaawebsite-724838782318.us-west1.run.app",
+		},
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+		AllowCredentials: true,
+	}
 }
