@@ -151,6 +151,10 @@ func uploadToGCS(data []byte, bucketName, objectName, contentType string) (strin
 		return "", 0, ErrObjectNameRequired
 	}
 
+	prepared := PrepareUploadForStorage(data, contentType)
+	data = prepared.Data
+	contentType = prepared.ContentType
+
 	ctx := context.Background()
 	client, err := newGCSClient(ctx)
 	if err != nil {
