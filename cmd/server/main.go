@@ -14,6 +14,7 @@ import (
 	"nordikcsaaapi/internal/pages"
 	"nordikcsaaapi/internal/press"
 	"nordikcsaaapi/internal/resources"
+	"nordikcsaaapi/internal/video"
 	"os"
 	"time"
 
@@ -75,6 +76,8 @@ func main() {
 	events.RegisterRoutes(r, eventService, auth.RequireBearerAuth(&cfg))
 	galleryService := &gallery.GalleryService{DB: db, BucketName: cfg.DriveBucketName, BucketPrefix: cfg.DriveBucketPrefix}
 	gallery.RegisterRoutes(r, galleryService, auth.RequireBearerAuth(&cfg))
+	videoService := &video.VideoService{DB: db, BucketName: cfg.DriveBucketName, BucketPrefix: cfg.DriveBucketPrefix}
+	video.RegisterRoutes(r, videoService, auth.RequireBearerAuth(&cfg))
 	pageService := &pages.PageService{DB: db, BucketName: cfg.DriveBucketName, BucketPrefix: cfg.DriveBucketPrefix}
 	pages.RegisterRoutes(r, pageService, auth.RequireBearerAuth(&cfg))
 	menuService := &menus.MenuService{DB: db}

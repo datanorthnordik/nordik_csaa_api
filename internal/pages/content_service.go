@@ -84,6 +84,7 @@ func normalizeSavePageSectionRequest(input SavePageSectionRequest, index int) (S
 		PageSectionTypeHeader,
 		PageSectionTypeTypography,
 		PageSectionTypeGallery,
+		PageSectionTypeVideo,
 		PageSectionTypeDocument,
 		PageSectionTypeQuote,
 		PageSectionTypeCTABanner,
@@ -167,6 +168,13 @@ func normalizeSavePageSectionRequest(input SavePageSectionRequest, index int) (S
 		}
 		if input.Gallery.AutoScrollEnabled == nil {
 			input.Gallery.AutoScrollEnabled = boolPtr(false)
+		}
+	case PageSectionTypeVideo:
+		if input.Video == nil {
+			input.Video = &PageVideoSectionInput{}
+		}
+		if input.Video.VideoPackageID != nil && *input.Video.VideoPackageID <= 0 {
+			return input, fmt.Errorf("page_detail.sections[%d].video.video_package_id must be a positive integer", index)
 		}
 	case PageSectionTypeDocument:
 		if input.Documents == nil {
@@ -300,6 +308,8 @@ func defaultPageSectionName(sectionType string) string {
 		return "Typography"
 	case PageSectionTypeGallery:
 		return "Gallery Module"
+	case PageSectionTypeVideo:
+		return "Video Module"
 	case PageSectionTypeDocument:
 		return "Document Module"
 	case PageSectionTypeQuote:
@@ -392,6 +402,10 @@ func (s *PageService) getPageContentDetail(pageID int) (*PageContentDetailRespon
 	if err != nil {
 		return nil, err
 	}
+	videosBySection, err := loadPageSectionVideos(s.DB, sectionIDs)
+	if err != nil {
+		return nil, err
+	}
 	quotesBySection, err := loadPageSectionQuotes(s.DB, sectionIDs)
 	if err != nil {
 		return nil, err
@@ -440,6 +454,11 @@ func (s *PageService) getPageContentDetail(pageID int) (*PageContentDetailRespon
 				ViewMode:             gallery.ViewMode,
 				ShowTitleDescription: gallery.ShowTitleDescription,
 				AutoScrollEnabled:    gallery.AutoScrollEnabled,
+			}
+		}
+		if video, ok := videosBySection[section.ID]; ok {
+			item.Video = &PageVideoSectionResponse{
+				VideoPackageID: video.VideoPackageID,
 			}
 		}
 		if quote, ok := quotesBySection[section.ID]; ok {
@@ -526,6 +545,19 @@ func loadPageSectionGalleries(db *gorm.DB, sectionIDs []int) (map[int]PageSectio
 	}
 
 	items := make(map[int]PageSectionGalleryModule, len(rows))
+	for _, row := range rows {
+		items[row.PageSectionID] = row
+	}
+	return items, nil
+}
+
+func loadPageSectionVideos(db *gorm.DB, sectionIDs []int) (map[int]PageSectionVideoModule, error) {
+	var rows []PageSectionVideoModule
+	if err := db.Where("page_section_id IN ?", sectionIDs).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	items := make(map[int]PageSectionVideoModule, len(rows))
 	for _, row := range rows {
 		items[row.PageSectionID] = row
 	}
@@ -754,6 +786,14 @@ func (s *PageService) savePageContentDetail(tx *gorm.DB, pageID int, input *Save
 				ViewMode:             section.Gallery.ViewMode,
 				ShowTitleDescription: boolValue(section.Gallery.ShowTitleDescription, true),
 				AutoScrollEnabled:    boolValue(section.Gallery.AutoScrollEnabled, false),
+			}
+			if err := tx.Create(&module).Error; err != nil {
+				return nil, nil, err
+			}
+		case PageSectionTypeVideo:
+			module := PageSectionVideoModule{
+				PageSectionID:  row.ID,
+				VideoPackageID: section.Video.VideoPackageID,
 			}
 			if err := tx.Create(&module).Error; err != nil {
 				return nil, nil, err

@@ -11,6 +11,7 @@ const (
 	PageSectionTypeHeader     = "header"
 	PageSectionTypeTypography = "typography"
 	PageSectionTypeGallery    = "gallery"
+	PageSectionTypeVideo      = "video"
 	PageSectionTypeDocument   = "document"
 	PageSectionTypeQuote      = "quote"
 	PageSectionTypeCTABanner  = "cta_banner"
@@ -135,6 +136,13 @@ type PageSectionGalleryModule struct {
 	UpdatedAt            time.Time `json:"updated_at"`
 }
 
+type PageSectionVideoModule struct {
+	PageSectionID  int       `gorm:"primaryKey;column:page_section_id" json:"page_section_id"`
+	VideoPackageID *int      `gorm:"column:video_package_id" json:"video_package_id,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
 type PageSectionQuoteModule struct {
 	PageSectionID int       `gorm:"primaryKey;column:page_section_id" json:"page_section_id"`
 	QuoteContent  string    `gorm:"column:quote_content" json:"quote_content"`
@@ -204,6 +212,10 @@ type PageGallerySectionInput struct {
 	AutoScrollEnabled    *bool  `json:"auto_scroll_enabled,omitempty"`
 }
 
+type PageVideoSectionInput struct {
+	VideoPackageID *int `json:"video_package_id"`
+}
+
 type PageQuoteSectionInput struct {
 	QuoteContent string `json:"quote_content"`
 	Attribution  string `json:"attribution"`
@@ -247,6 +259,7 @@ type SavePageSectionRequest struct {
 	Header      *PageHeaderSectionInput     `json:"header,omitempty"`
 	Typography  *PageTypographySectionInput `json:"typography,omitempty"`
 	Gallery     *PageGallerySectionInput    `json:"gallery,omitempty"`
+	Video       *PageVideoSectionInput      `json:"video,omitempty"`
 	Quote       *PageQuoteSectionInput      `json:"quote,omitempty"`
 	CTABanner   *PageCTABannerSectionInput  `json:"cta_banner,omitempty"`
 	Documents   *PageDocumentsSectionInput  `json:"documents,omitempty"`
@@ -278,6 +291,10 @@ type PageGallerySectionResponse struct {
 	ViewMode             string `json:"view_mode"`
 	ShowTitleDescription bool   `json:"show_title_description"`
 	AutoScrollEnabled    bool   `json:"auto_scroll_enabled"`
+}
+
+type PageVideoSectionResponse struct {
+	VideoPackageID *int `json:"video_package_id,omitempty"`
 }
 
 type PageQuoteSectionResponse struct {
@@ -332,6 +349,7 @@ type PageSectionResponse struct {
 	Header      *PageHeaderSectionResponse     `gorm:"-" json:"header,omitempty"`
 	Typography  *PageTypographySectionResponse `gorm:"-" json:"typography,omitempty"`
 	Gallery     *PageGallerySectionResponse    `gorm:"-" json:"gallery,omitempty"`
+	Video       *PageVideoSectionResponse      `gorm:"-" json:"video,omitempty"`
 	Quote       *PageQuoteSectionResponse      `gorm:"-" json:"quote,omitempty"`
 	CTABanner   *PageCTABannerSectionResponse  `gorm:"-" json:"cta_banner,omitempty"`
 	Documents   *PageDocumentsSectionResponse  `gorm:"-" json:"documents,omitempty"`
@@ -382,6 +400,10 @@ func (PageSectionTypographyModule) TableName() string {
 
 func (PageSectionGalleryModule) TableName() string {
 	return "page_section_gallery_modules"
+}
+
+func (PageSectionVideoModule) TableName() string {
+	return "page_section_video_modules"
 }
 
 func (PageSectionQuoteModule) TableName() string {
