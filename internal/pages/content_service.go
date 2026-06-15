@@ -514,7 +514,20 @@ func normalizeJSONRawMessage(value JSONRawMessage) JSONRawMessage {
 
 func loadPageSectionHeaders(db *gorm.DB, sectionIDs []int) (map[int]PageSectionHeaderModule, error) {
 	var rows []PageSectionHeaderModule
-	if err := db.Where("page_section_id IN ?", sectionIDs).Find(&rows).Error; err != nil {
+	if err := db.Model(&PageSectionHeaderModule{}).
+		Select(`
+			page_section_id,
+			COALESCE(main_header_text, '') AS main_header_text,
+			COALESCE(sub_header_text, '') AS sub_header_text,
+			COALESCE(description, '') AS description,
+			COALESCE(NULLIF(TRIM(hierarchy), ''), 'h1_hero') AS hierarchy,
+			COALESCE(NULLIF(TRIM(text_align), ''), 'left') AS text_align,
+			COALESCE(underline_enabled, FALSE) AS underline_enabled,
+			created_at,
+			updated_at
+		`).
+		Where("page_section_id IN ?", sectionIDs).
+		Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 
@@ -527,7 +540,17 @@ func loadPageSectionHeaders(db *gorm.DB, sectionIDs []int) (map[int]PageSectionH
 
 func loadPageSectionTypography(db *gorm.DB, sectionIDs []int) (map[int]PageSectionTypographyModule, error) {
 	var rows []PageSectionTypographyModule
-	if err := db.Where("page_section_id IN ?", sectionIDs).Find(&rows).Error; err != nil {
+	if err := db.Model(&PageSectionTypographyModule{}).
+		Select(`
+			page_section_id,
+			COALESCE(body_html, '') AS body_html,
+			COALESCE(body_text, '') AS body_text,
+			COALESCE(NULLIF(TRIM(text_align), ''), 'left') AS text_align,
+			created_at,
+			updated_at
+		`).
+		Where("page_section_id IN ?", sectionIDs).
+		Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 
@@ -540,7 +563,18 @@ func loadPageSectionTypography(db *gorm.DB, sectionIDs []int) (map[int]PageSecti
 
 func loadPageSectionGalleries(db *gorm.DB, sectionIDs []int) (map[int]PageSectionGalleryModule, error) {
 	var rows []PageSectionGalleryModule
-	if err := db.Where("page_section_id IN ?", sectionIDs).Find(&rows).Error; err != nil {
+	if err := db.Model(&PageSectionGalleryModule{}).
+		Select(`
+			page_section_id,
+			gallery_id,
+			COALESCE(NULLIF(TRIM(view_mode), ''), 'grid') AS view_mode,
+			COALESCE(show_title_description, TRUE) AS show_title_description,
+			COALESCE(auto_scroll_enabled, FALSE) AS auto_scroll_enabled,
+			created_at,
+			updated_at
+		`).
+		Where("page_section_id IN ?", sectionIDs).
+		Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 
@@ -553,7 +587,15 @@ func loadPageSectionGalleries(db *gorm.DB, sectionIDs []int) (map[int]PageSectio
 
 func loadPageSectionVideos(db *gorm.DB, sectionIDs []int) (map[int]PageSectionVideoModule, error) {
 	var rows []PageSectionVideoModule
-	if err := db.Where("page_section_id IN ?", sectionIDs).Find(&rows).Error; err != nil {
+	if err := db.Model(&PageSectionVideoModule{}).
+		Select(`
+			page_section_id,
+			video_package_id,
+			created_at,
+			updated_at
+		`).
+		Where("page_section_id IN ?", sectionIDs).
+		Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 
@@ -566,7 +608,16 @@ func loadPageSectionVideos(db *gorm.DB, sectionIDs []int) (map[int]PageSectionVi
 
 func loadPageSectionQuotes(db *gorm.DB, sectionIDs []int) (map[int]PageSectionQuoteModule, error) {
 	var rows []PageSectionQuoteModule
-	if err := db.Where("page_section_id IN ?", sectionIDs).Find(&rows).Error; err != nil {
+	if err := db.Model(&PageSectionQuoteModule{}).
+		Select(`
+			page_section_id,
+			COALESCE(quote_content, '') AS quote_content,
+			COALESCE(attribution, '') AS attribution,
+			created_at,
+			updated_at
+		`).
+		Where("page_section_id IN ?", sectionIDs).
+		Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 
@@ -579,7 +630,21 @@ func loadPageSectionQuotes(db *gorm.DB, sectionIDs []int) (map[int]PageSectionQu
 
 func loadPageSectionCTABanners(db *gorm.DB, sectionIDs []int) (map[int]PageSectionCTABannerModule, error) {
 	var rows []PageSectionCTABannerModule
-	if err := db.Where("page_section_id IN ?", sectionIDs).Find(&rows).Error; err != nil {
+	if err := db.Model(&PageSectionCTABannerModule{}).
+		Select(`
+			page_section_id,
+			COALESCE(banner_heading, '') AS banner_heading,
+			COALESCE(banner_message, '') AS banner_message,
+			COALESCE(button_text, '') AS button_text,
+			COALESCE(button_url, '') AS button_url,
+			COALESCE(open_in_new_tab, FALSE) AS open_in_new_tab,
+			COALESCE(image_url, '') AS image_url,
+			COALESCE(image_object_key, '') AS image_object_key,
+			created_at,
+			updated_at
+		`).
+		Where("page_section_id IN ?", sectionIDs).
+		Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 
