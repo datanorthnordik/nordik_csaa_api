@@ -140,6 +140,74 @@ BEGIN
     END IF;
 END $$;
 
+CREATE TABLE IF NOT EXISTS video_packages (
+    id SERIAL PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    package_type VARCHAR(20) NOT NULL DEFAULT 'single',
+    created_by INT NULL,
+    updated_by INT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_video_packages_created_by
+        FOREIGN KEY (created_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT fk_video_packages_updated_by
+        FOREIGN KEY (updated_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT chk_video_packages_title_not_blank
+        CHECK (btrim(title) <> ''),
+
+    CONSTRAINT chk_video_packages_type
+        CHECK (package_type IN ('single', 'collection'))
+);
+
+CREATE TABLE IF NOT EXISTS video_package_items (
+    id SERIAL PRIMARY KEY,
+    video_package_id INT NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    youtube_url TEXT NOT NULL,
+    description TEXT,
+    teaser_image_url TEXT NOT NULL,
+    teaser_image_object_key TEXT,
+    sort_order INT NOT NULL DEFAULT 0,
+    created_by INT NULL,
+    updated_by INT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_video_package_items_package
+        FOREIGN KEY (video_package_id) REFERENCES video_packages(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_video_package_items_created_by
+        FOREIGN KEY (created_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT fk_video_package_items_updated_by
+        FOREIGN KEY (updated_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT chk_video_package_items_title_not_blank
+        CHECK (btrim(title) <> ''),
+
+    CONSTRAINT chk_video_package_items_youtube_url_not_blank
+        CHECK (btrim(youtube_url) <> ''),
+
+    CONSTRAINT chk_video_package_items_teaser_image_url_not_blank
+        CHECK (btrim(teaser_image_url) <> ''),
+
+    CONSTRAINT chk_video_package_items_sort_order
+        CHECK (sort_order >= 0)
+);
+
 CREATE TABLE IF NOT EXISTS pages (
     id SERIAL PRIMARY KEY,
     page_title VARCHAR(255) NOT NULL,
@@ -575,6 +643,16 @@ CREATE INDEX IF NOT EXISTS idx_gallery_images_uploaded_by ON gallery_images(uplo
 CREATE INDEX IF NOT EXISTS idx_gallery_images_file_url ON gallery_images(file_url);
 CREATE INDEX IF NOT EXISTS idx_gallery_images_gallery_sort ON gallery_images(gallery_id, sort_order, id);
 
+CREATE INDEX IF NOT EXISTS idx_video_packages_title ON video_packages(title);
+CREATE INDEX IF NOT EXISTS idx_video_packages_package_type ON video_packages(package_type);
+CREATE INDEX IF NOT EXISTS idx_video_packages_created_by ON video_packages(created_by);
+CREATE INDEX IF NOT EXISTS idx_video_packages_updated_by ON video_packages(updated_by);
+
+CREATE INDEX IF NOT EXISTS idx_video_package_items_package_id ON video_package_items(video_package_id);
+CREATE INDEX IF NOT EXISTS idx_video_package_items_created_by ON video_package_items(created_by);
+CREATE INDEX IF NOT EXISTS idx_video_package_items_updated_by ON video_package_items(updated_by);
+CREATE INDEX IF NOT EXISTS idx_video_package_items_package_sort ON video_package_items(video_package_id, sort_order, id);
+
 CREATE INDEX IF NOT EXISTS idx_pages_status ON pages(status);
 CREATE INDEX IF NOT EXISTS idx_pages_page_type ON pages(page_type);
 CREATE INDEX IF NOT EXISTS idx_pages_slug ON pages(url_slug);
@@ -627,6 +705,18 @@ EXECUTE FUNCTION set_updated_at();
 DROP TRIGGER IF EXISTS trg_galleries_set_updated_at ON galleries;
 CREATE TRIGGER trg_galleries_set_updated_at
 BEFORE UPDATE ON galleries
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_video_packages_set_updated_at ON video_packages;
+CREATE TRIGGER trg_video_packages_set_updated_at
+BEFORE UPDATE ON video_packages
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_video_package_items_set_updated_at ON video_package_items;
+CREATE TRIGGER trg_video_package_items_set_updated_at
+BEFORE UPDATE ON video_package_items
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
@@ -704,6 +794,28 @@ ON CONFLICT (menu_key) DO UPDATE
 SET name = EXCLUDED.name,
     updated_at = CURRENT_TIMESTAMP;
 
+INSERT INTO pages (
+    page_title,
+    url_slug,
+    page_type,
+    status,
+    hero_image_enabled,
+    seo_page_title,
+    seo_page_description,
+    last_modified
+)
+VALUES (
+    'Videos',
+    '/videos',
+    'module',
+    'published',
+    FALSE,
+    'Videos',
+    'Videos',
+    CURRENT_TIMESTAMP
+)
+ON CONFLICT (url_slug) DO NOTHING;
+
 -- Page content builder schema.
 -- Note: the 1:1 relation is stored as page_details.page_id instead of pages.page_detail_id
 -- to avoid circular foreign keys and orphaned detail rows.
@@ -767,6 +879,7 @@ CREATE TABLE IF NOT EXISTS page_sections (
         CHECK (section_type IN (
             'typography',
             'gallery',
+            'video',
             'document',
             'quote',
             'cta_banner',
@@ -966,6 +1079,23 @@ ALTER TABLE page_section_gallery_modules
     ALTER COLUMN auto_scroll_enabled SET DEFAULT FALSE,
     ALTER COLUMN auto_scroll_enabled SET NOT NULL;
 
+CREATE TABLE IF NOT EXISTS page_section_video_modules (
+    page_section_id INT PRIMARY KEY,
+    video_package_id INT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_page_section_video_modules_section
+        FOREIGN KEY (page_section_id) REFERENCES page_sections(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_page_section_video_modules_video_package
+        FOREIGN KEY (video_package_id) REFERENCES video_packages(id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT
+);
+
 CREATE TABLE IF NOT EXISTS page_section_quote_modules (
     page_section_id INT PRIMARY KEY,
     quote_content TEXT NOT NULL,
@@ -1037,6 +1167,21 @@ CREATE TABLE IF NOT EXISTS page_section_documents (
         CHECK (sort_order >= 0)
 );
 
+ALTER TABLE page_sections
+    DROP CONSTRAINT IF EXISTS chk_page_sections_type;
+
+ALTER TABLE page_sections
+    ADD CONSTRAINT chk_page_sections_type
+        CHECK (section_type IN (
+            'typography',
+            'gallery',
+            'video',
+            'document',
+            'quote',
+            'cta_banner',
+            'header'
+        ));
+
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -1095,6 +1240,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_documents_gcp_object_key
 
 CREATE INDEX IF NOT EXISTS idx_page_section_gallery_modules_gallery_id
     ON page_section_gallery_modules(gallery_id);
+
+CREATE INDEX IF NOT EXISTS idx_page_section_video_modules_video_package_id
+    ON page_section_video_modules(video_package_id);
 
 CREATE INDEX IF NOT EXISTS idx_page_section_documents_section_id
     ON page_section_documents(page_section_id);
@@ -1312,6 +1460,12 @@ BEFORE UPDATE ON page_section_gallery_modules
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_page_section_video_modules_set_updated_at ON page_section_video_modules;
+CREATE TRIGGER trg_page_section_video_modules_set_updated_at
+BEFORE UPDATE ON page_section_video_modules
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
 DROP TRIGGER IF EXISTS trg_page_section_quote_modules_set_updated_at ON page_section_quote_modules;
 CREATE TRIGGER trg_page_section_quote_modules_set_updated_at
 BEFORE UPDATE ON page_section_quote_modules
@@ -1353,6 +1507,12 @@ CREATE TRIGGER trg_page_section_gallery_modules_validate_type
 BEFORE INSERT OR UPDATE ON page_section_gallery_modules
 FOR EACH ROW
 EXECUTE FUNCTION validate_page_section_type('gallery');
+
+DROP TRIGGER IF EXISTS trg_page_section_video_modules_validate_type ON page_section_video_modules;
+CREATE TRIGGER trg_page_section_video_modules_validate_type
+BEFORE INSERT OR UPDATE ON page_section_video_modules
+FOR EACH ROW
+EXECUTE FUNCTION validate_page_section_type('video');
 
 DROP TRIGGER IF EXISTS trg_page_section_quote_modules_validate_type ON page_section_quote_modules;
 CREATE TRIGGER trg_page_section_quote_modules_validate_type
@@ -1399,6 +1559,12 @@ EXECUTE FUNCTION touch_page_detail_from_section_child();
 DROP TRIGGER IF EXISTS trg_page_section_gallery_modules_touch_page_detail ON page_section_gallery_modules;
 CREATE TRIGGER trg_page_section_gallery_modules_touch_page_detail
 AFTER INSERT OR UPDATE OR DELETE ON page_section_gallery_modules
+FOR EACH ROW
+EXECUTE FUNCTION touch_page_detail_from_section_child();
+
+DROP TRIGGER IF EXISTS trg_page_section_video_modules_touch_page_detail ON page_section_video_modules;
+CREATE TRIGGER trg_page_section_video_modules_touch_page_detail
+AFTER INSERT OR UPDATE OR DELETE ON page_section_video_modules
 FOR EACH ROW
 EXECUTE FUNCTION touch_page_detail_from_section_child();
 
