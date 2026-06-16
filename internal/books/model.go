@@ -107,52 +107,51 @@ type BookVersion struct {
 }
 
 type BookVersionSection struct {
-	ID               int        `gorm:"primaryKey;autoIncrement" json:"id"`
-	BookVersionID    int        `gorm:"not null;column:book_version_id" json:"book_version_id"`
-	Name             string     `gorm:"size:150;not null;column:name" json:"name"`
-	SourceStartPage  *int       `gorm:"column:source_start_page" json:"source_start_page,omitempty"`
-	SourceEndPage    *int       `gorm:"column:source_end_page" json:"source_end_page,omitempty"`
-	CurrentStartPage int        `gorm:"not null;default:0;column:current_start_page" json:"current_start_page"`
-	CurrentEndPage   int        `gorm:"not null;default:0;column:current_end_page" json:"current_end_page"`
-	SortOrder        int        `gorm:"not null;default:0;column:sort_order" json:"sort_order"`
-	CreatedAt        time.Time  `json:"created_at"`
-	UpdatedAt        time.Time  `json:"updated_at"`
+	ID               int       `gorm:"primaryKey;autoIncrement" json:"id"`
+	BookVersionID    int       `gorm:"not null;column:book_version_id" json:"book_version_id"`
+	Name             string    `gorm:"size:150;not null;column:name" json:"name"`
+	SourceStartPage  *int      `gorm:"column:source_start_page" json:"source_start_page,omitempty"`
+	SourceEndPage    *int      `gorm:"column:source_end_page" json:"source_end_page,omitempty"`
+	CurrentStartPage int       `gorm:"not null;default:0;column:current_start_page" json:"current_start_page"`
+	CurrentEndPage   int       `gorm:"not null;default:0;column:current_end_page" json:"current_end_page"`
+	SortOrder        int       `gorm:"not null;default:0;column:sort_order" json:"sort_order"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 type BookVersionField struct {
-	ID          int       `gorm:"primaryKey;autoIncrement" json:"id"`
-	BookVersionID int     `gorm:"not null;column:book_version_id" json:"book_version_id"`
-	FieldKey    string    `gorm:"size:150;not null;column:field_key" json:"field_key"`
-	Label       string    `gorm:"size:150;not null;column:label" json:"label"`
-	InputType   string    `gorm:"size:30;not null;column:input_type" json:"input_type"`
-	Placement   string    `gorm:"size:30;not null;column:placement" json:"placement"`
-	ShowLabel   bool      `gorm:"not null;default:true;column:show_label" json:"show_label"`
-	IsRequired  bool      `gorm:"not null;default:false;column:is_required" json:"is_required"`
-	IsEmailField bool     `gorm:"not null;default:false;column:is_email_field" json:"is_email_field"`
-	SortOrder   int       `gorm:"not null;default:0;column:sort_order" json:"sort_order"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID            int       `gorm:"primaryKey;autoIncrement" json:"id"`
+	BookVersionID int       `gorm:"not null;column:book_version_id" json:"book_version_id"`
+	Label         string    `gorm:"size:150;not null;column:label" json:"label"`
+	InputType     string    `gorm:"size:30;not null;column:input_type" json:"input_type"`
+	Placement     string    `gorm:"size:30;not null;column:placement" json:"placement"`
+	ShowLabel     bool      `gorm:"not null;default:true;column:show_label" json:"show_label"`
+	IsRequired    bool      `gorm:"not null;default:false;column:is_required" json:"is_required"`
+	IsEmailField  bool      `gorm:"not null;default:false;column:is_email_field" json:"is_email_field"`
+	SortOrder     int       `gorm:"not null;default:0;column:sort_order" json:"sort_order"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 type BookSubmission struct {
-	ID                int        `gorm:"primaryKey;autoIncrement" json:"id"`
-	BookID            int        `gorm:"not null;column:book_id" json:"book_id"`
-	BookVersionID     int        `gorm:"not null;column:book_version_id" json:"book_version_id"`
-	TargetSectionID   *int       `gorm:"column:target_section_id" json:"target_section_id,omitempty"`
-	NewSectionName    string     `gorm:"size:150;column:new_section_name" json:"new_section_name,omitempty"`
-	Status            string     `gorm:"size:20;not null;default:pending;column:status" json:"status"`
-	SubmitterEmail    string     `gorm:"size:255;column:submitter_email" json:"submitter_email,omitempty"`
-	ImageFileName     string     `gorm:"size:255;column:image_file_name" json:"image_file_name,omitempty"`
-	ImageFileURL      string     `gorm:"column:image_file_url" json:"image_file_url,omitempty"`
-	ImageStorageURI   string     `gorm:"column:image_storage_uri" json:"image_storage_uri,omitempty"`
-	ImageObjectKey    string     `gorm:"column:image_object_key" json:"image_object_key,omitempty"`
-	ImageMimeType     string     `gorm:"size:255;column:image_mime_type" json:"image_mime_type,omitempty"`
-	ImageFileSize     int64      `gorm:"column:image_file_size" json:"image_file_size,omitempty"`
-	ReviewedBy        *int       `gorm:"column:reviewed_by" json:"reviewed_by,omitempty"`
-	ReviewedAt        *time.Time `gorm:"column:reviewed_at" json:"reviewed_at,omitempty"`
-	RejectionReason   string     `gorm:"type:text;column:rejection_reason" json:"rejection_reason,omitempty"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
+	ID              int        `gorm:"primaryKey;autoIncrement" json:"id"`
+	BookID          int        `gorm:"not null;column:book_id" json:"book_id"`
+	BookVersionID   int        `gorm:"not null;column:book_version_id" json:"book_version_id"`
+	TargetSectionID *int       `gorm:"column:target_section_id" json:"target_section_id,omitempty"`
+	NewSectionName  string     `gorm:"size:150;column:new_section_name" json:"new_section_name,omitempty"`
+	Status          string     `gorm:"size:20;not null;default:pending;column:status" json:"status"`
+	SubmitterEmail  string     `gorm:"size:255;column:submitter_email" json:"submitter_email,omitempty"`
+	ImageFileName   string     `gorm:"size:255;column:image_file_name" json:"image_file_name,omitempty"`
+	ImageFileURL    string     `gorm:"column:image_file_url" json:"image_file_url,omitempty"`
+	ImageStorageURI string     `gorm:"column:image_storage_uri" json:"image_storage_uri,omitempty"`
+	ImageObjectKey  string     `gorm:"column:image_object_key" json:"image_object_key,omitempty"`
+	ImageMimeType   string     `gorm:"size:255;column:image_mime_type" json:"image_mime_type,omitempty"`
+	ImageFileSize   int64      `gorm:"column:image_file_size" json:"image_file_size,omitempty"`
+	ReviewedBy      *int       `gorm:"column:reviewed_by" json:"reviewed_by,omitempty"`
+	ReviewedAt      *time.Time `gorm:"column:reviewed_at" json:"reviewed_at,omitempty"`
+	RejectionReason string     `gorm:"type:text;column:rejection_reason" json:"rejection_reason,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 type BookSubmissionValue struct {
@@ -184,10 +183,10 @@ type SaveBookRequest struct {
 }
 
 type SaveBookVersionSectionRequest struct {
-	ID              int  `json:"id,omitempty"`
+	ID              int    `json:"id,omitempty"`
 	Name            string `json:"name"`
-	SourceStartPage *int `json:"source_start_page,omitempty"`
-	SourceEndPage   *int `json:"source_end_page,omitempty"`
+	SourceStartPage *int   `json:"source_start_page,omitempty"`
+	SourceEndPage   *int   `json:"source_end_page,omitempty"`
 }
 
 type SaveBookVersionFieldRequest struct {
@@ -222,18 +221,18 @@ type BookSubmissionValueInput struct {
 }
 
 type SaveBookSubmissionRequest struct {
-	TargetSectionID *int                      `json:"target_section_id,omitempty"`
-	NewSectionName  string                    `json:"new_section_name"`
+	TargetSectionID *int                       `json:"target_section_id,omitempty"`
+	NewSectionName  string                     `json:"new_section_name"`
 	FieldValues     []BookSubmissionValueInput `json:"field_values"`
-	Image           *BookUploadInput          `json:"image,omitempty"`
+	Image           *BookUploadInput           `json:"image,omitempty"`
 }
 
 type UpdateBookSubmissionRequest struct {
-	TargetSectionID *int                      `json:"target_section_id,omitempty"`
-	NewSectionName  string                    `json:"new_section_name"`
+	TargetSectionID *int                       `json:"target_section_id,omitempty"`
+	NewSectionName  string                     `json:"new_section_name"`
 	FieldValues     []BookSubmissionValueInput `json:"field_values"`
-	Image           *BookUploadInput          `json:"image,omitempty"`
-	RemoveImage     bool                      `json:"remove_image"`
+	Image           *BookUploadInput           `json:"image,omitempty"`
+	RemoveImage     bool                       `json:"remove_image"`
 }
 
 type ReviewBookSubmissionRequest struct {
@@ -242,15 +241,15 @@ type ReviewBookSubmissionRequest struct {
 }
 
 type BookSummaryResponse struct {
-	ID                   int                 `json:"id"`
-	Title                string              `json:"title"`
-	Description          string              `json:"description"`
-	ActiveVersionID      *int                `json:"active_version_id,omitempty"`
-	ActiveVersionNumber  *int                `json:"active_version_number,omitempty"`
-	VersionCount         int                 `json:"version_count"`
-	PendingSubmissionCount int               `json:"pending_submission_count"`
-	CreatedAt            time.Time           `json:"created_at"`
-	UpdatedAt            time.Time           `json:"updated_at"`
+	ID                     int       `json:"id"`
+	Title                  string    `json:"title"`
+	Description            string    `json:"description"`
+	ActiveVersionID        *int      `json:"active_version_id,omitempty"`
+	ActiveVersionNumber    *int      `json:"active_version_number,omitempty"`
+	VersionCount           int       `json:"version_count"`
+	PendingSubmissionCount int       `json:"pending_submission_count"`
+	CreatedAt              time.Time `json:"created_at"`
+	UpdatedAt              time.Time `json:"updated_at"`
 }
 
 type BookMutationResponse struct {
@@ -275,14 +274,14 @@ type BookVersionSummaryResponse struct {
 }
 
 type BookDetailResponse struct {
-	ID                      int                         `json:"id"`
-	Title                   string                      `json:"title"`
-	Description             string                      `json:"description"`
-	AdminNotificationEmails []string                    `json:"admin_notification_emails"`
-	ActiveVersionID         *int                        `json:"active_version_id,omitempty"`
+	ID                      int                          `json:"id"`
+	Title                   string                       `json:"title"`
+	Description             string                       `json:"description"`
+	AdminNotificationEmails []string                     `json:"admin_notification_emails"`
+	ActiveVersionID         *int                         `json:"active_version_id,omitempty"`
 	Versions                []BookVersionSummaryResponse `json:"versions"`
-	CreatedAt               time.Time                   `json:"created_at"`
-	UpdatedAt               time.Time                   `json:"updated_at"`
+	CreatedAt               time.Time                    `json:"created_at"`
+	UpdatedAt               time.Time                    `json:"updated_at"`
 }
 
 type BookVersionSectionResponse struct {
@@ -328,21 +327,21 @@ type BookSubmissionValueResponse struct {
 }
 
 type BookSubmissionResponse struct {
-	ID               int                         `json:"id"`
-	BookID           int                         `json:"book_id"`
-	BookVersionID    int                         `json:"book_version_id"`
-	TargetSectionID  *int                        `json:"target_section_id,omitempty"`
-	TargetSectionName string                     `json:"target_section_name"`
-	NewSectionName   string                      `json:"new_section_name"`
-	Status           string                      `json:"status"`
-	SubmitterEmail   string                      `json:"submitter_email"`
-	Image            *BookSubmissionImageResponse `json:"image,omitempty"`
-	FieldValues      []BookSubmissionValueResponse `json:"field_values"`
-	ReviewedBy       *int                        `json:"reviewed_by,omitempty"`
-	ReviewedAt       *time.Time                  `json:"reviewed_at,omitempty"`
-	RejectionReason  string                      `json:"rejection_reason"`
-	CreatedAt        time.Time                   `json:"created_at"`
-	UpdatedAt        time.Time                   `json:"updated_at"`
+	ID                int                           `json:"id"`
+	BookID            int                           `json:"book_id"`
+	BookVersionID     int                           `json:"book_version_id"`
+	TargetSectionID   *int                          `json:"target_section_id,omitempty"`
+	TargetSectionName string                        `json:"target_section_name"`
+	NewSectionName    string                        `json:"new_section_name"`
+	Status            string                        `json:"status"`
+	SubmitterEmail    string                        `json:"submitter_email"`
+	Image             *BookSubmissionImageResponse  `json:"image,omitempty"`
+	FieldValues       []BookSubmissionValueResponse `json:"field_values"`
+	ReviewedBy        *int                          `json:"reviewed_by,omitempty"`
+	ReviewedAt        *time.Time                    `json:"reviewed_at,omitempty"`
+	RejectionReason   string                        `json:"rejection_reason"`
+	CreatedAt         time.Time                     `json:"created_at"`
+	UpdatedAt         time.Time                     `json:"updated_at"`
 }
 
 type BookVersionDetailResponse struct {
@@ -398,16 +397,16 @@ type ListBookSubmissionsFilter struct {
 }
 
 type PublicBookSummaryResponse struct {
-	ID              int   `json:"id"`
+	ID              int    `json:"id"`
 	Title           string `json:"title"`
 	Description     string `json:"description"`
 	ActiveVersionID *int   `json:"active_version_id,omitempty"`
 }
 
 type PublicBookDetailResponse struct {
-	ID          int                         `json:"id"`
-	Title       string                      `json:"title"`
-	Description string                      `json:"description"`
+	ID          int                             `json:"id"`
+	Title       string                          `json:"title"`
+	Description string                          `json:"description"`
 	Version     PublicBookActiveVersionResponse `json:"version"`
 }
 
