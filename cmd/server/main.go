@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"nordikcsaaapi/internal/apiresponse"
 	"nordikcsaaapi/internal/auth"
+	"nordikcsaaapi/internal/books"
 	"nordikcsaaapi/internal/config"
 	"nordikcsaaapi/internal/events"
 	"nordikcsaaapi/internal/gallery"
@@ -14,6 +15,7 @@ import (
 	"nordikcsaaapi/internal/pages"
 	"nordikcsaaapi/internal/press"
 	"nordikcsaaapi/internal/resources"
+	"nordikcsaaapi/internal/util"
 	"nordikcsaaapi/internal/video"
 	"os"
 	"time"
@@ -90,6 +92,13 @@ func main() {
 	resources.RegisterRoutes(r, resourceService, auth.RequireBearerAuth(&cfg))
 	memorialService := &memorial.MemorialService{DB: db, BucketName: cfg.DriveBucketName, BucketPrefix: cfg.DriveBucketPrefix}
 	memorial.RegisterRoutes(r, memorialService, auth.RequireBearerAuth(&cfg))
+	bookService := &books.BookService{
+		DB:           db,
+		BucketName:   cfg.DriveBucketName,
+		BucketPrefix: cfg.DriveBucketPrefix,
+		EmailSender:  util.NewEmailService(&cfg),
+	}
+	books.RegisterRoutes(r, bookService, auth.RequireBearerAuth(&cfg))
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})

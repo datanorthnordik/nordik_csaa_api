@@ -2255,4 +2255,350 @@ BEFORE UPDATE ON password_reset_otps
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
+-- Books Module Migration
+-- Prerequisites: table users(id) must already exist.
+
+CREATE TABLE IF NOT EXISTS books (
+    id SERIAL PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    admin_notification_emails TEXT[] NOT NULL DEFAULT '{}',
+    active_version_id INT,
+    created_by INT,
+    updated_by INT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT chk_books_title_not_blank
+        CHECK (BTRIM(title) <> ''),
+
+    CONSTRAINT fk_books_created_by
+        FOREIGN KEY (created_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT fk_books_updated_by
+        FOREIGN KEY (updated_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_books_title
+    ON books(title);
+
+CREATE INDEX IF NOT EXISTS idx_books_active_version_id
+    ON books(active_version_id);
+
+CREATE INDEX IF NOT EXISTS idx_books_updated_at
+    ON books(updated_at DESC);
+
+DROP TRIGGER IF EXISTS trg_books_set_updated_at ON books;
+CREATE TRIGGER trg_books_set_updated_at
+BEFORE UPDATE ON books
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+CREATE TABLE IF NOT EXISTS book_versions (
+    id SERIAL PRIMARY KEY,
+    book_id INT NOT NULL,
+    version_number INT NOT NULL,
+    source_page_count INT NOT NULL,
+    content_template_page_number INT NOT NULL,
+    section_template_page_number INT NOT NULL,
+    allow_page_image BOOLEAN NOT NULL DEFAULT FALSE,
+    allow_new_sections BOOLEAN NOT NULL DEFAULT TRUE,
+    layout_settings JSONB NOT NULL DEFAULT '{}'::jsonb,
+    source_pdf_file_name VARCHAR(255) NOT NULL,
+    source_pdf_file_url TEXT,
+    source_pdf_storage_uri TEXT,
+    source_pdf_object_key TEXT,
+    generated_pdf_file_name VARCHAR(255) NOT NULL DEFAULT '',
+    generated_pdf_file_url TEXT,
+    generated_pdf_storage_uri TEXT,
+    generated_pdf_object_key TEXT,
+    last_generated_at TIMESTAMP,
+    created_by INT,
+    updated_by INT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_book_versions_book
+        FOREIGN KEY (book_id) REFERENCES books(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_book_versions_created_by
+        FOREIGN KEY (created_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT fk_book_versions_updated_by
+        FOREIGN KEY (updated_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT chk_book_versions_version_number_positive
+        CHECK (version_number > 0),
+
+    CONSTRAINT chk_book_versions_source_page_count_positive
+        CHECK (source_page_count > 0),
+
+    CONSTRAINT chk_book_versions_content_template_page_number_positive
+        CHECK (content_template_page_number > 0),
+
+    CONSTRAINT chk_book_versions_section_template_page_number_positive
+        CHECK (section_template_page_number > 0),
+
+    CONSTRAINT chk_book_versions_template_pages_within_source
+        CHECK (
+            content_template_page_number <= source_page_count
+            AND section_template_page_number <= source_page_count
+        ),
+
+    CONSTRAINT chk_book_versions_source_pdf_file_name_not_blank
+        CHECK (BTRIM(source_pdf_file_name) <> '')
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_book_versions_book_id_version_number
+    ON book_versions(book_id, version_number);
+
+CREATE INDEX IF NOT EXISTS idx_book_versions_book_id
+    ON book_versions(book_id);
+
+CREATE INDEX IF NOT EXISTS idx_book_versions_last_generated_at
+    ON book_versions(last_generated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_book_versions_updated_at
+    ON book_versions(updated_at DESC);
+
+DROP TRIGGER IF EXISTS trg_book_versions_set_updated_at ON book_versions;
+CREATE TRIGGER trg_book_versions_set_updated_at
+BEFORE UPDATE ON book_versions
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+ALTER TABLE books
+    DROP CONSTRAINT IF EXISTS fk_books_active_version;
+
+ALTER TABLE books
+    ADD CONSTRAINT fk_books_active_version
+        FOREIGN KEY (active_version_id) REFERENCES book_versions(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL;
+
+CREATE TABLE IF NOT EXISTS book_version_sections (
+    id SERIAL PRIMARY KEY,
+    book_version_id INT NOT NULL,
+    name VARCHAR(150) NOT NULL,
+    source_start_page INT,
+    source_end_page INT,
+    current_start_page INT NOT NULL DEFAULT 0,
+    current_end_page INT NOT NULL DEFAULT 0,
+    sort_order INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_book_version_sections_version
+        FOREIGN KEY (book_version_id) REFERENCES book_versions(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT chk_book_version_sections_name_not_blank
+        CHECK (BTRIM(name) <> ''),
+
+    CONSTRAINT chk_book_version_sections_source_pages_valid
+        CHECK (
+            (
+                source_start_page IS NULL
+                AND source_end_page IS NULL
+            )
+            OR
+            (
+                source_start_page IS NOT NULL
+                AND source_end_page IS NOT NULL
+                AND source_start_page > 0
+                AND source_end_page >= source_start_page
+            )
+        ),
+
+    CONSTRAINT chk_book_version_sections_current_pages_valid
+        CHECK (
+            current_start_page >= 0
+            AND current_end_page >= 0
+            AND current_end_page >= current_start_page
+        ),
+
+    CONSTRAINT chk_book_version_sections_sort_order_non_negative
+        CHECK (sort_order >= 0)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_book_version_sections_name
+    ON book_version_sections(book_version_id, LOWER(name));
+
+CREATE INDEX IF NOT EXISTS idx_book_version_sections_version_sort
+    ON book_version_sections(book_version_id, sort_order, id);
+
+CREATE INDEX IF NOT EXISTS idx_book_version_sections_current_pages
+    ON book_version_sections(book_version_id, current_start_page, current_end_page);
+
+DROP TRIGGER IF EXISTS trg_book_version_sections_set_updated_at ON book_version_sections;
+CREATE TRIGGER trg_book_version_sections_set_updated_at
+BEFORE UPDATE ON book_version_sections
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+CREATE TABLE IF NOT EXISTS book_version_fields (
+    id SERIAL PRIMARY KEY,
+    book_version_id INT NOT NULL,
+    label VARCHAR(150) NOT NULL,
+    input_type VARCHAR(30) NOT NULL,
+    placement VARCHAR(30) NOT NULL,
+    show_label BOOLEAN NOT NULL DEFAULT TRUE,
+    is_required BOOLEAN NOT NULL DEFAULT FALSE,
+    is_email_field BOOLEAN NOT NULL DEFAULT FALSE,
+    sort_order INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_book_version_fields_version
+        FOREIGN KEY (book_version_id) REFERENCES book_versions(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT chk_book_version_fields_label_not_blank
+        CHECK (BTRIM(label) <> ''),
+
+    CONSTRAINT chk_book_version_fields_input_type
+        CHECK (input_type IN ('single_line', 'rich_text')),
+
+    CONSTRAINT chk_book_version_fields_placement
+        CHECK (placement IN ('heading', 'body')),
+
+    CONSTRAINT chk_book_version_fields_sort_order_non_negative
+        CHECK (sort_order >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_book_version_fields_version_sort
+    ON book_version_fields(book_version_id, sort_order, id);
+
+DROP TRIGGER IF EXISTS trg_book_version_fields_set_updated_at ON book_version_fields;
+CREATE TRIGGER trg_book_version_fields_set_updated_at
+BEFORE UPDATE ON book_version_fields
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+CREATE TABLE IF NOT EXISTS book_submissions (
+    id SERIAL PRIMARY KEY,
+    book_id INT NOT NULL,
+    book_version_id INT NOT NULL,
+    target_section_id INT,
+    new_section_name VARCHAR(150),
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    submitter_email VARCHAR(255),
+    image_file_name VARCHAR(255),
+    image_file_url TEXT,
+    image_storage_uri TEXT,
+    image_object_key TEXT,
+    image_mime_type VARCHAR(255),
+    image_file_size BIGINT,
+    reviewed_by INT,
+    reviewed_at TIMESTAMP,
+    rejection_reason TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_book_submissions_book
+        FOREIGN KEY (book_id) REFERENCES books(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_book_submissions_version
+        FOREIGN KEY (book_version_id) REFERENCES book_versions(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_book_submissions_target_section
+        FOREIGN KEY (target_section_id) REFERENCES book_version_sections(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT fk_book_submissions_reviewed_by
+        FOREIGN KEY (reviewed_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT chk_book_submissions_status
+        CHECK (status IN ('pending', 'approved', 'rejected')),
+
+    CONSTRAINT chk_book_submissions_target_required
+        CHECK (
+            target_section_id IS NOT NULL
+            OR BTRIM(COALESCE(new_section_name, '')) <> ''
+        ),
+
+    CONSTRAINT chk_book_submissions_new_section_name
+        CHECK (
+            new_section_name IS NULL
+            OR BTRIM(new_section_name) <> ''
+        ),
+
+    CONSTRAINT chk_book_submissions_image_file_size
+        CHECK (image_file_size IS NULL OR image_file_size >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_book_submissions_book_id
+    ON book_submissions(book_id);
+
+CREATE INDEX IF NOT EXISTS idx_book_submissions_version_id
+    ON book_submissions(book_version_id);
+
+CREATE INDEX IF NOT EXISTS idx_book_submissions_status
+    ON book_submissions(status);
+
+CREATE INDEX IF NOT EXISTS idx_book_submissions_target_section_id
+    ON book_submissions(target_section_id);
+
+CREATE INDEX IF NOT EXISTS idx_book_submissions_created_at
+    ON book_submissions(created_at DESC);
+
+DROP TRIGGER IF EXISTS trg_book_submissions_set_updated_at ON book_submissions;
+CREATE TRIGGER trg_book_submissions_set_updated_at
+BEFORE UPDATE ON book_submissions
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+CREATE TABLE IF NOT EXISTS book_submission_values (
+    id SERIAL PRIMARY KEY,
+    book_submission_id INT NOT NULL,
+    book_field_id INT NOT NULL,
+    value TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_book_submission_values_submission
+        FOREIGN KEY (book_submission_id) REFERENCES book_submissions(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_book_submission_values_field
+        FOREIGN KEY (book_field_id) REFERENCES book_version_fields(id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_book_submission_values_submission_field
+    ON book_submission_values(book_submission_id, book_field_id);
+
+CREATE INDEX IF NOT EXISTS idx_book_submission_values_submission_id
+    ON book_submission_values(book_submission_id);
+
+CREATE INDEX IF NOT EXISTS idx_book_submission_values_field_id
+    ON book_submission_values(book_field_id);
+
+DROP TRIGGER IF EXISTS trg_book_submission_values_set_updated_at ON book_submission_values;
+CREATE TRIGGER trg_book_submission_values_set_updated_at
+BEFORE UPDATE ON book_submission_values
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
 COMMIT;
