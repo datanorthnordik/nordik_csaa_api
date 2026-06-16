@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/smtp"
 	"nordikcsaaapi/internal/config"
+	"strings"
 )
 
 // EmailService handles sending emails
@@ -30,12 +31,13 @@ func (es *EmailService) SendPasswordResetEmail(email, otp, firstName string) err
 	return nil
 }
 
+// SendEmail sends a plain text email synchronously to one or more recipients.
+func (es *EmailService) SendEmail(to []string, subject string, body string) error {
+	return es.sendPlainTextEmailSync(to, subject, body)
+}
+
 // sendPasswordResetEmailSync sends the email synchronously (internal use)
 func (es *EmailService) sendPasswordResetEmailSync(email, otp, firstName string) error {
-	// Gmail SMTP configuration
-	smtpHost := "smtp.gmail.com"
-	smtpPort := "587"
-
 	// Create the email body
 	subject := "Password Reset OTP"
 	body := fmt.Sprintf(`
@@ -56,21 +58,52 @@ Best regards,
 Nordik Team
 `, firstName, otp)
 
-	// Prepare the email message
-	msg := []byte("To: " + email + "\r\n" +
-		"Subject: " + subject + "\r\n" +
+	return es.sendPlainTextEmailSync([]string{email}, subject, body)
+}
+
+func (es *EmailService) sendPlainTextEmailSync(to []string, subject string, body string) error {
+	recipients := sanitizeEmailRecipients(to)
+	if len(recipients) == 0 {
+		return fmt.Errorf("at least one email recipient is required")
+	}
+	if es == nil || es.Config == nil {
+		return fmt.Errorf("email configuration is not available")
+	}
+	if strings.TrimSpace(es.Config.GmailUser) == "" || strings.TrimSpace(es.Config.GmailPass) == "" {
+		return fmt.Errorf("gmail smtp credentials are not configured")
+	}
+
+	smtpHost := "smtp.gmail.com"
+	smtpPort := "587"
+
+	msg := []byte("To: " + strings.Join(recipients, ", ") + "\r\n" +
+		"Subject: " + strings.TrimSpace(subject) + "\r\n" +
 		"Content-Type: text/plain; charset=UTF-8\r\n" +
 		"\r\n" +
 		body)
 
-	// Set up authentication
 	auth := smtp.PlainAuth("", es.Config.GmailUser, es.Config.GmailPass, smtpHost)
-
-	// Send the email
-	err := smtp.SendMail(smtpHost+":"+smtpPort, auth, es.Config.GmailUser, []string{email}, msg)
+	err := smtp.SendMail(smtpHost+":"+smtpPort, auth, es.Config.GmailUser, recipients, msg)
 	if err != nil {
 		return fmt.Errorf("failed to send email: %w", err)
 	}
 
 	return nil
+}
+
+func sanitizeEmailRecipients(to []string) []string {
+	seen := make(map[string]struct{}, len(to))
+	recipients := make([]string, 0, len(to))
+	for _, item := range to {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, exists := seen[item]; exists {
+			continue
+		}
+		seen[item] = struct{}{}
+		recipients = append(recipients, item)
+	}
+	return recipients
 }
