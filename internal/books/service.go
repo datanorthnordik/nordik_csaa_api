@@ -1340,11 +1340,17 @@ func normalizeSaveBookVersionRequest(req SaveBookVersionRequest, requireSourcePD
 	}
 
 	emailFieldCount := 0
+	seenFieldLabels := make(map[string]int, len(req.Fields))
 	for idx := range req.Fields {
 		req.Fields[idx].Label = strings.TrimSpace(req.Fields[idx].Label)
 		if req.Fields[idx].Label == "" {
 			return req, fmt.Errorf("fields[%d].label is required", idx)
 		}
+		normalizedLabel := strings.ToLower(req.Fields[idx].Label)
+		if existingIdx, exists := seenFieldLabels[normalizedLabel]; exists {
+			return req, fmt.Errorf("fields[%d].label duplicates fields[%d].label", idx, existingIdx)
+		}
+		seenFieldLabels[normalizedLabel] = idx
 		req.Fields[idx].InputType = strings.TrimSpace(strings.ToLower(req.Fields[idx].InputType))
 		req.Fields[idx].Placement = strings.TrimSpace(strings.ToLower(req.Fields[idx].Placement))
 		if !isAllowedBookValue(req.Fields[idx].InputType, BookFieldInputTypeSingleLine, BookFieldInputTypeRichText) {
@@ -1354,6 +1360,9 @@ func normalizeSaveBookVersionRequest(req SaveBookVersionRequest, requireSourcePD
 			return req, fmt.Errorf("fields[%d].placement is invalid", idx)
 		}
 		if req.Fields[idx].IsEmailField {
+			if req.Fields[idx].InputType != BookFieldInputTypeSingleLine {
+				return req, fmt.Errorf("fields[%d].input_type must be single_line when is_email_field is true", idx)
+			}
 			emailFieldCount++
 		}
 	}
@@ -2067,6 +2076,17 @@ func (s *BookService) validateStoredVersionFields(tx *gorm.DB, versionID int) er
 	}
 
 	emailFieldCount := 0
+	seenLabels := make(map[string]int, len(fields))
+	for idx, field := range fields {
+		normalizedLabel := strings.ToLower(strings.TrimSpace(field.Label))
+		if normalizedLabel == "" {
+			return fmt.Errorf("field at position %d is missing a label", idx+1)
+		}
+		if previousIdx, exists := seenLabels[normalizedLabel]; exists {
+			return fmt.Errorf("field %q duplicates field at position %d", field.Label, previousIdx+1)
+		}
+		seenLabels[normalizedLabel] = idx
+	}
 	for _, field := range fields {
 		if !isAllowedBookValue(field.InputType, BookFieldInputTypeSingleLine, BookFieldInputTypeRichText) {
 			return fmt.Errorf("field %q has an invalid input_type", field.Label)
@@ -2075,6 +2095,9 @@ func (s *BookService) validateStoredVersionFields(tx *gorm.DB, versionID int) er
 			return fmt.Errorf("field %q has an invalid placement", field.Label)
 		}
 		if field.IsEmailField {
+			if field.InputType != BookFieldInputTypeSingleLine {
+				return fmt.Errorf("field %q must use input_type %q when is_email_field is true", field.Label, BookFieldInputTypeSingleLine)
+			}
 			emailFieldCount++
 		}
 	}
