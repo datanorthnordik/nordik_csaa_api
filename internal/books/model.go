@@ -330,6 +330,7 @@ type BookSubmissionResponse struct {
 	ID                int                           `json:"id"`
 	BookID            int                           `json:"book_id"`
 	BookVersionID     int                           `json:"book_version_id"`
+	BookVersionNumber int                           `json:"book_version_number"`
 	TargetSectionID   *int                          `json:"target_section_id,omitempty"`
 	TargetSectionName string                        `json:"target_section_name"`
 	NewSectionName    string                        `json:"new_section_name"`
@@ -374,9 +375,11 @@ type BookVersionMutationResponse struct {
 }
 
 type BookSubmissionMutationResponse struct {
-	ID        int       `json:"id"`
-	Status    string    `json:"status"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID                int       `json:"id"`
+	Status            string    `json:"status"`
+	BookVersionID     int       `json:"book_version_id,omitempty"`
+	BookVersionNumber int       `json:"book_version_number,omitempty"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 type BookPDFContent struct {

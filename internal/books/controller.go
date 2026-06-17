@@ -275,6 +275,25 @@ func (bc *BookController) ListBookSubmissions(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"submissions": resp})
 }
 
+func (bc *BookController) GetBookSubmission(c *gin.Context) {
+	bookID, ok := bookPathInt(c, "bookId")
+	if !ok {
+		return
+	}
+	submissionID, ok := bookPathInt(c, "submissionId")
+	if !ok {
+		return
+	}
+
+	resp, err := bc.BookService.GetBookSubmission(bookID, submissionID)
+	if err != nil {
+		writeBookError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"submission": resp})
+}
+
 func (bc *BookController) CreatePublicSubmission(c *gin.Context) {
 	bookID, ok := bookPathInt(c, "bookId")
 	if !ok {

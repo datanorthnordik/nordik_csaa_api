@@ -368,21 +368,6 @@ func (s *BookService) CreateBookVersion(bookID int, req SaveBookVersionRequest) 
 		return nil, err
 	}
 
-	if req.ActivateImmediately {
-		book.ActiveVersionID = cloneInt(version.ID)
-		book.UpdatedBy = cloneIntPointer(req.UpdatedBy)
-		if err := tx.Model(&Book{}).
-			Where("id = ?", book.ID).
-			Updates(map[string]any{
-				"active_version_id": book.ActiveVersionID,
-				"updated_by":        nullableInt(req.UpdatedBy),
-			}).Error; err != nil {
-			tx.Rollback()
-			s.cleanupUploadedBookObjects(uploadedObjects)
-			return nil, err
-		}
-	}
-
 	if err := tx.Commit().Error; err != nil {
 		s.cleanupUploadedBookObjects(uploadedObjects)
 		return nil, err
@@ -496,21 +481,6 @@ func (s *BookService) UpdateBookVersion(bookID int, versionID int, req SaveBookV
 		tx.Rollback()
 		s.cleanupUploadedBookObjects(uploadedObjects)
 		return nil, err
-	}
-
-	if req.ActivateImmediately {
-		book.ActiveVersionID = cloneInt(version.ID)
-		book.UpdatedBy = cloneIntPointer(req.UpdatedBy)
-		if err := tx.Model(&Book{}).
-			Where("id = ?", book.ID).
-			Updates(map[string]any{
-				"active_version_id": version.ID,
-				"updated_by":        nullableInt(req.UpdatedBy),
-			}).Error; err != nil {
-			tx.Rollback()
-			s.cleanupUploadedBookObjects(uploadedObjects)
-			return nil, err
-		}
 	}
 
 	if err := tx.Commit().Error; err != nil {
@@ -794,6 +764,26 @@ func (s *BookService) ListBookSubmissions(bookID int, filter ListBookSubmissions
 	return s.listSubmissionResponses(bookID, filter, "created_at DESC, id DESC")
 }
 
+func (s *BookService) GetBookSubmission(bookID int, submissionID int) (*BookSubmissionResponse, error) {
+	if s.DB == nil {
+		return nil, ErrStoreUnavailable
+	}
+
+	submission, err := s.getSubmissionModel(bookID, submissionID)
+	if err != nil {
+		return nil, err
+	}
+
+	responses, err := s.buildSubmissionResponses([]BookSubmission{*submission})
+	if err != nil {
+		return nil, err
+	}
+	if len(responses) == 0 {
+		return nil, ErrBookSubmissionNotFound
+	}
+	return &responses[0], nil
+}
+
 func (s *BookService) CreatePublicSubmission(bookID int, req SaveBookSubmissionRequest) (*BookSubmissionMutationResponse, error) {
 	if s.DB == nil {
 		return nil, ErrStoreUnavailable
@@ -1041,7 +1031,13 @@ func (s *BookService) ApproveBookSubmission(bookID int, submissionID int, userID
 		return nil, errors.New("submission is already approved")
 	}
 
-	version, err := s.getBookVersionModelTx(tx, bookID, submission.BookVersionID)
+	baseVersion, err := s.getBookVersionModelTx(tx, bookID, submission.BookVersionID)
+	if err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+
+	version, sectionIDMap, fieldIDMap, err := s.cloneVersionForApprovedSubmission(tx, baseVersion, userID)
 	if err != nil {
 		tx.Rollback()
 		return nil, err
@@ -1083,13 +1079,22 @@ func (s *BookService) ApproveBookSubmission(bookID int, submissionID int, userID
 			return nil, err
 		}
 		submission.TargetSectionID = cloneInt(section.ID)
+	} else {
+		mappedSectionID, ok := sectionIDMap[*submission.TargetSectionID]
+		if !ok {
+			tx.Rollback()
+			return nil, errors.New("target section does not belong to the approved book version")
+		}
+		submission.TargetSectionID = cloneInt(mappedSectionID)
+	}
+
+	if err := s.remapSubmissionValueFieldIDsTx(tx, submission.ID, fieldIDMap); err != nil {
+		tx.Rollback()
+		return nil, err
 	}
 
 	now := booksNowFunc()
-	submission.Status = BookSubmissionStatusApproved
-	submission.ReviewedBy = cloneIntPointer(userID)
-	submission.ReviewedAt = &now
-	submission.RejectionReason = ""
+	*submission = buildApprovedSubmissionRecord(*submission, version.ID, submission.TargetSectionID, userID, now)
 
 	if err := tx.Save(submission).Error; err != nil {
 		tx.Rollback()
@@ -1105,9 +1110,11 @@ func (s *BookService) ApproveBookSubmission(bookID int, submissionID int, userID
 	}
 
 	return &BookSubmissionMutationResponse{
-		ID:        submission.ID,
-		Status:    submission.Status,
-		UpdatedAt: submission.UpdatedAt,
+		ID:                submission.ID,
+		Status:            submission.Status,
+		BookVersionID:     submission.BookVersionID,
+		BookVersionNumber: version.VersionNumber,
+		UpdatedAt:         submission.UpdatedAt,
 	}, nil
 }
 
@@ -1584,6 +1591,10 @@ func (s *BookService) listSubmissionResponses(bookID int, filter ListBookSubmiss
 	if err := query.Order(orderClause).Find(&submissions).Error; err != nil {
 		return nil, err
 	}
+	return s.buildSubmissionResponses(submissions)
+}
+
+func (s *BookService) buildSubmissionResponses(submissions []BookSubmission) ([]BookSubmissionResponse, error) {
 	if len(submissions) == 0 {
 		return []BookSubmissionResponse{}, nil
 	}
@@ -1602,7 +1613,7 @@ func (s *BookService) listSubmissionResponses(bookID int, filter ListBookSubmiss
 	versionIDs := mapKeysInt(versionIDSet)
 	sectionIDs := mapKeysInt(sectionIDSet)
 
-	fieldsByVersion, err := s.fieldMapByVersion(versionIDs)
+	versionsByID, err := s.versionMapByID(versionIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -1674,14 +1685,16 @@ func (s *BookService) listSubmissionResponses(bookID int, filter ListBookSubmiss
 			}
 		}
 
-		if _, ok := fieldsByVersion[submission.BookVersionID]; !ok {
-			fieldsByVersion[submission.BookVersionID] = []BookVersionField{}
+		versionNumber := 0
+		if version, ok := versionsByID[submission.BookVersionID]; ok {
+			versionNumber = version.VersionNumber
 		}
 
 		resp = append(resp, BookSubmissionResponse{
 			ID:                submission.ID,
 			BookID:            submission.BookID,
 			BookVersionID:     submission.BookVersionID,
+			BookVersionNumber: versionNumber,
 			TargetSectionID:   cloneIntPointer(submission.TargetSectionID),
 			TargetSectionName: targetSectionName,
 			NewSectionName:    strings.TrimSpace(submission.NewSectionName),
@@ -2315,6 +2328,131 @@ func (s *BookService) sectionMapByID(sectionIDs []int) (map[int]BookVersionSecti
 		resp[section.ID] = section
 	}
 	return resp, nil
+}
+
+func (s *BookService) versionMapByID(versionIDs []int) (map[int]BookVersion, error) {
+	resp := make(map[int]BookVersion)
+	if len(versionIDs) == 0 {
+		return resp, nil
+	}
+	var versions []BookVersion
+	if err := s.DB.Where("id IN ?", versionIDs).Find(&versions).Error; err != nil {
+		return nil, err
+	}
+	for _, version := range versions {
+		resp[version.ID] = version
+	}
+	return resp, nil
+}
+
+func (s *BookService) cloneVersionForApprovedSubmission(tx *gorm.DB, sourceVersion *BookVersion, userID *int) (*BookVersion, map[int]int, map[int]int, error) {
+	versionNumber, err := s.nextVersionNumber(tx, sourceVersion.BookID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	nextVersion := buildApprovedVersionClone(*sourceVersion, versionNumber, userID)
+	clonedVersion := &nextVersion
+	if err := tx.Create(clonedVersion).Error; err != nil {
+		return nil, nil, nil, err
+	}
+
+	sections, err := s.listVersionSectionModelsTx(tx, sourceVersion.ID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	sectionIDMap := make(map[int]int, len(sections))
+	for _, section := range sections {
+		clonedSection := BookVersionSection{
+			BookVersionID:    clonedVersion.ID,
+			Name:             section.Name,
+			SourceStartPage:  cloneIntPointer(section.SourceStartPage),
+			SourceEndPage:    cloneIntPointer(section.SourceEndPage),
+			CurrentStartPage: 0,
+			CurrentEndPage:   0,
+			SortOrder:        section.SortOrder,
+		}
+		if err := tx.Create(&clonedSection).Error; err != nil {
+			return nil, nil, nil, err
+		}
+		sectionIDMap[section.ID] = clonedSection.ID
+	}
+
+	fields, err := s.listVersionFieldModelsTx(tx, sourceVersion.ID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	fieldIDMap := make(map[int]int, len(fields))
+	for _, field := range fields {
+		clonedField := BookVersionField{
+			BookVersionID: clonedVersion.ID,
+			Label:         field.Label,
+			InputType:     field.InputType,
+			Placement:     field.Placement,
+			ShowLabel:     field.ShowLabel,
+			IsRequired:    field.IsRequired,
+			IsEmailField:  field.IsEmailField,
+			SortOrder:     field.SortOrder,
+		}
+		if err := tx.Create(&clonedField).Error; err != nil {
+			return nil, nil, nil, err
+		}
+		fieldIDMap[field.ID] = clonedField.ID
+	}
+
+	return clonedVersion, sectionIDMap, fieldIDMap, nil
+}
+
+func (s *BookService) remapSubmissionValueFieldIDsTx(tx *gorm.DB, submissionID int, fieldIDMap map[int]int) error {
+	if len(fieldIDMap) == 0 {
+		return nil
+	}
+
+	var values []BookSubmissionValue
+	if err := tx.Where("book_submission_id = ?", submissionID).Find(&values).Error; err != nil {
+		return err
+	}
+	for _, value := range values {
+		nextFieldID, ok := fieldIDMap[value.BookFieldID]
+		if !ok {
+			return fmt.Errorf("field id %d does not belong to the approved book version", value.BookFieldID)
+		}
+		if err := tx.Model(&BookSubmissionValue{}).
+			Where("id = ?", value.ID).
+			Update("book_field_id", nextFieldID).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func buildApprovedVersionClone(sourceVersion BookVersion, versionNumber int, userID *int) BookVersion {
+	return BookVersion{
+		BookID:                    sourceVersion.BookID,
+		VersionNumber:             versionNumber,
+		SourcePageCount:           sourceVersion.SourcePageCount,
+		ContentTemplatePageNumber: sourceVersion.ContentTemplatePageNumber,
+		SectionTemplatePageNumber: sourceVersion.SectionTemplatePageNumber,
+		AllowPageImage:            sourceVersion.AllowPageImage,
+		AllowNewSections:          sourceVersion.AllowNewSections,
+		LayoutSettings:            cloneRawJSON(sourceVersion.LayoutSettings),
+		SourcePDFFileName:         sourceVersion.SourcePDFFileName,
+		SourcePDFFileURL:          sourceVersion.SourcePDFFileURL,
+		SourcePDFStorageURI:       sourceVersion.SourcePDFStorageURI,
+		SourcePDFObjectKey:        sourceVersion.SourcePDFObjectKey,
+		CreatedBy:                 cloneIntPointer(userID),
+		UpdatedBy:                 cloneIntPointer(userID),
+	}
+}
+
+func buildApprovedSubmissionRecord(submission BookSubmission, versionID int, targetSectionID *int, userID *int, reviewedAt time.Time) BookSubmission {
+	submission.BookVersionID = versionID
+	submission.TargetSectionID = cloneIntPointer(targetSectionID)
+	submission.Status = BookSubmissionStatusApproved
+	submission.ReviewedBy = cloneIntPointer(userID)
+	submission.ReviewedAt = cloneTimePointer(&reviewedAt)
+	submission.RejectionReason = ""
+	return submission
 }
 
 func (s *BookService) storeVersionPDF(bookID int, versionNumber int, folder string, input BookUploadInput) (storedBookUpload, error) {
