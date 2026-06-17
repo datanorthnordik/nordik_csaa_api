@@ -64,6 +64,22 @@ func TestNormalizeSaveBookVersionRequestRejectsRichTextEmailField(t *testing.T) 
 	}
 }
 
+func TestValidateManualInitialVersionNumberAllowsOnlyFirstVersion(t *testing.T) {
+	t.Helper()
+
+	if err := validateManualInitialVersionNumber(1); err != nil {
+		t.Fatalf("expected version number 1 to be allowed, got %v", err)
+	}
+
+	err := validateManualInitialVersionNumber(2)
+	if err == nil {
+		t.Fatal("expected manual creation to fail after the first version")
+	}
+	if !strings.Contains(err.Error(), "initial version can only be created manually once per book") {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}
+
 func TestBuildApprovedVersionCloneCopiesSourceVersionIntoDraft(t *testing.T) {
 	t.Helper()
 

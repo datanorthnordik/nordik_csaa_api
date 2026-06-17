@@ -300,6 +300,10 @@ func (s *BookService) CreateBookVersion(bookID int, req SaveBookVersionRequest) 
 		tx.Rollback()
 		return nil, err
 	}
+	if err := validateManualInitialVersionNumber(versionNumber); err != nil {
+		tx.Rollback()
+		return nil, err
+	}
 
 	uploadedObjects := make([]string, 0, 2)
 	version := BookVersion{
@@ -367,6 +371,15 @@ func (s *BookService) CreateBookVersion(bookID int, req SaveBookVersionRequest) 
 		s.cleanupUploadedBookObjects(uploadedObjects)
 		return nil, err
 	}
+	if err := tx.Model(&Book{}).Where("id = ?", book.ID).Updates(map[string]any{
+		"active_version_id": version.ID,
+		"updated_by":        nullableInt(req.UpdatedBy),
+	}).Error; err != nil {
+		tx.Rollback()
+		s.cleanupUploadedBookObjects(uploadedObjects)
+		return nil, err
+	}
+	book.ActiveVersionID = cloneInt(version.ID)
 
 	if err := tx.Commit().Error; err != nil {
 		s.cleanupUploadedBookObjects(uploadedObjects)
@@ -386,117 +399,7 @@ func (s *BookService) UpdateBookVersion(bookID int, versionID int, req SaveBookV
 	if s.DB == nil {
 		return nil, ErrStoreUnavailable
 	}
-
-	req, err := normalizeSaveBookVersionRequest(req, false)
-	if err != nil {
-		return nil, err
-	}
-
-	tx := s.DB.Begin()
-	if tx.Error != nil {
-		return nil, tx.Error
-	}
-	defer rollbackBooksOnPanic(tx)
-
-	book, err := s.getBookModelTx(tx, bookID)
-	if err != nil {
-		tx.Rollback()
-		return nil, err
-	}
-	version, err := s.getBookVersionModelTx(tx, bookID, versionID)
-	if err != nil {
-		tx.Rollback()
-		return nil, err
-	}
-
-	uploadedObjects := make([]string, 0, 2)
-	cleanupObjects := make([]storedBookObjectRef, 0, 2)
-	oldSource := storedBookObjectRef{ObjectKey: version.SourcePDFObjectKey, FileURL: version.SourcePDFStorageURI}
-	oldGenerated := storedBookObjectRef{ObjectKey: version.GeneratedPDFObjectKey, FileURL: version.GeneratedPDFStorageURI}
-
-	version.SourcePageCount = req.SourcePageCount
-	version.ContentTemplatePageNumber = req.ContentTemplatePageNumber
-	version.SectionTemplatePageNumber = req.SectionTemplatePageNumber
-	version.AllowPageImage = req.AllowPageImage
-	version.AllowNewSections = req.AllowNewSections
-	version.LayoutSettings = cloneRawJSON(req.LayoutSettings)
-	version.UpdatedBy = cloneIntPointer(req.UpdatedBy)
-
-	if req.SourcePDF != nil && !isEmptyBookUploadInput(*req.SourcePDF) {
-		sourceUpload, storeErr := s.storeVersionPDF(bookID, version.VersionNumber, "source", *req.SourcePDF)
-		if storeErr != nil {
-			tx.Rollback()
-			return nil, storeErr
-		}
-		if sourceUpload.UploadedKey != "" {
-			uploadedObjects = append(uploadedObjects, sourceUpload.UploadedKey)
-		}
-		version.SourcePDFFileName = sourceUpload.FileName
-		version.SourcePDFFileURL = sourceUpload.FileURL
-		version.SourcePDFStorageURI = sourceUpload.StorageURI
-		version.SourcePDFObjectKey = sourceUpload.ObjectKey
-		if shouldCleanupStoredBookObject(oldSource, storedBookObjectRef{ObjectKey: version.SourcePDFObjectKey, FileURL: version.SourcePDFStorageURI}) {
-			cleanupObjects = append(cleanupObjects, oldSource)
-		}
-	}
-
-	if req.GeneratedPDF != nil && !isEmptyBookUploadInput(*req.GeneratedPDF) {
-		generatedUpload, storeErr := s.storeVersionPDF(bookID, version.VersionNumber, "generated", *req.GeneratedPDF)
-		if storeErr != nil {
-			tx.Rollback()
-			s.cleanupUploadedBookObjects(uploadedObjects)
-			return nil, storeErr
-		}
-		if generatedUpload.UploadedKey != "" {
-			uploadedObjects = append(uploadedObjects, generatedUpload.UploadedKey)
-		}
-		version.GeneratedPDFFileName = generatedUpload.FileName
-		version.GeneratedPDFFileURL = generatedUpload.FileURL
-		version.GeneratedPDFStorageURI = generatedUpload.StorageURI
-		version.GeneratedPDFObjectKey = generatedUpload.ObjectKey
-		now := booksNowFunc()
-		version.LastGeneratedAt = &now
-		if shouldCleanupStoredBookObject(oldGenerated, storedBookObjectRef{ObjectKey: version.GeneratedPDFObjectKey, FileURL: version.GeneratedPDFStorageURI}) {
-			cleanupObjects = append(cleanupObjects, oldGenerated)
-		}
-	}
-
-	if err := tx.Save(version).Error; err != nil {
-		tx.Rollback()
-		s.cleanupUploadedBookObjects(uploadedObjects)
-		return nil, err
-	}
-
-	if err := s.syncVersionSections(tx, version.ID, version.SourcePageCount, req.Sections); err != nil {
-		tx.Rollback()
-		s.cleanupUploadedBookObjects(uploadedObjects)
-		return nil, err
-	}
-	if err := s.syncVersionFields(tx, version.ID, req.Fields); err != nil {
-		tx.Rollback()
-		s.cleanupUploadedBookObjects(uploadedObjects)
-		return nil, err
-	}
-	if err := s.recomputeVersionSectionPageBounds(tx, *version); err != nil {
-		tx.Rollback()
-		s.cleanupUploadedBookObjects(uploadedObjects)
-		return nil, err
-	}
-
-	if err := tx.Commit().Error; err != nil {
-		s.cleanupUploadedBookObjects(uploadedObjects)
-		return nil, err
-	}
-
-	s.cleanupStoredBookObjectsBestEffort(cleanupObjects)
-
-	return &BookVersionMutationResponse{
-		ID:            version.ID,
-		BookID:        version.BookID,
-		VersionNumber: version.VersionNumber,
-		IsActive:      book.ActiveVersionID != nil && *book.ActiveVersionID == version.ID,
-		UpdatedAt:     version.UpdatedAt,
-	}, nil
+	return nil, errors.New("book version setup can only be created once and cannot be edited later")
 }
 
 func (s *BookService) SetActiveVersion(bookID int, versionID int, userID *int) (*BookVersionMutationResponse, error) {
@@ -1104,6 +1007,13 @@ func (s *BookService) ApproveBookSubmission(bookID int, submissionID int, userID
 		tx.Rollback()
 		return nil, err
 	}
+	if err := tx.Model(&Book{}).Where("id = ?", bookID).Updates(map[string]any{
+		"active_version_id": version.ID,
+		"updated_by":        nullableInt(userID),
+	}).Error; err != nil {
+		tx.Rollback()
+		return nil, err
+	}
 
 	if err := tx.Commit().Error; err != nil {
 		return nil, err
@@ -1273,6 +1183,13 @@ func normalizeSaveBookRequest(req SaveBookRequest) (SaveBookRequest, error) {
 		return req, errors.New("title is required")
 	}
 	return req, nil
+}
+
+func validateManualInitialVersionNumber(nextVersionNumber int) error {
+	if nextVersionNumber != 1 {
+		return errors.New("initial version can only be created manually once per book")
+	}
+	return nil
 }
 
 func normalizeSaveBookVersionRequest(req SaveBookVersionRequest, requireSourcePDF bool) (SaveBookVersionRequest, error) {
