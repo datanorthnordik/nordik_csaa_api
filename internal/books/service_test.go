@@ -174,6 +174,19 @@ func TestBuildApprovedSubmissionRecordMovesSubmissionToDraftVersion(t *testing.T
 	}
 }
 
+func TestNullableStringPointerTrimsBlankToNil(t *testing.T) {
+	t.Helper()
+
+	if value := nullableStringPointer("   "); value != nil {
+		t.Fatalf("expected blank string to normalize to nil, got %#v", value)
+	}
+
+	value := nullableStringPointer(" Main Recipes ")
+	if value == nil || *value != "Main Recipes" {
+		t.Fatalf("expected trimmed string pointer, got %#v", value)
+	}
+}
+
 func validSaveBookVersionRequest() SaveBookVersionRequest {
 	return SaveBookVersionRequest{
 		SourcePageCount:           10,

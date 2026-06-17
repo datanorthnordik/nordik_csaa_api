@@ -733,7 +733,7 @@ func (s *BookService) CreatePublicSubmission(bookID int, req SaveBookSubmissionR
 		BookID:          book.ID,
 		BookVersionID:   version.ID,
 		TargetSectionID: cloneIntPointer(req.TargetSectionID),
-		NewSectionName:  req.NewSectionName,
+		NewSectionName:  nullableStringPointer(req.NewSectionName),
 		Status:          BookSubmissionStatusPending,
 		SubmitterEmail:  submitterEmail,
 	}
@@ -852,7 +852,7 @@ func (s *BookService) UpdateBookSubmission(bookID int, submissionID int, req Upd
 	cleanupObjects := make([]storedBookObjectRef, 0, 1)
 
 	submission.TargetSectionID = cloneIntPointer(createLikeReq.TargetSectionID)
-	submission.NewSectionName = createLikeReq.NewSectionName
+	submission.NewSectionName = nullableStringPointer(createLikeReq.NewSectionName)
 	submission.SubmitterEmail = submitterEmail
 
 	switch {
@@ -951,7 +951,7 @@ func (s *BookService) ApproveBookSubmission(bookID int, submissionID int, userID
 			tx.Rollback()
 			return nil, errors.New("new sections are not enabled for this book version")
 		}
-		if strings.TrimSpace(submission.NewSectionName) == "" {
+		if strings.TrimSpace(stringValue(submission.NewSectionName)) == "" {
 			tx.Rollback()
 			return nil, errors.New("new_section_name is required")
 		}
@@ -961,7 +961,7 @@ func (s *BookService) ApproveBookSubmission(bookID int, submissionID int, userID
 			tx.Rollback()
 			return nil, listErr
 		}
-		if sectionNameExists(sections, submission.NewSectionName, 0) {
+		if sectionNameExists(sections, stringValue(submission.NewSectionName), 0) {
 			tx.Rollback()
 			return nil, errors.New("new_section_name already exists")
 		}
@@ -974,7 +974,7 @@ func (s *BookService) ApproveBookSubmission(bookID int, submissionID int, userID
 
 		section := BookVersionSection{
 			BookVersionID: version.ID,
-			Name:          strings.TrimSpace(submission.NewSectionName),
+			Name:          strings.TrimSpace(stringValue(submission.NewSectionName)),
 			SortOrder:     nextSortOrder,
 		}
 		if err := tx.Create(&section).Error; err != nil {
@@ -1585,7 +1585,7 @@ func (s *BookService) buildSubmissionResponses(submissions []BookSubmission) ([]
 			fieldResponses = []BookSubmissionValueResponse{}
 		}
 
-		targetSectionName := strings.TrimSpace(submission.NewSectionName)
+		targetSectionName := strings.TrimSpace(stringValue(submission.NewSectionName))
 		if submission.TargetSectionID != nil {
 			if section, ok := sectionsByID[*submission.TargetSectionID]; ok {
 				targetSectionName = strings.TrimSpace(section.Name)
@@ -1614,7 +1614,7 @@ func (s *BookService) buildSubmissionResponses(submissions []BookSubmission) ([]
 			BookVersionNumber: versionNumber,
 			TargetSectionID:   cloneIntPointer(submission.TargetSectionID),
 			TargetSectionName: targetSectionName,
-			NewSectionName:    strings.TrimSpace(submission.NewSectionName),
+			NewSectionName:    strings.TrimSpace(stringValue(submission.NewSectionName)),
 			Status:            submission.Status,
 			SubmitterEmail:    strings.TrimSpace(submission.SubmitterEmail),
 			Image:             image,
@@ -2592,7 +2592,7 @@ func (s *BookService) sendAdminNewSubmissionEmail(book *Book, version *BookVersi
 		return
 	}
 
-	sectionName := strings.TrimSpace(submission.NewSectionName)
+	sectionName := strings.TrimSpace(stringValue(submission.NewSectionName))
 	if submission.TargetSectionID != nil {
 		for _, section := range sections {
 			if section.ID == *submission.TargetSectionID {
@@ -2894,11 +2894,26 @@ func nullableString(value string) any {
 	return value
 }
 
+func nullableStringPointer(value string) *string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
 func nullableInt64Value(value int64) any {
 	if value <= 0 {
 		return nil
 	}
 	return value
+}
+
+func stringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func chooseNonEmpty(values ...string) string {

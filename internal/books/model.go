@@ -138,7 +138,7 @@ type BookSubmission struct {
 	BookID          int        `gorm:"not null;column:book_id" json:"book_id"`
 	BookVersionID   int        `gorm:"not null;column:book_version_id" json:"book_version_id"`
 	TargetSectionID *int       `gorm:"column:target_section_id" json:"target_section_id,omitempty"`
-	NewSectionName  string     `gorm:"size:150;column:new_section_name" json:"new_section_name,omitempty"`
+	NewSectionName  *string    `gorm:"size:150;column:new_section_name" json:"new_section_name,omitempty"`
 	Status          string     `gorm:"size:20;not null;default:pending;column:status" json:"status"`
 	SubmitterEmail  string     `gorm:"size:255;column:submitter_email" json:"submitter_email,omitempty"`
 	ImageFileName   string     `gorm:"size:255;column:image_file_name" json:"image_file_name,omitempty"`
