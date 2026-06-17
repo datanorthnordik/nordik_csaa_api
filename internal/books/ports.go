@@ -14,6 +14,7 @@ type BookServicePort interface {
 	GetGeneratedPDFContent(bookID int, versionID int) (*BookPDFContent, error)
 	GetSubmissionImageContent(bookID int, submissionID int) (*SubmissionImageContent, error)
 	ListBookSubmissions(bookID int, filter ListBookSubmissionsFilter) ([]BookSubmissionResponse, error)
+	GetBookSubmission(bookID int, submissionID int) (*BookSubmissionResponse, error)
 	CreatePublicSubmission(bookID int, req SaveBookSubmissionRequest) (*BookSubmissionMutationResponse, error)
 	UpdateBookSubmission(bookID int, submissionID int, req UpdateBookSubmissionRequest) (*BookSubmissionMutationResponse, error)
 	ApproveBookSubmission(bookID int, submissionID int, userID *int) (*BookSubmissionMutationResponse, error)
