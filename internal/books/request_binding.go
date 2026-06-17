@@ -1,7 +1,9 @@
 package books
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"strings"
 
 	"nordikcsaaapi/internal/apiresponse"
@@ -54,7 +56,7 @@ func bindSaveBookVersionRequest(c *gin.Context) (SaveBookVersionRequest, bool) {
 		return req, true
 	}
 
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := bindJSONPayloadCompat(c, &req); err != nil {
 		apiresponse.WriteBindingError(c, err, req)
 		return req, false
 	}
@@ -85,7 +87,7 @@ func bindGeneratedPDFUploadRequest(c *gin.Context) (BookUploadInput, bool) {
 		}
 		applyBookUploadedFile(&req.GeneratedPDF, file)
 	} else {
-		if err := c.ShouldBindJSON(&req); err != nil {
+		if err := bindJSONPayloadCompat(c, &req); err != nil {
 			apiresponse.WriteBindingError(c, err, req)
 			return BookUploadInput{}, false
 		}
@@ -123,7 +125,7 @@ func bindSaveBookSubmissionRequest(c *gin.Context) (SaveBookSubmissionRequest, b
 		return req, true
 	}
 
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := bindJSONPayloadCompat(c, &req); err != nil {
 		apiresponse.WriteBindingError(c, err, req)
 		return req, false
 	}
@@ -155,7 +157,7 @@ func bindUpdateBookSubmissionRequest(c *gin.Context) (UpdateBookSubmissionReques
 		return req, true
 	}
 
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := bindJSONPayloadCompat(c, &req); err != nil {
 		apiresponse.WriteBindingError(c, err, req)
 		return req, false
 	}
@@ -190,4 +192,39 @@ func applyBookUploadedFile(dst **BookUploadInput, file *httpapi.UploadedFile) {
 	}
 
 	(*dst).Content = append([]byte(nil), file.Data...)
+}
+
+// Accept both the canonical JSON body and the legacy UI shape that nests it under payload.
+func bindJSONPayloadCompat(c *gin.Context, dst any) error {
+	if c == nil || c.Request == nil {
+		return io.EOF
+	}
+
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return err
+	}
+	c.Request.Body = io.NopCloser(bytes.NewReader(body))
+
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 {
+		return io.EOF
+	}
+
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(trimmed, &envelope); err != nil {
+		return err
+	}
+
+	payload := trimmed
+	if rawPayload, ok := envelope["payload"]; ok && len(bytes.TrimSpace(rawPayload)) > 0 {
+		var nested string
+		if err := json.Unmarshal(rawPayload, &nested); err == nil {
+			payload = []byte(nested)
+		} else {
+			payload = rawPayload
+		}
+	}
+
+	return json.Unmarshal(payload, dst)
 }
