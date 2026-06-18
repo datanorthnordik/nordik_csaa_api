@@ -179,23 +179,35 @@ func TestBuildApprovedVersionCloneCopiesSourceVersionIntoDraft(t *testing.T) {
 
 	reviewerID := 99
 	source := BookVersion{
-		ID:                        1,
-		BookID:                    7,
-		VersionNumber:             1,
-		SourcePageCount:           10,
-		ContentTemplatePageNumber: 9,
-		SectionTemplatePageNumber: 3,
-		AllowPageImage:            true,
-		AllowNewSections:          true,
-		LayoutSettings:            json.RawMessage(`{"layout":"default"}`),
-		SourcePDFFileName:         "source.pdf",
-		SourcePDFFileURL:          "https://storage.example/source.pdf",
-		SourcePDFStorageURI:       "gs://bucket/books/book-7/source.pdf",
-		SourcePDFObjectKey:        "books/book-7/source.pdf",
-		GeneratedPDFFileName:      "generated.pdf",
-		GeneratedPDFFileURL:       "https://storage.example/generated.pdf",
-		GeneratedPDFStorageURI:    "gs://bucket/books/book-7/generated.pdf",
-		GeneratedPDFObjectKey:     "books/book-7/generated.pdf",
+		ID:                                1,
+		BookID:                            7,
+		VersionNumber:                     1,
+		SourcePageCount:                   10,
+		ContentTemplatePageNumber:         9,
+		SectionTemplatePageNumber:         3,
+		AllowPageImage:                    true,
+		AllowNewSections:                  true,
+		LayoutSettings:                    json.RawMessage(`{"layout":"default"}`),
+		SourcePDFFileName:                 "source.pdf",
+		SourcePDFFileURL:                  "https://storage.example/source.pdf",
+		SourcePDFStorageURI:               "gs://bucket/books/book-7/source.pdf",
+		SourcePDFObjectKey:                "books/book-7/source.pdf",
+		ContentTemplatePDFFileName:        "content-template.pdf",
+		ContentTemplatePDFFileURL:         "https://storage.example/content-template.pdf",
+		ContentTemplatePDFStorageURI:      "gs://bucket/books/book-7/content-template.pdf",
+		ContentTemplatePDFObjectKey:       "books/book-7/content-template.pdf",
+		ContentImageTemplatePDFFileName:   "content-image-template.pdf",
+		ContentImageTemplatePDFFileURL:    "https://storage.example/content-image-template.pdf",
+		ContentImageTemplatePDFStorageURI: "gs://bucket/books/book-7/content-image-template.pdf",
+		ContentImageTemplatePDFObjectKey:  "books/book-7/content-image-template.pdf",
+		SectionTemplatePDFFileName:        "section-template.pdf",
+		SectionTemplatePDFFileURL:         "https://storage.example/section-template.pdf",
+		SectionTemplatePDFStorageURI:      "gs://bucket/books/book-7/section-template.pdf",
+		SectionTemplatePDFObjectKey:       "books/book-7/section-template.pdf",
+		GeneratedPDFFileName:              "generated.pdf",
+		GeneratedPDFFileURL:               "https://storage.example/generated.pdf",
+		GeneratedPDFStorageURI:            "gs://bucket/books/book-7/generated.pdf",
+		GeneratedPDFObjectKey:             "books/book-7/generated.pdf",
 	}
 	cloned := buildApprovedVersionClone(source, 2, &reviewerID)
 
@@ -213,6 +225,15 @@ func TestBuildApprovedVersionCloneCopiesSourceVersionIntoDraft(t *testing.T) {
 	}
 	if cloned.SourcePDFObjectKey != source.SourcePDFObjectKey {
 		t.Fatalf("expected source pdf object key %q, got %q", source.SourcePDFObjectKey, cloned.SourcePDFObjectKey)
+	}
+	if cloned.ContentTemplatePDFObjectKey != source.ContentTemplatePDFObjectKey {
+		t.Fatalf("expected content template object key %q, got %q", source.ContentTemplatePDFObjectKey, cloned.ContentTemplatePDFObjectKey)
+	}
+	if cloned.ContentImageTemplatePDFObjectKey != source.ContentImageTemplatePDFObjectKey {
+		t.Fatalf("expected content image template object key %q, got %q", source.ContentImageTemplatePDFObjectKey, cloned.ContentImageTemplatePDFObjectKey)
+	}
+	if cloned.SectionTemplatePDFObjectKey != source.SectionTemplatePDFObjectKey {
+		t.Fatalf("expected section template object key %q, got %q", source.SectionTemplatePDFObjectKey, cloned.SectionTemplatePDFObjectKey)
 	}
 	if cloned.GeneratedPDFFileName != "" || cloned.GeneratedPDFFileURL != "" || cloned.GeneratedPDFObjectKey != "" {
 		t.Fatalf("expected generated pdf metadata to be reset, got %#v", cloned)

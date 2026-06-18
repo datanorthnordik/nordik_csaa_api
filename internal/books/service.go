@@ -341,6 +341,7 @@ func (s *BookService) CreateBookVersion(bookID int, req SaveBookVersionRequest) 
 	if contentTemplateUpload.UploadedKey != "" {
 		uploadedObjects = append(uploadedObjects, contentTemplateUpload.UploadedKey)
 	}
+	applyStoredContentTemplatePDFUpload(&version, contentTemplateUpload)
 
 	contentImageTemplateUpload, err := s.storeOptionalVersionPDF(bookID, versionNumber, "content-image-template", req.ContentImageTemplatePDF)
 	if err != nil {
@@ -351,6 +352,7 @@ func (s *BookService) CreateBookVersion(bookID int, req SaveBookVersionRequest) 
 	if contentImageTemplateUpload.UploadedKey != "" {
 		uploadedObjects = append(uploadedObjects, contentImageTemplateUpload.UploadedKey)
 	}
+	applyStoredContentImageTemplatePDFUpload(&version, contentImageTemplateUpload)
 
 	sectionTemplateUpload, err := s.storeOptionalVersionPDF(bookID, versionNumber, "section-template", req.SectionTemplatePDF)
 	if err != nil {
@@ -361,6 +363,7 @@ func (s *BookService) CreateBookVersion(bookID int, req SaveBookVersionRequest) 
 	if sectionTemplateUpload.UploadedKey != "" {
 		uploadedObjects = append(uploadedObjects, sectionTemplateUpload.UploadedKey)
 	}
+	applyStoredSectionTemplatePDFUpload(&version, sectionTemplateUpload)
 
 	sourcePDFContent, err := s.resolveBookUploadContent(req.SourcePDF, sourceUpload, ErrBookPDFNotFound)
 	if err != nil {
@@ -1114,7 +1117,7 @@ func (s *BookService) ApproveBookSubmission(bookID int, submissionID int, userID
 		tx.Rollback()
 		return nil, err
 	}
-	generationTemplates, err := s.loadGenerationTemplatesFromLayout(version.LayoutSettings)
+	generationTemplates, err := s.loadGenerationTemplatesForVersion(version)
 	if err != nil {
 		tx.Rollback()
 		return nil, err
@@ -2602,20 +2605,32 @@ func (s *BookService) remapSubmissionValueFieldIDsTx(tx *gorm.DB, submissionID i
 
 func buildApprovedVersionClone(sourceVersion BookVersion, versionNumber int, userID *int) BookVersion {
 	return BookVersion{
-		BookID:                    sourceVersion.BookID,
-		VersionNumber:             versionNumber,
-		SourcePageCount:           sourceVersion.SourcePageCount,
-		ContentTemplatePageNumber: sourceVersion.ContentTemplatePageNumber,
-		SectionTemplatePageNumber: sourceVersion.SectionTemplatePageNumber,
-		AllowPageImage:            sourceVersion.AllowPageImage,
-		AllowNewSections:          sourceVersion.AllowNewSections,
-		LayoutSettings:            cloneRawJSON(sourceVersion.LayoutSettings),
-		SourcePDFFileName:         sourceVersion.SourcePDFFileName,
-		SourcePDFFileURL:          sourceVersion.SourcePDFFileURL,
-		SourcePDFStorageURI:       sourceVersion.SourcePDFStorageURI,
-		SourcePDFObjectKey:        sourceVersion.SourcePDFObjectKey,
-		CreatedBy:                 cloneIntPointer(userID),
-		UpdatedBy:                 cloneIntPointer(userID),
+		BookID:                            sourceVersion.BookID,
+		VersionNumber:                     versionNumber,
+		SourcePageCount:                   sourceVersion.SourcePageCount,
+		ContentTemplatePageNumber:         sourceVersion.ContentTemplatePageNumber,
+		SectionTemplatePageNumber:         sourceVersion.SectionTemplatePageNumber,
+		AllowPageImage:                    sourceVersion.AllowPageImage,
+		AllowNewSections:                  sourceVersion.AllowNewSections,
+		LayoutSettings:                    cloneRawJSON(sourceVersion.LayoutSettings),
+		SourcePDFFileName:                 sourceVersion.SourcePDFFileName,
+		SourcePDFFileURL:                  sourceVersion.SourcePDFFileURL,
+		SourcePDFStorageURI:               sourceVersion.SourcePDFStorageURI,
+		SourcePDFObjectKey:                sourceVersion.SourcePDFObjectKey,
+		ContentTemplatePDFFileName:        sourceVersion.ContentTemplatePDFFileName,
+		ContentTemplatePDFFileURL:         sourceVersion.ContentTemplatePDFFileURL,
+		ContentTemplatePDFStorageURI:      sourceVersion.ContentTemplatePDFStorageURI,
+		ContentTemplatePDFObjectKey:       sourceVersion.ContentTemplatePDFObjectKey,
+		ContentImageTemplatePDFFileName:   sourceVersion.ContentImageTemplatePDFFileName,
+		ContentImageTemplatePDFFileURL:    sourceVersion.ContentImageTemplatePDFFileURL,
+		ContentImageTemplatePDFStorageURI: sourceVersion.ContentImageTemplatePDFStorageURI,
+		ContentImageTemplatePDFObjectKey:  sourceVersion.ContentImageTemplatePDFObjectKey,
+		SectionTemplatePDFFileName:        sourceVersion.SectionTemplatePDFFileName,
+		SectionTemplatePDFFileURL:         sourceVersion.SectionTemplatePDFFileURL,
+		SectionTemplatePDFStorageURI:      sourceVersion.SectionTemplatePDFStorageURI,
+		SectionTemplatePDFObjectKey:       sourceVersion.SectionTemplatePDFObjectKey,
+		CreatedBy:                         cloneIntPointer(userID),
+		UpdatedBy:                         cloneIntPointer(userID),
 	}
 }
 
@@ -2728,17 +2743,48 @@ func (s *BookService) resolveGenerationTemplateContents(contentInput *BookUpload
 	}, nil
 }
 
-func (s *BookService) loadGenerationTemplatesFromLayout(raw json.RawMessage) (bookGenerationTemplates, error) {
-	layout := parseBookLayoutSettings(raw)
-	contentTemplate, err := s.downloadBookTemplatePDF(layout.ContentPage.TemplatePDF)
+func (s *BookService) loadGenerationTemplatesForVersion(version *BookVersion) (bookGenerationTemplates, error) {
+	if version == nil {
+		return bookGenerationTemplates{}, nil
+	}
+	layout := parseBookLayoutSettings(version.LayoutSettings)
+	contentRef := bookTemplatePDFForStoredColumns(
+		version.ContentTemplatePDFFileName,
+		version.ContentTemplatePDFFileURL,
+		version.ContentTemplatePDFStorageURI,
+		version.ContentTemplatePDFObjectKey,
+	)
+	if !hasBookTemplatePDF(contentRef) {
+		contentRef = layout.ContentPage.TemplatePDF
+	}
+	contentImageRef := bookTemplatePDFForStoredColumns(
+		version.ContentImageTemplatePDFFileName,
+		version.ContentImageTemplatePDFFileURL,
+		version.ContentImageTemplatePDFStorageURI,
+		version.ContentImageTemplatePDFObjectKey,
+	)
+	if !hasBookTemplatePDF(contentImageRef) {
+		contentImageRef = layout.ContentPage.ImageTemplatePDF
+	}
+	sectionRef := bookTemplatePDFForStoredColumns(
+		version.SectionTemplatePDFFileName,
+		version.SectionTemplatePDFFileURL,
+		version.SectionTemplatePDFStorageURI,
+		version.SectionTemplatePDFObjectKey,
+	)
+	if !hasBookTemplatePDF(sectionRef) {
+		sectionRef = layout.SectionPage.TemplatePDF
+	}
+
+	contentTemplate, err := s.downloadBookTemplatePDF(contentRef)
 	if err != nil {
 		return bookGenerationTemplates{}, err
 	}
-	contentImageTemplate, err := s.downloadBookTemplatePDF(layout.ContentPage.ImageTemplatePDF)
+	contentImageTemplate, err := s.downloadBookTemplatePDF(contentImageRef)
 	if err != nil {
 		return bookGenerationTemplates{}, err
 	}
-	sectionTemplate, err := s.downloadBookTemplatePDF(layout.SectionPage.TemplatePDF)
+	sectionTemplate, err := s.downloadBookTemplatePDF(sectionRef)
 	if err != nil {
 		return bookGenerationTemplates{}, err
 	}
@@ -2747,6 +2793,16 @@ func (s *BookService) loadGenerationTemplatesFromLayout(raw json.RawMessage) (bo
 		ContentImageTemplatePDF: contentImageTemplate,
 		SectionTemplatePDF:      sectionTemplate,
 	}, nil
+}
+
+func bookTemplatePDFForStoredColumns(fileName string, fileURL string, storageURI string, objectKey string) bookTemplatePDF {
+	return bookTemplatePDF{
+		FileName:   strings.TrimSpace(fileName),
+		FileURL:    strings.TrimSpace(fileURL),
+		StorageURI: strings.TrimSpace(storageURI),
+		ObjectKey:  strings.TrimSpace(objectKey),
+		PageNumber: 1,
+	}
 }
 
 func (s *BookService) downloadBookTemplatePDF(ref bookTemplatePDF) ([]byte, error) {
@@ -2811,6 +2867,27 @@ func applyStoredGeneratedPDFUpload(version *BookVersion, upload storedBookUpload
 	version.GeneratedPDFStorageURI = upload.StorageURI
 	version.GeneratedPDFObjectKey = upload.ObjectKey
 	version.LastGeneratedAt = cloneTimePointer(&generatedAt)
+}
+
+func applyStoredContentTemplatePDFUpload(version *BookVersion, upload storedBookUpload) {
+	version.ContentTemplatePDFFileName = upload.FileName
+	version.ContentTemplatePDFFileURL = upload.FileURL
+	version.ContentTemplatePDFStorageURI = upload.StorageURI
+	version.ContentTemplatePDFObjectKey = upload.ObjectKey
+}
+
+func applyStoredContentImageTemplatePDFUpload(version *BookVersion, upload storedBookUpload) {
+	version.ContentImageTemplatePDFFileName = upload.FileName
+	version.ContentImageTemplatePDFFileURL = upload.FileURL
+	version.ContentImageTemplatePDFStorageURI = upload.StorageURI
+	version.ContentImageTemplatePDFObjectKey = upload.ObjectKey
+}
+
+func applyStoredSectionTemplatePDFUpload(version *BookVersion, upload storedBookUpload) {
+	version.SectionTemplatePDFFileName = upload.FileName
+	version.SectionTemplatePDFFileURL = upload.FileURL
+	version.SectionTemplatePDFStorageURI = upload.StorageURI
+	version.SectionTemplatePDFObjectKey = upload.ObjectKey
 }
 
 func buildGeneratedPDFFileName(sourceFileName string) string {
