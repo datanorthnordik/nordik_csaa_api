@@ -1209,11 +1209,7 @@ func normalizeSaveBookVersionRequest(req SaveBookVersionRequest, requireSourcePD
 		return req, errors.New("section_template_page_number must be within source_page_count")
 	}
 
-	var err error
-	req.LayoutSettings, err = normalizeBookLayoutSettings(req.LayoutSettings)
-	if err != nil {
-		return req, err
-	}
+	req.LayoutSettings = buildInitialBookLayoutSettings()
 
 	if len(req.Sections) == 0 {
 		return req, errors.New("sections is required")
@@ -1322,24 +1318,74 @@ func normalizeSaveBookVersionRequest(req SaveBookVersionRequest, requireSourcePD
 	return req, nil
 }
 
+func buildInitialBookLayoutSettings() json.RawMessage {
+	return cloneRawJSON(defaultBookLayoutSettings)
+}
+
 func normalizeBookLayoutSettings(raw json.RawMessage) (json.RawMessage, error) {
 	if len(strings.TrimSpace(string(raw))) == 0 {
 		return cloneRawJSON(defaultBookLayoutSettings), nil
 	}
 
-	var decoded map[string]any
-	if err := json.Unmarshal(raw, &decoded); err != nil {
+	defaults, err := decodeBookLayoutSettings(defaultBookLayoutSettings)
+	if err != nil {
+		return nil, errors.New("layout_settings defaults are invalid")
+	}
+
+	decoded, err := decodeBookLayoutSettings(raw)
+	if err != nil {
 		return nil, errors.New("layout_settings must be valid JSON")
 	}
 	if decoded == nil {
 		return nil, errors.New("layout_settings must be a JSON object")
 	}
+	if len(decoded) == 0 {
+		return cloneRawJSON(defaultBookLayoutSettings), nil
+	}
 
-	normalized, err := json.Marshal(decoded)
+	normalized, err := json.Marshal(mergeBookLayoutSettings(defaults, decoded))
 	if err != nil {
 		return nil, errors.New("layout_settings must be valid JSON")
 	}
 	return normalized, nil
+}
+
+func decodeBookLayoutSettings(raw json.RawMessage) (map[string]any, error) {
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return nil, err
+	}
+	return decoded, nil
+}
+
+func mergeBookLayoutSettings(base map[string]any, overrides map[string]any) map[string]any {
+	merged := cloneJSONObject(base)
+	for key, overrideValue := range overrides {
+		overrideMap, overrideIsMap := overrideValue.(map[string]any)
+		baseMap, baseIsMap := merged[key].(map[string]any)
+		if overrideIsMap && baseIsMap {
+			merged[key] = mergeBookLayoutSettings(baseMap, overrideMap)
+			continue
+		}
+		merged[key] = overrideValue
+	}
+	return merged
+}
+
+func cloneJSONObject(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	cloned := make(map[string]any, len(input))
+	for key, value := range input {
+		nested, ok := value.(map[string]any)
+		if ok {
+			cloned[key] = cloneJSONObject(nested)
+			continue
+		}
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func normalizeBookSubmissionRequest(req SaveBookSubmissionRequest, version BookVersion, fields []BookVersionField, sections []BookVersionSection) (SaveBookSubmissionRequest, string, []BookSubmissionValue, error) {

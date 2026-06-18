@@ -205,7 +205,7 @@ type SaveBookVersionRequest struct {
 	SectionTemplatePageNumber int                             `json:"section_template_page_number"`
 	AllowPageImage            bool                            `json:"allow_page_image"`
 	AllowNewSections          bool                            `json:"allow_new_sections"`
-	LayoutSettings            json.RawMessage                 `json:"layout_settings"`
+	LayoutSettings            json.RawMessage                 `json:"-"`
 	Sections                  []SaveBookVersionSectionRequest `json:"sections"`
 	Fields                    []SaveBookVersionFieldRequest   `json:"fields"`
 	ActivateImmediately       bool                            `json:"activate_immediately"`
