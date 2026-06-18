@@ -29,8 +29,46 @@ func TestNormalizeSaveBookVersionRequestAcceptsTypicalCreatePayload(t *testing.T
 	if len(normalized.Fields) != 2 {
 		t.Fatalf("expected 2 fields, got %d", len(normalized.Fields))
 	}
+	if !jsonEqual(t, normalized.LayoutSettings, defaultBookLayoutSettings) {
+		t.Fatalf("expected default layout settings to be applied, got %s", string(normalized.LayoutSettings))
+	}
 	if normalized.SourcePDF == nil || len(normalized.SourcePDF.Content) == 0 {
 		t.Fatal("expected source PDF to be preserved during normalization")
+	}
+}
+
+func TestNormalizeSaveBookVersionRequestIgnoresClientLayoutSettings(t *testing.T) {
+	t.Helper()
+
+	req := validSaveBookVersionRequest()
+	req.LayoutSettings = json.RawMessage(`{"heading_area":{"font_size":24},"body_area":{"font_size":5}}`)
+
+	normalized, err := normalizeSaveBookVersionRequest(req, true)
+	if err != nil {
+		t.Fatalf("normalizeSaveBookVersionRequest returned error: %v", err)
+	}
+
+	if !jsonEqual(t, normalized.LayoutSettings, defaultBookLayoutSettings) {
+		t.Fatalf("expected client layout settings to be ignored in favor of backend defaults, got %s", string(normalized.LayoutSettings))
+	}
+}
+
+func TestNormalizeSaveBookVersionRequestIgnoresClientGeneratedPDF(t *testing.T) {
+	t.Helper()
+
+	req := validSaveBookVersionRequest()
+	req.GeneratedPDF = &BookUploadInput{
+		FileName: "manual.pdf",
+		MimeType: "application/pdf",
+		Content:  []byte("%PDF-1.4 manual"),
+	}
+
+	normalized, err := normalizeSaveBookVersionRequest(req, true)
+	if err != nil {
+		t.Fatalf("normalizeSaveBookVersionRequest returned error: %v", err)
+	}
+	if normalized.GeneratedPDF != nil {
+		t.Fatalf("expected client generated PDF upload to be ignored, got %#v", normalized.GeneratedPDF)
 	}
 }
 
@@ -227,4 +265,20 @@ func validSaveBookVersionRequest() SaveBookVersionRequest {
 
 func intPtr(value int) *int {
 	return &value
+}
+
+func jsonEqual(t *testing.T, left json.RawMessage, right json.RawMessage) bool {
+	t.Helper()
+
+	var leftValue any
+	if err := json.Unmarshal(left, &leftValue); err != nil {
+		t.Fatalf("unmarshal left json: %v", err)
+	}
+
+	var rightValue any
+	if err := json.Unmarshal(right, &rightValue); err != nil {
+		t.Fatalf("unmarshal right json: %v", err)
+	}
+
+	return reflect.DeepEqual(leftValue, rightValue)
 }

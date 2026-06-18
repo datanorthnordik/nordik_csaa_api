@@ -332,23 +332,13 @@ func (s *BookService) CreateBookVersion(bookID int, req SaveBookVersionRequest) 
 	version.SourcePDFStorageURI = sourceUpload.StorageURI
 	version.SourcePDFObjectKey = sourceUpload.ObjectKey
 
-	if req.GeneratedPDF != nil && !isEmptyBookUploadInput(*req.GeneratedPDF) {
-		generatedUpload, storeErr := s.storeVersionPDF(bookID, versionNumber, "generated", *req.GeneratedPDF)
-		if storeErr != nil {
-			tx.Rollback()
-			s.cleanupUploadedBookObjects(uploadedObjects)
-			return nil, storeErr
-		}
-		if generatedUpload.UploadedKey != "" {
-			uploadedObjects = append(uploadedObjects, generatedUpload.UploadedKey)
-		}
-		version.GeneratedPDFFileName = generatedUpload.FileName
-		version.GeneratedPDFFileURL = generatedUpload.FileURL
-		version.GeneratedPDFStorageURI = generatedUpload.StorageURI
-		version.GeneratedPDFObjectKey = generatedUpload.ObjectKey
-		now := booksNowFunc()
-		version.LastGeneratedAt = &now
+	sourcePDFContent, err := s.resolveBookUploadContent(req.SourcePDF, sourceUpload, ErrBookPDFNotFound)
+	if err != nil {
+		tx.Rollback()
+		s.cleanupUploadedBookObjects(uploadedObjects)
+		return nil, err
 	}
+	version.LayoutSettings = deriveInitialBookLayoutSettings(sourcePDFContent, req.ContentTemplatePageNumber, req.SectionTemplatePageNumber)
 
 	if err := tx.Create(&version).Error; err != nil {
 		tx.Rollback()
@@ -371,6 +361,42 @@ func (s *BookService) CreateBookVersion(bookID int, req SaveBookVersionRequest) 
 		s.cleanupUploadedBookObjects(uploadedObjects)
 		return nil, err
 	}
+
+	sections, err := s.listVersionSectionModelsTx(tx, version.ID)
+	if err != nil {
+		tx.Rollback()
+		s.cleanupUploadedBookObjects(uploadedObjects)
+		return nil, err
+	}
+	fields, err := s.listVersionFieldModelsTx(tx, version.ID)
+	if err != nil {
+		tx.Rollback()
+		s.cleanupUploadedBookObjects(uploadedObjects)
+		return nil, err
+	}
+	generatedUpload, err := s.generateAndStoreVersionPDF(bookID, &version, sourcePDFContent, sections, fields, nil, nil, nil)
+	if err != nil {
+		tx.Rollback()
+		s.cleanupUploadedBookObjects(uploadedObjects)
+		return nil, err
+	}
+	if generatedUpload.UploadedKey != "" {
+		uploadedObjects = append(uploadedObjects, generatedUpload.UploadedKey)
+	}
+	applyStoredGeneratedPDFUpload(&version, generatedUpload, booksNowFunc())
+	if err := tx.Model(&BookVersion{}).Where("id = ?", version.ID).Updates(map[string]any{
+		"layout_settings":           cloneRawJSON(version.LayoutSettings),
+		"generated_pdf_file_name":   nullableString(version.GeneratedPDFFileName),
+		"generated_pdf_file_url":    nullableString(version.GeneratedPDFFileURL),
+		"generated_pdf_storage_uri": nullableString(version.GeneratedPDFStorageURI),
+		"generated_pdf_object_key":  nullableString(version.GeneratedPDFObjectKey),
+		"last_generated_at":         version.LastGeneratedAt,
+	}).Error; err != nil {
+		tx.Rollback()
+		s.cleanupUploadedBookObjects(uploadedObjects)
+		return nil, err
+	}
+
 	if err := tx.Model(&Book{}).Where("id = ?", book.ID).Updates(map[string]any{
 		"active_version_id": version.ID,
 		"updated_by":        nullableInt(req.UpdatedBy),
@@ -934,6 +960,11 @@ func (s *BookService) ApproveBookSubmission(bookID int, submissionID int, userID
 		return nil, errors.New("submission is already approved")
 	}
 
+	book, err := s.getBookModelTx(tx, bookID)
+	if err != nil {
+		tx.Rollback()
+		return nil, err
+	}
 	baseVersion, err := s.getBookVersionModelTx(tx, bookID, submission.BookVersionID)
 	if err != nil {
 		tx.Rollback()
@@ -1007,15 +1038,76 @@ func (s *BookService) ApproveBookSubmission(bookID int, submissionID int, userID
 		tx.Rollback()
 		return nil, err
 	}
-	if err := tx.Model(&Book{}).Where("id = ?", bookID).Updates(map[string]any{
+
+	sourcePDFContent, _, err := s.downloadStoredBookObject(storedBookObjectRef{
+		ObjectKey: version.SourcePDFObjectKey,
+		FileURL:   coalesceString(version.SourcePDFStorageURI, version.SourcePDFFileURL),
+	}, ErrBookPDFNotFound)
+	if err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	sections, err := s.listVersionSectionModelsTx(tx, version.ID)
+	if err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	fields, err := s.listVersionFieldModelsTx(tx, version.ID)
+	if err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	approvedSubmissions, err := s.listApprovedSubmissionModelsTx(tx, version.ID)
+	if err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	approvedSubmissionIDs := make([]int, 0, len(approvedSubmissions))
+	for _, approvedSubmission := range approvedSubmissions {
+		approvedSubmissionIDs = append(approvedSubmissionIDs, approvedSubmission.ID)
+	}
+	valuesBySubmission, err := s.listSubmissionValuesBySubmissionIDsTx(tx, approvedSubmissionIDs)
+	if err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	imagesBySubmission, err := s.loadSubmissionImages(approvedSubmissions)
+	if err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	generatedUpload, err := s.generateAndStoreVersionPDF(bookID, version, sourcePDFContent, sections, fields, approvedSubmissions, valuesBySubmission, imagesBySubmission)
+	if err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	uploadedObjects := []string{}
+	if generatedUpload.UploadedKey != "" {
+		uploadedObjects = append(uploadedObjects, generatedUpload.UploadedKey)
+	}
+	applyStoredGeneratedPDFUpload(version, generatedUpload, now)
+	if err := tx.Model(&BookVersion{}).Where("id = ?", version.ID).Updates(map[string]any{
+		"generated_pdf_file_name":   nullableString(version.GeneratedPDFFileName),
+		"generated_pdf_file_url":    nullableString(version.GeneratedPDFFileURL),
+		"generated_pdf_storage_uri": nullableString(version.GeneratedPDFStorageURI),
+		"generated_pdf_object_key":  nullableString(version.GeneratedPDFObjectKey),
+		"last_generated_at":         version.LastGeneratedAt,
+	}).Error; err != nil {
+		tx.Rollback()
+		s.cleanupUploadedBookObjects(uploadedObjects)
+		return nil, err
+	}
+	if err := tx.Model(&Book{}).Where("id = ?", book.ID).Updates(map[string]any{
 		"active_version_id": version.ID,
 		"updated_by":        nullableInt(userID),
 	}).Error; err != nil {
 		tx.Rollback()
+		s.cleanupUploadedBookObjects(uploadedObjects)
 		return nil, err
 	}
 
 	if err := tx.Commit().Error; err != nil {
+		s.cleanupUploadedBookObjects(uploadedObjects)
 		return nil, err
 	}
 
@@ -1209,11 +1301,7 @@ func normalizeSaveBookVersionRequest(req SaveBookVersionRequest, requireSourcePD
 		return req, errors.New("section_template_page_number must be within source_page_count")
 	}
 
-	var err error
-	req.LayoutSettings, err = normalizeBookLayoutSettings(req.LayoutSettings)
-	if err != nil {
-		return req, err
-	}
+	req.LayoutSettings = buildInitialBookLayoutSettings()
 
 	if len(req.Sections) == 0 {
 		return req, errors.New("sections is required")
@@ -1298,10 +1386,7 @@ func normalizeSaveBookVersionRequest(req SaveBookVersionRequest, requireSourcePD
 		cleaned := sanitizeBookUploadInput(*req.SourcePDF)
 		req.SourcePDF = &cleaned
 	}
-	if req.GeneratedPDF != nil {
-		cleaned := sanitizeBookUploadInput(*req.GeneratedPDF)
-		req.GeneratedPDF = &cleaned
-	}
+	req.GeneratedPDF = nil
 
 	if requireSourcePDF {
 		if req.SourcePDF == nil || isEmptyBookUploadInput(*req.SourcePDF) {
@@ -1313,13 +1398,11 @@ func normalizeSaveBookVersionRequest(req SaveBookVersionRequest, requireSourcePD
 			return req, err
 		}
 	}
-	if req.GeneratedPDF != nil && !isEmptyBookUploadInput(*req.GeneratedPDF) {
-		if err := validatePDFUploadInput(*req.GeneratedPDF, "generated_pdf"); err != nil {
-			return req, err
-		}
-	}
-
 	return req, nil
+}
+
+func buildInitialBookLayoutSettings() json.RawMessage {
+	return cloneRawJSON(defaultBookLayoutSettings)
 }
 
 func normalizeBookLayoutSettings(raw json.RawMessage) (json.RawMessage, error) {
@@ -1327,19 +1410,65 @@ func normalizeBookLayoutSettings(raw json.RawMessage) (json.RawMessage, error) {
 		return cloneRawJSON(defaultBookLayoutSettings), nil
 	}
 
-	var decoded map[string]any
-	if err := json.Unmarshal(raw, &decoded); err != nil {
+	defaults, err := decodeBookLayoutSettings(defaultBookLayoutSettings)
+	if err != nil {
+		return nil, errors.New("layout_settings defaults are invalid")
+	}
+
+	decoded, err := decodeBookLayoutSettings(raw)
+	if err != nil {
 		return nil, errors.New("layout_settings must be valid JSON")
 	}
 	if decoded == nil {
 		return nil, errors.New("layout_settings must be a JSON object")
 	}
+	if len(decoded) == 0 {
+		return cloneRawJSON(defaultBookLayoutSettings), nil
+	}
 
-	normalized, err := json.Marshal(decoded)
+	normalized, err := json.Marshal(mergeBookLayoutSettings(defaults, decoded))
 	if err != nil {
 		return nil, errors.New("layout_settings must be valid JSON")
 	}
 	return normalized, nil
+}
+
+func decodeBookLayoutSettings(raw json.RawMessage) (map[string]any, error) {
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return nil, err
+	}
+	return decoded, nil
+}
+
+func mergeBookLayoutSettings(base map[string]any, overrides map[string]any) map[string]any {
+	merged := cloneJSONObject(base)
+	for key, overrideValue := range overrides {
+		overrideMap, overrideIsMap := overrideValue.(map[string]any)
+		baseMap, baseIsMap := merged[key].(map[string]any)
+		if overrideIsMap && baseIsMap {
+			merged[key] = mergeBookLayoutSettings(baseMap, overrideMap)
+			continue
+		}
+		merged[key] = overrideValue
+	}
+	return merged
+}
+
+func cloneJSONObject(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	cloned := make(map[string]any, len(input))
+	for key, value := range input {
+		nested, ok := value.(map[string]any)
+		if ok {
+			cloned[key] = cloneJSONObject(nested)
+			continue
+		}
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func normalizeBookSubmissionRequest(req SaveBookSubmissionRequest, version BookVersion, fields []BookVersionField, sections []BookVersionSection) (SaveBookSubmissionRequest, string, []BookSubmissionValue, error) {
@@ -2317,7 +2446,65 @@ func (s *BookService) cloneVersionForApprovedSubmission(tx *gorm.DB, sourceVersi
 		fieldIDMap[field.ID] = clonedField.ID
 	}
 
+	if err := s.cloneApprovedSubmissionsForVersionTx(tx, sourceVersion.ID, clonedVersion.ID, sectionIDMap, fieldIDMap); err != nil {
+		return nil, nil, nil, err
+	}
+
 	return clonedVersion, sectionIDMap, fieldIDMap, nil
+}
+
+func (s *BookService) cloneApprovedSubmissionsForVersionTx(tx *gorm.DB, sourceVersionID int, targetVersionID int, sectionIDMap map[int]int, fieldIDMap map[int]int) error {
+	submissions, err := s.listApprovedSubmissionModelsTx(tx, sourceVersionID)
+	if err != nil {
+		return err
+	}
+	if len(submissions) == 0 {
+		return nil
+	}
+
+	submissionIDs := make([]int, 0, len(submissions))
+	for _, submission := range submissions {
+		submissionIDs = append(submissionIDs, submission.ID)
+	}
+	valuesBySubmission, err := s.listSubmissionValuesBySubmissionIDsTx(tx, submissionIDs)
+	if err != nil {
+		return err
+	}
+
+	for _, submission := range submissions {
+		clonedSubmission := submission
+		clonedSubmission.ID = 0
+		clonedSubmission.BookVersionID = targetVersionID
+		if submission.TargetSectionID != nil {
+			mappedSectionID, ok := sectionIDMap[*submission.TargetSectionID]
+			if !ok {
+				return fmt.Errorf("section id %d does not belong to the approved book version", *submission.TargetSectionID)
+			}
+			clonedSubmission.TargetSectionID = cloneInt(mappedSectionID)
+		} else {
+			clonedSubmission.TargetSectionID = nil
+		}
+
+		if err := tx.Create(&clonedSubmission).Error; err != nil {
+			return err
+		}
+
+		for _, value := range valuesBySubmission[submission.ID] {
+			nextFieldID, ok := fieldIDMap[value.BookFieldID]
+			if !ok {
+				return fmt.Errorf("field id %d does not belong to the approved book version", value.BookFieldID)
+			}
+			clonedValue := value
+			clonedValue.ID = 0
+			clonedValue.BookSubmissionID = clonedSubmission.ID
+			clonedValue.BookFieldID = nextFieldID
+			if err := tx.Create(&clonedValue).Error; err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
 
 func (s *BookService) remapSubmissionValueFieldIDsTx(tx *gorm.DB, submissionID int, fieldIDMap map[int]int) error {
@@ -2370,6 +2557,106 @@ func buildApprovedSubmissionRecord(submission BookSubmission, versionID int, tar
 	submission.ReviewedAt = cloneTimePointer(&reviewedAt)
 	submission.RejectionReason = ""
 	return submission
+}
+
+func (s *BookService) listApprovedSubmissionModelsTx(tx *gorm.DB, versionID int) ([]BookSubmission, error) {
+	var submissions []BookSubmission
+	if err := tx.Where("book_version_id = ? AND status = ?", versionID, BookSubmissionStatusApproved).
+		Order("reviewed_at ASC NULLS LAST").
+		Order("id ASC").
+		Find(&submissions).Error; err != nil {
+		return nil, err
+	}
+	if submissions == nil {
+		submissions = []BookSubmission{}
+	}
+	return submissions, nil
+}
+
+func (s *BookService) listSubmissionValuesBySubmissionIDsTx(tx *gorm.DB, submissionIDs []int) (map[int][]BookSubmissionValue, error) {
+	valuesBySubmission := make(map[int][]BookSubmissionValue)
+	if len(submissionIDs) == 0 {
+		return valuesBySubmission, nil
+	}
+
+	var values []BookSubmissionValue
+	if err := tx.Where("book_submission_id IN ?", submissionIDs).
+		Order("id ASC").
+		Find(&values).Error; err != nil {
+		return nil, err
+	}
+	for _, value := range values {
+		valuesBySubmission[value.BookSubmissionID] = append(valuesBySubmission[value.BookSubmissionID], value)
+	}
+	return valuesBySubmission, nil
+}
+
+func (s *BookService) loadSubmissionImages(submissions []BookSubmission) (map[int]*storedBookUploadContent, error) {
+	imagesBySubmission := make(map[int]*storedBookUploadContent)
+	for _, submission := range submissions {
+		if !hasStoredBookFile(submission.ImageObjectKey, submission.ImageStorageURI, submission.ImageFileURL) {
+			continue
+		}
+
+		data, contentType, err := s.downloadStoredBookObject(storedBookObjectRef{
+			ObjectKey: submission.ImageObjectKey,
+			FileURL:   coalesceString(submission.ImageStorageURI, submission.ImageFileURL),
+		}, ErrBookSubmissionImageNotFound)
+		if err != nil {
+			return nil, err
+		}
+		imagesBySubmission[submission.ID] = &storedBookUploadContent{
+			Data:     data,
+			MimeType: chooseNonEmpty(strings.TrimSpace(contentType), strings.TrimSpace(submission.ImageMimeType)),
+			FileName: strings.TrimSpace(submission.ImageFileName),
+		}
+	}
+	return imagesBySubmission, nil
+}
+
+func (s *BookService) resolveBookUploadContent(input *BookUploadInput, stored storedBookUpload, notFoundErr error) ([]byte, error) {
+	if input != nil && len(input.Content) > 0 {
+		return append([]byte(nil), input.Content...), nil
+	}
+	data, _, err := s.downloadStoredBookObject(storedBookObjectRef{
+		ObjectKey: stored.ObjectKey,
+		FileURL:   coalesceString(stored.StorageURI, stored.FileURL),
+	}, notFoundErr)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func (s *BookService) generateAndStoreVersionPDF(bookID int, version *BookVersion, sourcePDF []byte, sections []BookVersionSection, fields []BookVersionField, submissions []BookSubmission, valuesBySubmission map[int][]BookSubmissionValue, imagesBySubmission map[int]*storedBookUploadContent) (storedBookUpload, error) {
+	generatedPDF, err := generateBookVersionPDF(sourcePDF, *version, sections, fields, submissions, valuesBySubmission, imagesBySubmission)
+	if err != nil {
+		return storedBookUpload{}, err
+	}
+
+	return s.storeVersionPDF(bookID, version.VersionNumber, "generated", BookUploadInput{
+		FileName: buildGeneratedPDFFileName(version.SourcePDFFileName),
+		MimeType: "application/pdf",
+		FileSize: int64(len(generatedPDF)),
+		Content:  generatedPDF,
+	})
+}
+
+func applyStoredGeneratedPDFUpload(version *BookVersion, upload storedBookUpload, generatedAt time.Time) {
+	version.GeneratedPDFFileName = upload.FileName
+	version.GeneratedPDFFileURL = upload.FileURL
+	version.GeneratedPDFStorageURI = upload.StorageURI
+	version.GeneratedPDFObjectKey = upload.ObjectKey
+	version.LastGeneratedAt = cloneTimePointer(&generatedAt)
+}
+
+func buildGeneratedPDFFileName(sourceFileName string) string {
+	baseName := strings.TrimSpace(path.Base(sourceFileName))
+	baseName = strings.TrimSpace(strings.TrimSuffix(baseName, path.Ext(baseName)))
+	if baseName == "" {
+		baseName = "book"
+	}
+	return baseName + "_generated.pdf"
 }
 
 func (s *BookService) storeVersionPDF(bookID int, versionNumber int, folder string, input BookUploadInput) (storedBookUpload, error) {

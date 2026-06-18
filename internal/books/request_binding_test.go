@@ -203,6 +203,25 @@ func TestBindSaveBookVersionRequestWrappedJSONPayload(t *testing.T) {
 	}
 }
 
+func TestBindSaveBookVersionRequestIgnoresLayoutSettingsPayload(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	const versionPayload = `{"source_page_count":5,"content_template_page_number":1,"section_template_page_number":2,"allow_page_image":true,"allow_new_sections":true,"layout_settings":{"heading_area":{"font_size":99}},"sections":[{"name":"Recipes","source_start_page":1,"source_end_page":5}],"fields":[{"label":"Name","input_type":"single_line","placement":"heading","show_label":true,"is_required":true,"is_email_field":false}]}`
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/books/3/versions", strings.NewReader(versionPayload))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	req, ok := bindSaveBookVersionRequest(c)
+	if !ok {
+		t.Fatal("expected version payload with layout_settings to bind successfully")
+	}
+	if len(req.LayoutSettings) != 0 {
+		t.Fatalf("expected layout_settings payload to be ignored, got %s", string(req.LayoutSettings))
+	}
+}
+
 func assertBookAPIError(t *testing.T, rec *httptest.ResponseRecorder, wantStatus int, wantCode string, wantMessage string) apiresponse.ErrorResponse {
 	t.Helper()
 

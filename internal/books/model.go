@@ -19,55 +19,7 @@ const (
 	BookSubmissionStatusRejected = "rejected"
 )
 
-var defaultBookLayoutSettings = json.RawMessage(`{
-  "content_mask": {
-    "x": 54,
-    "y": 92,
-    "width": 392,
-    "height": 484,
-    "background_color": "#ffffff"
-  },
-  "heading_area": {
-    "x": 78,
-    "y": 114,
-    "width": 316,
-    "height": 86,
-    "font_size": 19,
-    "line_height": 1.2,
-    "text_align": "left"
-  },
-  "body_area": {
-    "x": 78,
-    "y": 214,
-    "width": 280,
-    "height": 314,
-    "font_size": 11,
-    "line_height": 1.35,
-    "text_align": "left"
-  },
-  "image_area": {
-    "x": 316,
-    "y": 422,
-    "width": 108,
-    "height": 108
-  },
-  "section_mask": {
-    "x": 70,
-    "y": 228,
-    "width": 360,
-    "height": 114,
-    "background_color": "#ffffff"
-  },
-  "section_title_area": {
-    "x": 90,
-    "y": 248,
-    "width": 320,
-    "height": 74,
-    "font_size": 28,
-    "line_height": 1.1,
-    "text_align": "center"
-  }
-}`)
+var defaultBookLayoutSettings = mustMarshalBookLayoutSettings(defaultBookLayoutSettingsModel())
 
 type Book struct {
 	ID                      int            `gorm:"primaryKey;autoIncrement" json:"id"`
@@ -205,7 +157,7 @@ type SaveBookVersionRequest struct {
 	SectionTemplatePageNumber int                             `json:"section_template_page_number"`
 	AllowPageImage            bool                            `json:"allow_page_image"`
 	AllowNewSections          bool                            `json:"allow_new_sections"`
-	LayoutSettings            json.RawMessage                 `json:"layout_settings"`
+	LayoutSettings            json.RawMessage                 `json:"-"`
 	Sections                  []SaveBookVersionSectionRequest `json:"sections"`
 	Fields                    []SaveBookVersionFieldRequest   `json:"fields"`
 	ActivateImmediately       bool                            `json:"activate_immediately"`
