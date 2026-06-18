@@ -21,6 +21,8 @@ import (
 const (
 	bookLayoutSettingsVersion = 2
 	bookDefaultPDFMimeType    = "application/pdf"
+	bookDefaultPageWidth      = 612.0
+	bookDefaultPageHeight     = 792.0
 )
 
 type bookLayoutSettings struct {
@@ -298,12 +300,27 @@ func parseBookLayoutSettings(raw json.RawMessage) bookLayoutSettings {
 }
 
 func normalizeBookLayoutSettingsModel(layout bookLayoutSettings) bookLayoutSettings {
-	defaults := defaultBookLayoutSettingsModel()
 	if layout.Version == 0 {
 		layout.Version = bookLayoutSettingsVersion
 	}
-	layout.ContentPage = normalizeContentPageLayout(layout.ContentPage, defaults.ContentPage)
-	layout.SectionPage = normalizeSectionPageLayout(layout.SectionPage, defaults.SectionPage)
+	contentDefaults := scaledDefaultContentPageLayout(
+		layout.ContentPage.TemplatePageNumber,
+		layout.ContentPage.PageWidth,
+		layout.ContentPage.PageHeight,
+	)
+	sectionDefaults := scaledDefaultSectionPageLayout(
+		layout.SectionPage.TemplatePageNumber,
+		layout.SectionPage.PageWidth,
+		layout.SectionPage.PageHeight,
+	)
+	layout.ContentPage = repairContentPageLayout(
+		normalizeContentPageLayout(layout.ContentPage, contentDefaults),
+		contentDefaults,
+	)
+	layout.SectionPage = repairSectionPageLayout(
+		normalizeSectionPageLayout(layout.SectionPage, sectionDefaults),
+		sectionDefaults,
+	)
 	return layout
 }
 
@@ -408,15 +425,300 @@ func normalizeImageLayout(layout bookImageLayout, defaults bookImageLayout) book
 	return layout
 }
 
+func scaledDefaultContentPageLayout(pageNumber int, pageWidth float64, pageHeight float64) bookContentPageLayout {
+	defaults := defaultBookLayoutSettingsModel().ContentPage
+	if pageWidth <= 0 {
+		pageWidth = bookDefaultPageWidth
+	}
+	if pageHeight <= 0 {
+		pageHeight = bookDefaultPageHeight
+	}
+
+	scaleX := pageWidth / bookDefaultPageWidth
+	scaleY := pageHeight / bookDefaultPageHeight
+	fontScale := math.Min(scaleX, scaleY)
+
+	defaults.TemplatePageNumber = pageNumber
+	defaults.PageWidth = pageWidth
+	defaults.PageHeight = pageHeight
+	defaults.HeadingMask = scaleMaskLayout(defaults.HeadingMask, scaleX, scaleY)
+	defaults.HeadingArea = scaleTextLayout(defaults.HeadingArea, scaleX, scaleY, fontScale)
+	defaults.BodyMask = scaleMaskLayout(defaults.BodyMask, scaleX, scaleY)
+	defaults.BodyArea = scaleBodyLayout(defaults.BodyArea, scaleX, scaleY, fontScale)
+	defaults.ImageArea = scaleImageLayout(defaults.ImageArea, scaleX, scaleY)
+	return defaults
+}
+
+func scaledDefaultSectionPageLayout(pageNumber int, pageWidth float64, pageHeight float64) bookSectionPageLayout {
+	defaults := defaultBookLayoutSettingsModel().SectionPage
+	if pageWidth <= 0 {
+		pageWidth = bookDefaultPageWidth
+	}
+	if pageHeight <= 0 {
+		pageHeight = bookDefaultPageHeight
+	}
+
+	scaleX := pageWidth / bookDefaultPageWidth
+	scaleY := pageHeight / bookDefaultPageHeight
+	fontScale := math.Min(scaleX, scaleY)
+
+	defaults.TemplatePageNumber = pageNumber
+	defaults.PageWidth = pageWidth
+	defaults.PageHeight = pageHeight
+	defaults.TitleMask = scaleMaskLayout(defaults.TitleMask, scaleX, scaleY)
+	defaults.TitleArea = scaleTextLayout(defaults.TitleArea, scaleX, scaleY, fontScale)
+	return defaults
+}
+
+func scaleMaskLayout(layout bookMaskLayout, scaleX float64, scaleY float64) bookMaskLayout {
+	layout.X *= scaleX
+	layout.Y *= scaleY
+	layout.Width *= scaleX
+	layout.Height *= scaleY
+	return layout
+}
+
+func scaleTextLayout(layout bookTextLayout, scaleX float64, scaleY float64, fontScale float64) bookTextLayout {
+	layout.X *= scaleX
+	layout.Y *= scaleY
+	layout.Width *= scaleX
+	layout.Height *= scaleY
+	layout.FontSize *= fontScale
+	layout.MinFontSize *= fontScale
+	return layout
+}
+
+func scaleBodyLayout(layout bookBodyLayout, scaleX float64, scaleY float64, fontScale float64) bookBodyLayout {
+	layout.X *= scaleX
+	layout.Y *= scaleY
+	layout.Width *= scaleX
+	layout.Height *= scaleY
+	layout.FontSize *= fontScale
+	layout.MinFontSize *= fontScale
+	layout.LabelFontSize *= fontScale
+	layout.LabelMinFontSize *= fontScale
+	layout.ParagraphSpacing *= fontScale
+	return layout
+}
+
+func scaleImageLayout(layout bookImageLayout, scaleX float64, scaleY float64) bookImageLayout {
+	layout.X *= scaleX
+	layout.Y *= scaleY
+	layout.Width *= scaleX
+	layout.Height *= scaleY
+	return layout
+}
+
+func pageDimensionsFromReader(reader *rpdf.Reader, pageNumber int) (float64, float64) {
+	if reader == nil || pageNumber <= 0 || pageNumber > reader.NumPage() {
+		return bookDefaultPageWidth, bookDefaultPageHeight
+	}
+	pageWidth, pageHeight := extractPageDimensions(reader.Page(pageNumber))
+	if pageWidth <= 0 || pageHeight <= 0 {
+		return bookDefaultPageWidth, bookDefaultPageHeight
+	}
+	return pageWidth, pageHeight
+}
+
+func resolveBookLayoutSettings(reader *rpdf.Reader, version BookVersion, layout bookLayoutSettings) bookLayoutSettings {
+	if layout.ContentPage.TemplatePageNumber == 0 {
+		layout.ContentPage.TemplatePageNumber = version.ContentTemplatePageNumber
+	}
+	if layout.SectionPage.TemplatePageNumber == 0 {
+		layout.SectionPage.TemplatePageNumber = version.SectionTemplatePageNumber
+	}
+
+	contentWidth, contentHeight := pageDimensionsFromReader(reader, layout.ContentPage.TemplatePageNumber)
+	sectionWidth, sectionHeight := pageDimensionsFromReader(reader, layout.SectionPage.TemplatePageNumber)
+	contentDefaults := scaledDefaultContentPageLayout(layout.ContentPage.TemplatePageNumber, contentWidth, contentHeight)
+	sectionDefaults := scaledDefaultSectionPageLayout(layout.SectionPage.TemplatePageNumber, sectionWidth, sectionHeight)
+
+	layout.ContentPage = repairContentPageLayout(
+		normalizeContentPageLayout(layout.ContentPage, contentDefaults),
+		contentDefaults,
+	)
+	layout.SectionPage = repairSectionPageLayout(
+		normalizeSectionPageLayout(layout.SectionPage, sectionDefaults),
+		sectionDefaults,
+	)
+	return layout
+}
+
+func repairContentPageLayout(layout bookContentPageLayout, defaults bookContentPageLayout) bookContentPageLayout {
+	layout.TemplatePageNumber = defaults.TemplatePageNumber
+	layout.PageWidth = defaults.PageWidth
+	layout.PageHeight = defaults.PageHeight
+	layout.HeadingMask = clampMaskLayout(layout.HeadingMask, layout.PageWidth, layout.PageHeight)
+	layout.HeadingArea = clampTextLayout(layout.HeadingArea, layout.PageWidth, layout.PageHeight)
+	layout.BodyMask = clampMaskLayout(layout.BodyMask, layout.PageWidth, layout.PageHeight)
+	layout.BodyArea = clampBodyLayout(layout.BodyArea, layout.PageWidth, layout.PageHeight)
+	layout.ImageArea = clampImageLayout(layout.ImageArea, layout.PageWidth, layout.PageHeight)
+
+	if !isPlausibleMaskLayout(layout.HeadingMask, layout.PageWidth, layout.PageHeight, layout.PageWidth*0.22, layout.PageHeight*0.05) ||
+		!isPlausibleTextLayout(layout.HeadingArea, layout.PageWidth, layout.PageHeight, layout.PageWidth*0.18, layout.PageHeight*0.03) ||
+		layout.HeadingArea.Y > layout.PageHeight*0.4 {
+		layout.HeadingMask = defaults.HeadingMask
+		layout.HeadingArea = defaults.HeadingArea
+	}
+
+	if !isPlausibleMaskLayout(layout.BodyMask, layout.PageWidth, layout.PageHeight, layout.PageWidth*0.26, layout.PageHeight*0.12) ||
+		!isPlausibleBodyLayout(layout.BodyArea, layout.PageWidth, layout.PageHeight) ||
+		layout.BodyArea.Y <= layout.HeadingArea.Y+layout.HeadingArea.Height*0.25 {
+		layout.BodyMask = defaults.BodyMask
+		layout.BodyArea = defaults.BodyArea
+	}
+
+	if !isPlausibleImageLayout(layout.ImageArea, layout.PageWidth, layout.PageHeight) {
+		layout.ImageArea = defaults.ImageArea
+	}
+
+	if layout.HeadingArea.FontSize < layout.BodyArea.FontSize {
+		layout.HeadingArea.FontSize = defaults.HeadingArea.FontSize
+		layout.HeadingArea.MinFontSize = defaults.HeadingArea.MinFontSize
+		layout.HeadingArea.TextAlign = defaults.HeadingArea.TextAlign
+	}
+	return layout
+}
+
+func repairSectionPageLayout(layout bookSectionPageLayout, defaults bookSectionPageLayout) bookSectionPageLayout {
+	layout.TemplatePageNumber = defaults.TemplatePageNumber
+	layout.PageWidth = defaults.PageWidth
+	layout.PageHeight = defaults.PageHeight
+	layout.TitleMask = clampMaskLayout(layout.TitleMask, layout.PageWidth, layout.PageHeight)
+	layout.TitleArea = clampTextLayout(layout.TitleArea, layout.PageWidth, layout.PageHeight)
+
+	if !isPlausibleMaskLayout(layout.TitleMask, layout.PageWidth, layout.PageHeight, layout.PageWidth*0.26, layout.PageHeight*0.08) ||
+		!isPlausibleTextLayout(layout.TitleArea, layout.PageWidth, layout.PageHeight, layout.PageWidth*0.22, layout.PageHeight*0.05) {
+		layout.TitleMask = defaults.TitleMask
+		layout.TitleArea = defaults.TitleArea
+	}
+	return layout
+}
+
+func clampMaskLayout(layout bookMaskLayout, pageWidth float64, pageHeight float64) bookMaskLayout {
+	rect := clampRect(bookRect{
+		X:      layout.X,
+		Y:      layout.Y,
+		Width:  layout.Width,
+		Height: layout.Height,
+	}, pageWidth, pageHeight)
+	layout.X = rect.X
+	layout.Y = rect.Y
+	layout.Width = rect.Width
+	layout.Height = rect.Height
+	return layout
+}
+
+func clampTextLayout(layout bookTextLayout, pageWidth float64, pageHeight float64) bookTextLayout {
+	rect := clampRect(bookRect{
+		X:      layout.X,
+		Y:      layout.Y,
+		Width:  layout.Width,
+		Height: layout.Height,
+	}, pageWidth, pageHeight)
+	layout.X = rect.X
+	layout.Y = rect.Y
+	layout.Width = rect.Width
+	layout.Height = rect.Height
+	return layout
+}
+
+func clampBodyLayout(layout bookBodyLayout, pageWidth float64, pageHeight float64) bookBodyLayout {
+	rect := clampRect(bookRect{
+		X:      layout.X,
+		Y:      layout.Y,
+		Width:  layout.Width,
+		Height: layout.Height,
+	}, pageWidth, pageHeight)
+	layout.X = rect.X
+	layout.Y = rect.Y
+	layout.Width = rect.Width
+	layout.Height = rect.Height
+	return layout
+}
+
+func clampImageLayout(layout bookImageLayout, pageWidth float64, pageHeight float64) bookImageLayout {
+	rect := clampRect(bookRect{
+		X:      layout.X,
+		Y:      layout.Y,
+		Width:  layout.Width,
+		Height: layout.Height,
+	}, pageWidth, pageHeight)
+	layout.X = rect.X
+	layout.Y = rect.Y
+	layout.Width = rect.Width
+	layout.Height = rect.Height
+	return layout
+}
+
+func isPlausibleMaskLayout(layout bookMaskLayout, pageWidth float64, pageHeight float64, minWidth float64, minHeight float64) bool {
+	return layout.X >= 0 && layout.Y >= 0 &&
+		layout.Width >= minWidth &&
+		layout.Height >= minHeight &&
+		layout.X+layout.Width <= pageWidth+0.1 &&
+		layout.Y+layout.Height <= pageHeight+0.1
+}
+
+func isPlausibleTextLayout(layout bookTextLayout, pageWidth float64, pageHeight float64, minWidth float64, minHeight float64) bool {
+	return layout.X >= 0 && layout.Y >= 0 &&
+		layout.Width >= minWidth &&
+		layout.Height >= minHeight &&
+		layout.FontSize >= 8 &&
+		layout.X+layout.Width <= pageWidth+0.1 &&
+		layout.Y+layout.Height <= pageHeight+0.1
+}
+
+func isPlausibleBodyLayout(layout bookBodyLayout, pageWidth float64, pageHeight float64) bool {
+	return layout.X >= 0 && layout.Y >= 0 &&
+		layout.Width >= pageWidth*0.22 &&
+		layout.Height >= pageHeight*0.14 &&
+		layout.FontSize >= 8 &&
+		layout.X+layout.Width <= pageWidth+0.1 &&
+		layout.Y+layout.Height <= pageHeight+0.1
+}
+
+func isPlausibleImageLayout(layout bookImageLayout, pageWidth float64, pageHeight float64) bool {
+	return layout.X >= 0 && layout.Y >= 0 &&
+		layout.Width >= pageWidth*0.1 &&
+		layout.Height >= pageHeight*0.08 &&
+		layout.X+layout.Width <= pageWidth+0.1 &&
+		layout.Y+layout.Height <= pageHeight+0.1
+}
+
 func deriveInitialBookLayoutSettings(sourcePDF []byte, contentTemplatePageNumber int, sectionTemplatePageNumber int) json.RawMessage {
-	layout := defaultBookLayoutSettingsModel()
-	layout.ContentPage.TemplatePageNumber = contentTemplatePageNumber
-	layout.SectionPage.TemplatePageNumber = sectionTemplatePageNumber
+	layout := bookLayoutSettings{
+		Version: bookLayoutSettingsVersion,
+		ContentPage: scaledDefaultContentPageLayout(
+			contentTemplatePageNumber,
+			bookDefaultPageWidth,
+			bookDefaultPageHeight,
+		),
+		SectionPage: scaledDefaultSectionPageLayout(
+			sectionTemplatePageNumber,
+			bookDefaultPageWidth,
+			bookDefaultPageHeight,
+		),
+	}
 
 	reader, err := rpdf.NewReader(bytes.NewReader(sourcePDF), int64(len(sourcePDF)))
 	if err != nil {
 		return mustMarshalBookLayoutSettings(layout)
 	}
+
+	contentWidth, contentHeight := pageDimensionsFromReader(reader, contentTemplatePageNumber)
+	sectionWidth, sectionHeight := pageDimensionsFromReader(reader, sectionTemplatePageNumber)
+	contentDefaults := scaledDefaultContentPageLayout(
+		contentTemplatePageNumber,
+		contentWidth,
+		contentHeight,
+	)
+	sectionDefaults := scaledDefaultSectionPageLayout(
+		sectionTemplatePageNumber,
+		sectionWidth,
+		sectionHeight,
+	)
+	layout.ContentPage = contentDefaults
+	layout.SectionPage = sectionDefaults
 
 	if analysis, ok := analyzeTemplatePage(reader.Page(contentTemplatePageNumber)); ok {
 		applyContentTemplateAnalysis(&layout.ContentPage, analysis)
@@ -424,6 +726,8 @@ func deriveInitialBookLayoutSettings(sourcePDF []byte, contentTemplatePageNumber
 	if analysis, ok := analyzeTemplatePage(reader.Page(sectionTemplatePageNumber)); ok {
 		applySectionTemplateAnalysis(&layout.SectionPage, analysis)
 	}
+	layout.ContentPage = repairContentPageLayout(layout.ContentPage, contentDefaults)
+	layout.SectionPage = repairSectionPageLayout(layout.SectionPage, sectionDefaults)
 
 	return mustMarshalBookLayoutSettings(layout)
 }
@@ -445,6 +749,7 @@ func generateBookVersionPDF(sourcePDF []byte, version BookVersion, sections []Bo
 	if layout.SectionPage.TemplatePageNumber == 0 {
 		layout.SectionPage.TemplatePageNumber = version.SectionTemplatePageNumber
 	}
+	layout = resolveBookLayoutSettings(reader, version, layout)
 
 	pdfDoc := gofpdf.NewCustom(&gofpdf.InitType{
 		OrientationStr: "P",
