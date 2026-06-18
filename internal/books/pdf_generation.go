@@ -6,11 +6,17 @@ import (
 	"errors"
 	"fmt"
 	htmlstd "html"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"math"
 	"sort"
 	"strconv"
 	"strings"
+
+	_ "image/gif"
+	_ "image/jpeg"
 
 	"github.com/phpdave11/gofpdf"
 	"github.com/phpdave11/gofpdf/contrib/gofpdi"
@@ -35,6 +41,8 @@ type bookContentPageLayout struct {
 	TemplatePageNumber int             `json:"template_page_number,omitempty"`
 	PageWidth          float64         `json:"page_width"`
 	PageHeight         float64         `json:"page_height"`
+	TemplatePDF        bookTemplatePDF `json:"template_pdf,omitempty"`
+	ImageTemplatePDF   bookTemplatePDF `json:"image_template_pdf,omitempty"`
 	HeadingMask        bookMaskLayout  `json:"heading_mask"`
 	HeadingArea        bookTextLayout  `json:"heading_area"`
 	BodyMask           bookMaskLayout  `json:"body_mask"`
@@ -43,11 +51,20 @@ type bookContentPageLayout struct {
 }
 
 type bookSectionPageLayout struct {
-	TemplatePageNumber int            `json:"template_page_number,omitempty"`
-	PageWidth          float64        `json:"page_width"`
-	PageHeight         float64        `json:"page_height"`
-	TitleMask          bookMaskLayout `json:"title_mask"`
-	TitleArea          bookTextLayout `json:"title_area"`
+	TemplatePageNumber int             `json:"template_page_number,omitempty"`
+	PageWidth          float64         `json:"page_width"`
+	PageHeight         float64         `json:"page_height"`
+	TemplatePDF        bookTemplatePDF `json:"template_pdf,omitempty"`
+	TitleMask          bookMaskLayout  `json:"title_mask"`
+	TitleArea          bookTextLayout  `json:"title_area"`
+}
+
+type bookTemplatePDF struct {
+	FileName   string `json:"file_name,omitempty"`
+	FileURL    string `json:"file_url,omitempty"`
+	StorageURI string `json:"storage_uri,omitempty"`
+	ObjectKey  string `json:"object_key,omitempty"`
+	PageNumber int    `json:"page_number,omitempty"`
 }
 
 type bookMaskLayout struct {
@@ -157,6 +174,12 @@ type storedBookUploadContent struct {
 	Data     []byte
 	MimeType string
 	FileName string
+}
+
+type bookGenerationTemplates struct {
+	ContentTemplatePDF      []byte
+	ContentImageTemplatePDF []byte
+	SectionTemplatePDF      []byte
 }
 
 func defaultBookLayoutSettingsModel() bookLayoutSettings {
@@ -760,7 +783,7 @@ func deriveInitialBookLayoutSettings(sourcePDF []byte, contentTemplatePageNumber
 	return mustMarshalBookLayoutSettings(layout)
 }
 
-func generateBookVersionPDF(sourcePDF []byte, version BookVersion, sections []BookVersionSection, fields []BookVersionField, submissions []BookSubmission, valuesBySubmission map[int][]BookSubmissionValue, imagesBySubmission map[int]*storedBookUploadContent) ([]byte, error) {
+func generateBookVersionPDF(sourcePDF []byte, version BookVersion, sections []BookVersionSection, fields []BookVersionField, submissions []BookSubmission, valuesBySubmission map[int][]BookSubmissionValue, imagesBySubmission map[int]*storedBookUploadContent, templates bookGenerationTemplates) ([]byte, error) {
 	if len(sourcePDF) == 0 {
 		return nil, errors.New("source PDF content is required")
 	}
@@ -789,7 +812,7 @@ func generateBookVersionPDF(sourcePDF []byte, version BookVersion, sections []Bo
 	pdfDoc.SetCompression(true)
 
 	importer := gofpdi.NewImporter()
-	templateCache := make(map[int]bookImportedTemplate)
+	templateCache := make(map[string]bookImportedTemplate)
 	submissionsBySection := groupSubmissionRenderData(fields, submissions, valuesBySubmission, imagesBySubmission)
 
 	sourceCursor := 1
@@ -812,7 +835,7 @@ func generateBookVersionPDF(sourcePDF []byte, version BookVersion, sections []Bo
 			sourceCursor = *section.SourceEndPage + 1
 
 			for _, submission := range submissionsBySection[section.ID] {
-				if err := appendContentTemplatePage(pdfDoc, importer, templateCache, sourcePDF, layout.ContentPage, submission); err != nil {
+				if err := appendContentTemplatePage(pdfDoc, importer, templateCache, sourcePDF, layout.ContentPage, submission, templates); err != nil {
 					return nil, err
 				}
 			}
@@ -826,11 +849,11 @@ func generateBookVersionPDF(sourcePDF []byte, version BookVersion, sections []Bo
 			sourceCursor++
 		}
 
-		if err := appendSectionTemplatePage(pdfDoc, importer, templateCache, sourcePDF, layout.SectionPage, strings.TrimSpace(section.Name)); err != nil {
+		if err := appendSectionTemplatePage(pdfDoc, importer, templateCache, sourcePDF, layout.SectionPage, strings.TrimSpace(section.Name), templates); err != nil {
 			return nil, err
 		}
 		for _, submission := range submissionsBySection[section.ID] {
-			if err := appendContentTemplatePage(pdfDoc, importer, templateCache, sourcePDF, layout.ContentPage, submission); err != nil {
+			if err := appendContentTemplatePage(pdfDoc, importer, templateCache, sourcePDF, layout.ContentPage, submission, templates); err != nil {
 				return nil, err
 			}
 		}
@@ -850,8 +873,8 @@ func generateBookVersionPDF(sourcePDF []byte, version BookVersion, sections []Bo
 	return out.Bytes(), nil
 }
 
-func appendImportedPage(pdfDoc *gofpdf.Fpdf, importer *gofpdi.Importer, cache map[int]bookImportedTemplate, sourcePDF []byte, pageNumber int) error {
-	template, err := importTemplatePage(pdfDoc, importer, cache, sourcePDF, pageNumber)
+func appendImportedPage(pdfDoc *gofpdf.Fpdf, importer *gofpdi.Importer, cache map[string]bookImportedTemplate, sourcePDF []byte, pageNumber int) error {
+	template, err := importTemplatePage(pdfDoc, importer, cache, "source", sourcePDF, pageNumber)
 	if err != nil {
 		return err
 	}
@@ -861,22 +884,45 @@ func appendImportedPage(pdfDoc *gofpdf.Fpdf, importer *gofpdi.Importer, cache ma
 	return pdfDoc.Error()
 }
 
-func appendContentTemplatePage(pdfDoc *gofpdf.Fpdf, importer *gofpdi.Importer, cache map[int]bookImportedTemplate, sourcePDF []byte, layout bookContentPageLayout, submission bookSubmissionRenderData) error {
-	template, err := importTemplatePage(pdfDoc, importer, cache, sourcePDF, layout.TemplatePageNumber)
+func appendContentTemplatePage(pdfDoc *gofpdf.Fpdf, importer *gofpdi.Importer, cache map[string]bookImportedTemplate, sourcePDF []byte, layout bookContentPageLayout, submission bookSubmissionRenderData, templates bookGenerationTemplates) error {
+	templatePDF := sourcePDF
+	templatePageNumber := layout.TemplatePageNumber
+	templateCacheKey := "source-content"
+	useBlankTemplate := false
+	if submission.Image != nil && len(templates.ContentImageTemplatePDF) > 0 {
+		templatePDF = templates.ContentImageTemplatePDF
+		templatePageNumber = firstTemplatePDFPage(layout.ImageTemplatePDF)
+		templateCacheKey = "content-image-template"
+		useBlankTemplate = true
+	} else if len(templates.ContentTemplatePDF) > 0 {
+		templatePDF = templates.ContentTemplatePDF
+		templatePageNumber = firstTemplatePDFPage(layout.TemplatePDF)
+		templateCacheKey = "content-template"
+		useBlankTemplate = true
+	}
+
+	template, err := importTemplatePage(pdfDoc, importer, cache, templateCacheKey, templatePDF, templatePageNumber)
 	if err != nil {
 		return err
 	}
 
 	pdfDoc.AddPageFormat(pageOrientation(template.Width, template.Height), gofpdf.SizeType{Wd: template.Width, Ht: template.Height})
-	drawCleanContentTemplatePage(pdfDoc, layout, template.Width, template.Height)
+	if useBlankTemplate {
+		importer.UseImportedTemplate(pdfDoc, template.ID, 0, 0, template.Width, template.Height)
+	} else {
+		drawCleanContentTemplatePage(pdfDoc, layout, template.Width, template.Height)
+	}
 
-	drawMask(pdfDoc, layout.HeadingMask)
+	drawLayout := scaleContentPageLayoutToSize(layout, template.Width, template.Height)
+	if !useBlankTemplate {
+		drawMask(pdfDoc, drawLayout.HeadingMask)
+	}
 
 	if submission.Image != nil {
-		drawSubmissionImage(pdfDoc, layout.ImageArea, *submission.Image)
+		drawSubmissionImage(pdfDoc, drawLayout.ImageArea, *submission.Image)
 	}
-	drawFittedTextBox(pdfDoc, layout.HeadingArea, submission.Heading)
-	drawBodyBlocks(pdfDoc, layout.BodyArea, submission.Body)
+	drawFittedTextBox(pdfDoc, drawLayout.HeadingArea, submission.Heading)
+	drawBodyBlocks(pdfDoc, drawLayout.BodyArea, submission.Body)
 	return pdfDoc.Error()
 }
 
@@ -888,8 +934,67 @@ func drawCleanContentTemplatePage(pdfDoc *gofpdf.Fpdf, layout bookContentPageLay
 	pdfDoc.Rect(0, 0, pageWidth, pageHeight, "F")
 }
 
-func appendSectionTemplatePage(pdfDoc *gofpdf.Fpdf, importer *gofpdi.Importer, cache map[int]bookImportedTemplate, sourcePDF []byte, layout bookSectionPageLayout, title string) error {
-	template, err := importTemplatePage(pdfDoc, importer, cache, sourcePDF, layout.TemplatePageNumber)
+func firstTemplatePDFPage(ref bookTemplatePDF) int {
+	if ref.PageNumber > 0 {
+		return ref.PageNumber
+	}
+	return 1
+}
+
+func scaleContentPageLayoutToSize(layout bookContentPageLayout, pageWidth float64, pageHeight float64) bookContentPageLayout {
+	if pageWidth <= 0 || pageHeight <= 0 || layout.PageWidth <= 0 || layout.PageHeight <= 0 {
+		return layout
+	}
+	if almostEqual(layout.PageWidth, pageWidth) && almostEqual(layout.PageHeight, pageHeight) {
+		return layout
+	}
+
+	scaleX := pageWidth / layout.PageWidth
+	scaleY := pageHeight / layout.PageHeight
+	fontScale := math.Min(scaleX, scaleY)
+
+	layout.PageWidth = pageWidth
+	layout.PageHeight = pageHeight
+	layout.HeadingMask = scaleMaskLayout(layout.HeadingMask, scaleX, scaleY)
+	layout.HeadingArea = scaleTextLayout(layout.HeadingArea, scaleX, scaleY, fontScale)
+	layout.BodyMask = scaleMaskLayout(layout.BodyMask, scaleX, scaleY)
+	layout.BodyArea = scaleBodyLayout(layout.BodyArea, scaleX, scaleY, fontScale)
+	layout.ImageArea = scaleImageLayout(layout.ImageArea, scaleX, scaleY)
+	return layout
+}
+
+func scaleSectionPageLayoutToSize(layout bookSectionPageLayout, pageWidth float64, pageHeight float64) bookSectionPageLayout {
+	if pageWidth <= 0 || pageHeight <= 0 || layout.PageWidth <= 0 || layout.PageHeight <= 0 {
+		return layout
+	}
+	if almostEqual(layout.PageWidth, pageWidth) && almostEqual(layout.PageHeight, pageHeight) {
+		return layout
+	}
+
+	scaleX := pageWidth / layout.PageWidth
+	scaleY := pageHeight / layout.PageHeight
+	fontScale := math.Min(scaleX, scaleY)
+
+	layout.PageWidth = pageWidth
+	layout.PageHeight = pageHeight
+	layout.TitleMask = scaleMaskLayout(layout.TitleMask, scaleX, scaleY)
+	layout.TitleArea = scaleTextLayout(layout.TitleArea, scaleX, scaleY, fontScale)
+	return layout
+}
+
+func appendSectionTemplatePage(pdfDoc *gofpdf.Fpdf, importer *gofpdi.Importer, cache map[string]bookImportedTemplate, sourcePDF []byte, layout bookSectionPageLayout, title string, templates bookGenerationTemplates) error {
+	templatePDF := sourcePDF
+	templatePageNumber := layout.TemplatePageNumber
+	templateCacheKey := "source-section"
+	useBlankTemplate := false
+	if len(templates.SectionTemplatePDF) > 0 {
+		templatePDF = templates.SectionTemplatePDF
+		templatePageNumber = firstTemplatePDFPage(layout.TemplatePDF)
+		templateCacheKey = "section-template"
+		useBlankTemplate = true
+	}
+
+	template, err := importTemplatePage(pdfDoc, importer, cache, templateCacheKey, templatePDF, templatePageNumber)
 	if err != nil {
 		return err
 	}
@@ -897,14 +1002,18 @@ func appendSectionTemplatePage(pdfDoc *gofpdf.Fpdf, importer *gofpdi.Importer, c
 	pdfDoc.AddPageFormat(pageOrientation(template.Width, template.Height), gofpdf.SizeType{Wd: template.Width, Ht: template.Height})
 	importer.UseImportedTemplate(pdfDoc, template.ID, 0, 0, template.Width, template.Height)
 
-	eraseLayout := mergedSectionEraseLayout(layout, scaledDefaultSectionPageLayout(layout.TemplatePageNumber, template.Width, template.Height))
-	drawMask(pdfDoc, eraseLayout.TitleMask)
-	drawFittedTextBox(pdfDoc, layout.TitleArea, strings.TrimSpace(title))
+	drawLayout := scaleSectionPageLayoutToSize(layout, template.Width, template.Height)
+	if !useBlankTemplate {
+		eraseLayout := mergedSectionEraseLayout(drawLayout, scaledDefaultSectionPageLayout(drawLayout.TemplatePageNumber, template.Width, template.Height))
+		drawMask(pdfDoc, eraseLayout.TitleMask)
+	}
+	drawFittedTextBox(pdfDoc, drawLayout.TitleArea, strings.TrimSpace(title))
 	return pdfDoc.Error()
 }
 
-func importTemplatePage(pdfDoc *gofpdf.Fpdf, importer *gofpdi.Importer, cache map[int]bookImportedTemplate, sourcePDF []byte, pageNumber int) (bookImportedTemplate, error) {
-	if template, ok := cache[pageNumber]; ok {
+func importTemplatePage(pdfDoc *gofpdf.Fpdf, importer *gofpdi.Importer, cache map[string]bookImportedTemplate, sourceName string, sourcePDF []byte, pageNumber int) (bookImportedTemplate, error) {
+	cacheKey := fmt.Sprintf("%s:%d", strings.TrimSpace(sourceName), pageNumber)
+	if template, ok := cache[cacheKey]; ok {
 		return template, nil
 	}
 	if pageNumber <= 0 {
@@ -938,7 +1047,7 @@ func importTemplatePage(pdfDoc *gofpdf.Fpdf, importer *gofpdi.Importer, cache ma
 		Width:  size["w"],
 		Height: size["h"],
 	}
-	cache[pageNumber] = template
+	cache[cacheKey] = template
 	return template, nil
 }
 
@@ -1546,19 +1655,24 @@ func drawSubmissionImage(pdfDoc *gofpdf.Fpdf, layout bookImageLayout, image stor
 		return
 	}
 
+	imageData := image.Data
 	imageType := detectImageTypeFromMime(image.MimeType)
 	if imageType == "" {
 		imageType = detectImageTypeFromName(image.FileName)
+	}
+	if lineArtData, ok := convertImageToLineArtPNG(image.Data); ok {
+		imageData = lineArtData
+		imageType = "png"
 	}
 	if imageType == "" {
 		return
 	}
 
-	imgName := fmt.Sprintf("submission-image-%d-%d", len(image.Data), len(image.FileName))
+	imgName := fmt.Sprintf("submission-image-%d-%d-%s", len(imageData), len(image.FileName), imageType)
 	pdfDoc.RegisterImageOptionsReader(imgName, gofpdf.ImageOptions{
 		ImageType: imageType,
 		ReadDpi:   true,
-	}, bytes.NewReader(image.Data))
+	}, bytes.NewReader(imageData))
 	info := pdfDoc.GetImageInfo(imgName)
 	if info == nil {
 		return
@@ -1573,6 +1687,51 @@ func drawSubmissionImage(pdfDoc *gofpdf.Fpdf, layout bookImageLayout, image stor
 		ReadDpi:   true,
 	}, 0, "")
 	pdfDoc.SetAlpha(1, "Normal")
+}
+
+func convertImageToLineArtPNG(data []byte) ([]byte, bool) {
+	src, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, false
+	}
+
+	bounds := src.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+	if width <= 0 || height <= 0 {
+		return nil, false
+	}
+
+	luma := make([]uint8, width*height)
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			r, g, b, _ := src.At(bounds.Min.X+x, bounds.Min.Y+y).RGBA()
+			luma[y*width+x] = uint8(((299 * int(r>>8)) + (587 * int(g>>8)) + (114 * int(b>>8))) / 1000)
+		}
+	}
+
+	dst := image.NewNRGBA(image.Rect(0, 0, width, height))
+	for y := 1; y < height-1; y++ {
+		for x := 1; x < width-1; x++ {
+			idx := y*width + x
+			gx := -int(luma[(y-1)*width+x-1]) + int(luma[(y-1)*width+x+1]) -
+				2*int(luma[y*width+x-1]) + 2*int(luma[y*width+x+1]) -
+				int(luma[(y+1)*width+x-1]) + int(luma[(y+1)*width+x+1])
+			gy := -int(luma[(y-1)*width+x-1]) - 2*int(luma[(y-1)*width+x]) - int(luma[(y-1)*width+x+1]) +
+				int(luma[(y+1)*width+x-1]) + 2*int(luma[(y+1)*width+x]) + int(luma[(y+1)*width+x+1])
+			edgeStrength := math.Abs(float64(gx)) + math.Abs(float64(gy))
+			darkInk := luma[idx] < 92
+			if edgeStrength > 130 || darkInk {
+				dst.SetNRGBA(x, y, color.NRGBA{R: 34, G: 34, B: 34, A: 230})
+			}
+		}
+	}
+
+	var out bytes.Buffer
+	if err := png.Encode(&out, dst); err != nil {
+		return nil, false
+	}
+	return out.Bytes(), true
 }
 
 func fitImageIntoBox(srcWidth, srcHeight, maxWidth, maxHeight float64) (float64, float64) {

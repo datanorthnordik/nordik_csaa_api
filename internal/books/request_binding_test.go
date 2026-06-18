@@ -222,6 +222,38 @@ func TestBindSaveBookVersionRequestIgnoresLayoutSettingsPayload(t *testing.T) {
 	}
 }
 
+func TestBindSaveBookVersionRequestMultipartTemplatePDFs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	const versionPayload = `{"source_page_count":5,"content_template_page_number":1,"section_template_page_number":2,"allow_page_image":true,"allow_new_sections":true,"sections":[{"name":"Recipes","source_start_page":1,"source_end_page":5}],"fields":[{"label":"Name","input_type":"single_line","placement":"heading","show_label":true,"is_required":true,"is_email_field":false}]}`
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = newBookMultipartRequest(t, http.MethodPost, "/api/books/3/versions", versionPayload, []bookMultipartTestFile{
+		{Field: "source_pdf_file", Filename: "source.pdf", Data: []byte("%PDF-1.4 source")},
+		{Field: "content_template_pdf_file", Filename: "content-template.pdf", Data: []byte("%PDF-1.4 content")},
+		{Field: "content_image_template_pdf_file", Filename: "content-image-template.pdf", Data: []byte("%PDF-1.4 image")},
+		{Field: "section_template_pdf_file", Filename: "section-template.pdf", Data: []byte("%PDF-1.4 section")},
+	})
+
+	req, ok := bindSaveBookVersionRequest(c)
+	if !ok {
+		t.Fatal("expected multipart version bind success")
+	}
+	if req.SourcePDF == nil || req.SourcePDF.FileName != "source.pdf" {
+		t.Fatalf("expected source PDF upload, got %#v", req.SourcePDF)
+	}
+	if req.ContentTemplatePDF == nil || req.ContentTemplatePDF.FileName != "content-template.pdf" {
+		t.Fatalf("expected content template upload, got %#v", req.ContentTemplatePDF)
+	}
+	if req.ContentImageTemplatePDF == nil || req.ContentImageTemplatePDF.FileName != "content-image-template.pdf" {
+		t.Fatalf("expected content image template upload, got %#v", req.ContentImageTemplatePDF)
+	}
+	if req.SectionTemplatePDF == nil || req.SectionTemplatePDF.FileName != "section-template.pdf" {
+		t.Fatalf("expected section template upload, got %#v", req.SectionTemplatePDF)
+	}
+}
+
 func assertBookAPIError(t *testing.T, rec *httptest.ResponseRecorder, wantStatus int, wantCode string, wantMessage string) apiresponse.ErrorResponse {
 	t.Helper()
 

@@ -72,6 +72,62 @@ func TestNormalizeSaveBookVersionRequestIgnoresClientGeneratedPDF(t *testing.T) 
 	}
 }
 
+func TestNormalizeSaveBookVersionRequestPreservesTemplatePDFUploads(t *testing.T) {
+	t.Helper()
+
+	req := validSaveBookVersionRequest()
+	req.ContentTemplatePDF = &BookUploadInput{
+		FileName: "content-template.pdf",
+		MimeType: "application/pdf",
+		Content:  []byte("%PDF-1.4 content"),
+	}
+	req.ContentImageTemplatePDF = &BookUploadInput{
+		FileName: "content-image-template.pdf",
+		MimeType: "application/pdf",
+		Content:  []byte("%PDF-1.4 image"),
+	}
+	req.SectionTemplatePDF = &BookUploadInput{
+		FileName: "section-template.pdf",
+		MimeType: "application/pdf",
+		Content:  []byte("%PDF-1.4 section"),
+	}
+
+	normalized, err := normalizeSaveBookVersionRequest(req, true)
+	if err != nil {
+		t.Fatalf("normalizeSaveBookVersionRequest returned error: %v", err)
+	}
+	if normalized.ContentTemplatePDF == nil || normalized.ContentTemplatePDF.FileName != "content-template.pdf" {
+		t.Fatalf("expected content template upload to be preserved, got %#v", normalized.ContentTemplatePDF)
+	}
+	if normalized.ContentImageTemplatePDF == nil || normalized.ContentImageTemplatePDF.FileName != "content-image-template.pdf" {
+		t.Fatalf("expected image content template upload to be preserved, got %#v", normalized.ContentImageTemplatePDF)
+	}
+	if normalized.SectionTemplatePDF == nil || normalized.SectionTemplatePDF.FileName != "section-template.pdf" {
+		t.Fatalf("expected section template upload to be preserved, got %#v", normalized.SectionTemplatePDF)
+	}
+}
+
+func TestApplyBookTemplatePDFUploadsToLayoutStoresTemplateRefs(t *testing.T) {
+	t.Helper()
+
+	layout := applyBookTemplatePDFUploadsToLayout(defaultBookLayoutSettings,
+		storedBookUpload{FileName: "content-template.pdf", FileURL: "gs://bucket/content-template.pdf", StorageURI: "gs://bucket/content-template.pdf", ObjectKey: "books/content-template.pdf"},
+		storedBookUpload{FileName: "content-image-template.pdf", FileURL: "gs://bucket/content-image-template.pdf", StorageURI: "gs://bucket/content-image-template.pdf", ObjectKey: "books/content-image-template.pdf"},
+		storedBookUpload{FileName: "section-template.pdf", FileURL: "gs://bucket/section-template.pdf", StorageURI: "gs://bucket/section-template.pdf", ObjectKey: "books/section-template.pdf"},
+	)
+	parsed := parseBookLayoutSettings(layout)
+
+	if parsed.ContentPage.TemplatePDF.ObjectKey != "books/content-template.pdf" || parsed.ContentPage.TemplatePDF.PageNumber != 1 {
+		t.Fatalf("expected content template ref in layout, got %#v", parsed.ContentPage.TemplatePDF)
+	}
+	if parsed.ContentPage.ImageTemplatePDF.ObjectKey != "books/content-image-template.pdf" || parsed.ContentPage.ImageTemplatePDF.PageNumber != 1 {
+		t.Fatalf("expected content image template ref in layout, got %#v", parsed.ContentPage.ImageTemplatePDF)
+	}
+	if parsed.SectionPage.TemplatePDF.ObjectKey != "books/section-template.pdf" || parsed.SectionPage.TemplatePDF.PageNumber != 1 {
+		t.Fatalf("expected section template ref in layout, got %#v", parsed.SectionPage.TemplatePDF)
+	}
+}
+
 func TestNormalizeSaveBookVersionRequestRejectsDuplicateFieldLabels(t *testing.T) {
 	t.Helper()
 

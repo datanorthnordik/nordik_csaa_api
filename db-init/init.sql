@@ -2601,4 +2601,80 @@ BEFORE UPDATE ON book_submission_values
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
+CREATE TABLE IF NOT EXISTS knowledge_center_submissions (
+    id SERIAL PRIMARY KEY,
+    submitter_name VARCHAR(255) NOT NULL,
+    submitter_email VARCHAR(255) NOT NULL,
+    submitter_phone VARCHAR(80) NOT NULL DEFAULT '',
+    submission_type VARCHAR(20) NOT NULL,
+    message TEXT NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'open',
+    completion_notes TEXT NOT NULL DEFAULT '',
+    completed_by_user_id INT,
+    completed_by_name VARCHAR(255) NOT NULL DEFAULT '',
+    completed_by_email VARCHAR(255) NOT NULL DEFAULT '',
+    completed_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_knowledge_center_submissions_completed_by
+        FOREIGN KEY (completed_by_user_id) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT chk_knowledge_center_submissions_name_not_blank
+        CHECK (BTRIM(submitter_name) <> ''),
+
+    CONSTRAINT chk_knowledge_center_submissions_email_not_blank
+        CHECK (BTRIM(submitter_email) <> ''),
+
+    CONSTRAINT chk_knowledge_center_submissions_submission_type
+        CHECK (submission_type IN ('post', 'video', 'both')),
+
+    CONSTRAINT chk_knowledge_center_submissions_status
+        CHECK (status IN ('open', 'completed')),
+
+    CONSTRAINT chk_knowledge_center_submissions_message_not_blank
+        CHECK (BTRIM(message) <> ''),
+
+    CONSTRAINT chk_knowledge_center_submissions_completion_state
+        CHECK (
+            (
+                status = 'open'
+                AND completed_by_user_id IS NULL
+                AND completed_at IS NULL
+                AND BTRIM(COALESCE(completion_notes, '')) = ''
+                AND BTRIM(COALESCE(completed_by_name, '')) = ''
+                AND BTRIM(COALESCE(completed_by_email, '')) = ''
+            )
+            OR
+            (
+                status = 'completed'
+                AND completed_by_user_id IS NOT NULL
+                AND completed_at IS NOT NULL
+                AND BTRIM(COALESCE(completion_notes, '')) <> ''
+                AND BTRIM(COALESCE(completed_by_name, '')) <> ''
+                AND BTRIM(COALESCE(completed_by_email, '')) <> ''
+            )
+        )
+);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_center_submissions_status
+    ON knowledge_center_submissions(status);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_center_submissions_created_at
+    ON knowledge_center_submissions(created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_center_submissions_completed_at
+    ON knowledge_center_submissions(completed_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_center_submissions_submitter_email
+    ON knowledge_center_submissions(submitter_email);
+
+DROP TRIGGER IF EXISTS trg_knowledge_center_submissions_set_updated_at ON knowledge_center_submissions;
+CREATE TRIGGER trg_knowledge_center_submissions_set_updated_at
+BEFORE UPDATE ON knowledge_center_submissions
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
 COMMIT;

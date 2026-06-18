@@ -53,6 +53,27 @@ func bindSaveBookVersionRequest(c *gin.Context) (SaveBookVersionRequest, bool) {
 		}
 		applyBookUploadedFile(&req.GeneratedPDF, file)
 
+		file, err = httpapi.ReadMultipartFile(c, "content_template_pdf_file")
+		if err != nil {
+			apiresponse.WriteValidationError(c, "invalid multipart form data")
+			return req, false
+		}
+		applyBookUploadedFile(&req.ContentTemplatePDF, file)
+
+		file, err = httpapi.ReadMultipartFile(c, "content_image_template_pdf_file")
+		if err != nil {
+			apiresponse.WriteValidationError(c, "invalid multipart form data")
+			return req, false
+		}
+		applyBookUploadedFile(&req.ContentImageTemplatePDF, file)
+
+		file, err = httpapi.ReadMultipartFile(c, "section_template_pdf_file")
+		if err != nil {
+			apiresponse.WriteValidationError(c, "invalid multipart form data")
+			return req, false
+		}
+		applyBookUploadedFile(&req.SectionTemplatePDF, file)
+
 		return req, true
 	}
 
