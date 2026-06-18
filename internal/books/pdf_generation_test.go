@@ -102,10 +102,12 @@ func TestGenerateBookVersionPDFAppendsSubmissionAndSectionPages(t *testing.T) {
 		{ID: 2, BookVersionID: version.ID, Name: "Campfire Classics", SortOrder: 1},
 	}
 	fields := []BookVersionField{
-		{ID: 1, BookVersionID: version.ID, Label: "Title Part 1", Placement: BookFieldPlacementHeading, SortOrder: 0},
-		{ID: 2, BookVersionID: version.ID, Label: "Title Part 2", Placement: BookFieldPlacementHeading, SortOrder: 1},
+		{ID: 1, BookVersionID: version.ID, Label: "Prep time", Placement: BookFieldPlacementBody, ShowLabel: true, SortOrder: 0},
+		{ID: 2, BookVersionID: version.ID, Label: "Cook time", Placement: BookFieldPlacementBody, ShowLabel: true, SortOrder: 1},
 		{ID: 3, BookVersionID: version.ID, Label: "Ingredients", Placement: BookFieldPlacementBody, ShowLabel: true, SortOrder: 2},
 		{ID: 4, BookVersionID: version.ID, Label: "Method", Placement: BookFieldPlacementBody, ShowLabel: true, SortOrder: 3},
+		{ID: 5, BookVersionID: version.ID, Label: "Your Name", Placement: BookFieldPlacementHeading, SortOrder: 4},
+		{ID: 6, BookVersionID: version.ID, Label: "Recipe Name", Placement: BookFieldPlacementHeading, SortOrder: 5},
 	}
 	submissions := []BookSubmission{
 		{ID: 10, BookVersionID: version.ID, TargetSectionID: intPtr(1), Status: BookSubmissionStatusApproved},
@@ -113,16 +115,20 @@ func TestGenerateBookVersionPDFAppendsSubmissionAndSectionPages(t *testing.T) {
 	}
 	valuesBySubmission := map[int][]BookSubmissionValue{
 		10: {
-			{BookSubmissionID: 10, BookFieldID: 1, Value: "Liz's"},
-			{BookSubmissionID: 10, BookFieldID: 2, Value: "Bannock"},
-			{BookSubmissionID: 10, BookFieldID: 3, Value: "<p>3 cups flour</p><p>1 cup water</p>"},
-			{BookSubmissionID: 10, BookFieldID: 4, Value: "<p>Mix dry ingredients.</p><p>Bake until golden.</p>"},
+			{BookSubmissionID: 10, BookFieldID: 1, Value: "10 minutes"},
+			{BookSubmissionID: 10, BookFieldID: 2, Value: "20 minutes"},
+			{BookSubmissionID: 10, BookFieldID: 3, Value: `<ul><li><p><span style="font-size: 16px;">4 cups all-purpose flour</span></p></li><li><p><span style="font-size: 16px;">2 tablespoons baking powder</span></p></li></ul>`},
+			{BookSubmissionID: 10, BookFieldID: 4, Value: `<ul><li><p><span style="font-size: 16px;">Mix dry ingredients in a large bowl.</span></p></li><li><p><span style="font-size: 16px;">Cook until golden.</span></p></li></ul>`},
+			{BookSubmissionID: 10, BookFieldID: 5, Value: "Athul Narayanan"},
+			{BookSubmissionID: 10, BookFieldID: 6, Value: "Indian Bannock"},
 		},
 		11: {
-			{BookSubmissionID: 11, BookFieldID: 1, Value: "Campfire"},
-			{BookSubmissionID: 11, BookFieldID: 2, Value: "Bread"},
+			{BookSubmissionID: 11, BookFieldID: 1, Value: "15 minutes"},
+			{BookSubmissionID: 11, BookFieldID: 2, Value: "25 minutes"},
 			{BookSubmissionID: 11, BookFieldID: 3, Value: "<p>2 cups flour</p><p>1 cup water</p>"},
 			{BookSubmissionID: 11, BookFieldID: 4, Value: "<p>Mix together.</p><p>Cook on a hot stone.</p>"},
+			{BookSubmissionID: 11, BookFieldID: 5, Value: "Campfire"},
+			{BookSubmissionID: 11, BookFieldID: 6, Value: "Bread"},
 		},
 	}
 
@@ -143,10 +149,14 @@ func TestGenerateBookVersionPDFAppendsSubmissionAndSectionPages(t *testing.T) {
 	page5Text := compactPDFText(extractPDFPageText(t, generatedPDF, 5))
 	page6Text := compactPDFText(extractPDFPageText(t, generatedPDF, 6))
 
-	if !strings.Contains(page4Text, "liz'sbannock") {
+	if !strings.Contains(page4Text, "athulnarayananindianbannock") {
 		t.Fatalf("expected appended recipe page to contain joined heading text, got %q", page4Text)
 	}
-	if !strings.Contains(page4Text, "ingredients:") || !strings.Contains(page4Text, "method:") {
+	if !strings.Contains(page4Text, "preptime:") ||
+		!strings.Contains(page4Text, "cooktime:") ||
+		!strings.Contains(page4Text, "ingredients:") ||
+		!strings.Contains(page4Text, "method:") ||
+		!strings.Contains(page4Text, "4cupsall-purposeflour") {
 		t.Fatalf("expected appended recipe page to contain body labels, got %q", page4Text)
 	}
 	if !strings.Contains(page5Text, "campfireclassics") {
