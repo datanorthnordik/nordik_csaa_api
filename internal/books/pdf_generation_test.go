@@ -72,8 +72,11 @@ func TestDeriveInitialBookLayoutSettingsFromTemplatePages(t *testing.T) {
 	if layout.ContentPage.HeadingArea.FontSize <= layout.ContentPage.BodyArea.FontSize {
 		t.Fatalf("expected heading font size to be larger than body font size, got heading=%f body=%f", layout.ContentPage.HeadingArea.FontSize, layout.ContentPage.BodyArea.FontSize)
 	}
-	if layout.ContentPage.HeadingArea.Width <= 0 || layout.ContentPage.BodyArea.Width <= 0 {
+	if layout.ContentPage.HeadingArea.Width < layout.ContentPage.PageWidth*0.2 || layout.ContentPage.BodyArea.Height < layout.ContentPage.PageHeight*0.14 {
 		t.Fatalf("expected text areas to be derived from template geometry, got heading=%#v body=%#v", layout.ContentPage.HeadingArea, layout.ContentPage.BodyArea)
+	}
+	if layout.ContentPage.HeadingArea.TextAlign != "C" {
+		t.Fatalf("expected content heading to stay centered after repair, got %#v", layout.ContentPage.HeadingArea)
 	}
 	if layout.SectionPage.TitleArea.FontSize < 20 {
 		t.Fatalf("expected divider title font size to be derived from template, got %#v", layout.SectionPage.TitleArea)
@@ -84,19 +87,7 @@ func TestGenerateBookVersionPDFAppendsSubmissionAndSectionPages(t *testing.T) {
 	t.Helper()
 
 	sourcePDF := buildSyntheticBookTemplatePDF(t)
-	layout := defaultBookLayoutSettingsModel()
-	layout.ContentPage.TemplatePageNumber = 1
-	layout.ContentPage.PageWidth = 612
-	layout.ContentPage.PageHeight = 792
-	layout.ContentPage.HeadingMask = bookMaskLayout{X: 52, Y: 42, Width: 508, Height: 78, BackgroundColor: "#7f9892", Alpha: 0.98}
-	layout.ContentPage.HeadingArea = bookTextLayout{X: 92, Y: 58, Width: 340, Height: 46, FontFamily: "Helvetica", FontSize: 24, MinFontSize: 16, LineHeight: 1.1, TextAlign: "C", TextColor: "#f5f0e7"}
-	layout.ContentPage.BodyMask = bookMaskLayout{X: 48, Y: 144, Width: 360, Height: 176, BackgroundColor: "#f7f0df", Alpha: 0.95}
-	layout.ContentPage.BodyArea = bookBodyLayout{X: 60, Y: 154, Width: 278, Height: 156, FontFamily: "Helvetica", FontSize: 12, MinFontSize: 10, LineHeight: 1.25, TextAlign: "L", TextColor: "#2c261f", LabelFontFamily: "Helvetica", LabelFontStyle: "B", LabelFontSize: 12, LabelMinFontSize: 10, LabelTextColor: "#2c261f", ParagraphSpacing: 8}
-	layout.SectionPage.TemplatePageNumber = 2
-	layout.SectionPage.PageWidth = 612
-	layout.SectionPage.PageHeight = 792
-	layout.SectionPage.TitleMask = bookMaskLayout{X: 82, Y: 238, Width: 448, Height: 116, BackgroundColor: "#f7f0df", Alpha: 0.95}
-	layout.SectionPage.TitleArea = bookTextLayout{X: 118, Y: 268, Width: 376, Height: 48, FontFamily: "Helvetica", FontStyle: "B", FontSize: 30, MinFontSize: 20, LineHeight: 1.1, TextAlign: "C", TextColor: "#2c261f"}
+	layout := deriveInitialBookLayoutSettings(sourcePDF, 1, 2)
 	version := BookVersion{
 		ID:                        8,
 		BookID:                    5,
@@ -104,7 +95,7 @@ func TestGenerateBookVersionPDFAppendsSubmissionAndSectionPages(t *testing.T) {
 		SourcePageCount:           3,
 		ContentTemplatePageNumber: 1,
 		SectionTemplatePageNumber: 2,
-		LayoutSettings:            mustMarshalBookLayoutSettings(layout),
+		LayoutSettings:            layout,
 	}
 	sections := []BookVersionSection{
 		{ID: 1, BookVersionID: version.ID, Name: "Recipes", SourceStartPage: intPtr(3), SourceEndPage: intPtr(3), SortOrder: 0},
