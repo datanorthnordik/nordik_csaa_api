@@ -305,7 +305,7 @@ func (s *BookService) CreateBookVersion(bookID int, req SaveBookVersionRequest) 
 		return nil, err
 	}
 
-	uploadedObjects := make([]string, 0, 2)
+	uploadedObjects := make([]string, 0, 5)
 	version := BookVersion{
 		BookID:                    bookID,
 		VersionNumber:             versionNumber,
@@ -332,6 +332,36 @@ func (s *BookService) CreateBookVersion(bookID int, req SaveBookVersionRequest) 
 	version.SourcePDFStorageURI = sourceUpload.StorageURI
 	version.SourcePDFObjectKey = sourceUpload.ObjectKey
 
+	contentTemplateUpload, err := s.storeOptionalVersionPDF(bookID, versionNumber, "content-template", req.ContentTemplatePDF)
+	if err != nil {
+		tx.Rollback()
+		s.cleanupUploadedBookObjects(uploadedObjects)
+		return nil, err
+	}
+	if contentTemplateUpload.UploadedKey != "" {
+		uploadedObjects = append(uploadedObjects, contentTemplateUpload.UploadedKey)
+	}
+
+	contentImageTemplateUpload, err := s.storeOptionalVersionPDF(bookID, versionNumber, "content-image-template", req.ContentImageTemplatePDF)
+	if err != nil {
+		tx.Rollback()
+		s.cleanupUploadedBookObjects(uploadedObjects)
+		return nil, err
+	}
+	if contentImageTemplateUpload.UploadedKey != "" {
+		uploadedObjects = append(uploadedObjects, contentImageTemplateUpload.UploadedKey)
+	}
+
+	sectionTemplateUpload, err := s.storeOptionalVersionPDF(bookID, versionNumber, "section-template", req.SectionTemplatePDF)
+	if err != nil {
+		tx.Rollback()
+		s.cleanupUploadedBookObjects(uploadedObjects)
+		return nil, err
+	}
+	if sectionTemplateUpload.UploadedKey != "" {
+		uploadedObjects = append(uploadedObjects, sectionTemplateUpload.UploadedKey)
+	}
+
 	sourcePDFContent, err := s.resolveBookUploadContent(req.SourcePDF, sourceUpload, ErrBookPDFNotFound)
 	if err != nil {
 		tx.Rollback()
@@ -339,6 +369,14 @@ func (s *BookService) CreateBookVersion(bookID int, req SaveBookVersionRequest) 
 		return nil, err
 	}
 	version.LayoutSettings = deriveInitialBookLayoutSettings(sourcePDFContent, req.ContentTemplatePageNumber, req.SectionTemplatePageNumber)
+	version.LayoutSettings = applyBookTemplatePDFUploadsToLayout(version.LayoutSettings, contentTemplateUpload, contentImageTemplateUpload, sectionTemplateUpload)
+
+	generationTemplates, err := s.resolveGenerationTemplateContents(req.ContentTemplatePDF, req.ContentImageTemplatePDF, req.SectionTemplatePDF, contentTemplateUpload, contentImageTemplateUpload, sectionTemplateUpload)
+	if err != nil {
+		tx.Rollback()
+		s.cleanupUploadedBookObjects(uploadedObjects)
+		return nil, err
+	}
 
 	if err := tx.Create(&version).Error; err != nil {
 		tx.Rollback()
@@ -374,7 +412,7 @@ func (s *BookService) CreateBookVersion(bookID int, req SaveBookVersionRequest) 
 		s.cleanupUploadedBookObjects(uploadedObjects)
 		return nil, err
 	}
-	generatedUpload, err := s.generateAndStoreVersionPDF(bookID, &version, sourcePDFContent, sections, fields, nil, nil, nil)
+	generatedUpload, err := s.generateAndStoreVersionPDF(bookID, &version, sourcePDFContent, sections, fields, nil, nil, nil, generationTemplates)
 	if err != nil {
 		tx.Rollback()
 		s.cleanupUploadedBookObjects(uploadedObjects)
@@ -1076,7 +1114,12 @@ func (s *BookService) ApproveBookSubmission(bookID int, submissionID int, userID
 		tx.Rollback()
 		return nil, err
 	}
-	generatedUpload, err := s.generateAndStoreVersionPDF(bookID, version, sourcePDFContent, sections, fields, approvedSubmissions, valuesBySubmission, imagesBySubmission)
+	generationTemplates, err := s.loadGenerationTemplatesFromLayout(version.LayoutSettings)
+	if err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	generatedUpload, err := s.generateAndStoreVersionPDF(bookID, version, sourcePDFContent, sections, fields, approvedSubmissions, valuesBySubmission, imagesBySubmission, generationTemplates)
 	if err != nil {
 		tx.Rollback()
 		return nil, err
@@ -1386,6 +1429,18 @@ func normalizeSaveBookVersionRequest(req SaveBookVersionRequest, requireSourcePD
 		cleaned := sanitizeBookUploadInput(*req.SourcePDF)
 		req.SourcePDF = &cleaned
 	}
+	if req.ContentTemplatePDF != nil {
+		cleaned := sanitizeBookUploadInput(*req.ContentTemplatePDF)
+		req.ContentTemplatePDF = &cleaned
+	}
+	if req.ContentImageTemplatePDF != nil {
+		cleaned := sanitizeBookUploadInput(*req.ContentImageTemplatePDF)
+		req.ContentImageTemplatePDF = &cleaned
+	}
+	if req.SectionTemplatePDF != nil {
+		cleaned := sanitizeBookUploadInput(*req.SectionTemplatePDF)
+		req.SectionTemplatePDF = &cleaned
+	}
 	req.GeneratedPDF = nil
 
 	if requireSourcePDF {
@@ -1395,6 +1450,21 @@ func normalizeSaveBookVersionRequest(req SaveBookVersionRequest, requireSourcePD
 	}
 	if req.SourcePDF != nil && !isEmptyBookUploadInput(*req.SourcePDF) {
 		if err := validatePDFUploadInput(*req.SourcePDF, "source_pdf"); err != nil {
+			return req, err
+		}
+	}
+	if req.ContentTemplatePDF != nil && !isEmptyBookUploadInput(*req.ContentTemplatePDF) {
+		if err := validatePDFUploadInput(*req.ContentTemplatePDF, "content_template_pdf"); err != nil {
+			return req, err
+		}
+	}
+	if req.ContentImageTemplatePDF != nil && !isEmptyBookUploadInput(*req.ContentImageTemplatePDF) {
+		if err := validatePDFUploadInput(*req.ContentImageTemplatePDF, "content_image_template_pdf"); err != nil {
+			return req, err
+		}
+	}
+	if req.SectionTemplatePDF != nil && !isEmptyBookUploadInput(*req.SectionTemplatePDF) {
+		if err := validatePDFUploadInput(*req.SectionTemplatePDF, "section_template_pdf"); err != nil {
 			return req, err
 		}
 	}
@@ -2628,8 +2698,101 @@ func (s *BookService) resolveBookUploadContent(input *BookUploadInput, stored st
 	return data, nil
 }
 
-func (s *BookService) generateAndStoreVersionPDF(bookID int, version *BookVersion, sourcePDF []byte, sections []BookVersionSection, fields []BookVersionField, submissions []BookSubmission, valuesBySubmission map[int][]BookSubmissionValue, imagesBySubmission map[int]*storedBookUploadContent) (storedBookUpload, error) {
-	generatedPDF, err := generateBookVersionPDF(sourcePDF, *version, sections, fields, submissions, valuesBySubmission, imagesBySubmission)
+func (s *BookService) resolveOptionalBookUploadContent(input *BookUploadInput, stored storedBookUpload) ([]byte, error) {
+	if input == nil && !hasStoredBookFile(stored.ObjectKey, stored.StorageURI, stored.FileURL) {
+		return nil, nil
+	}
+	if input != nil && isEmptyBookUploadInput(*input) && !hasStoredBookFile(stored.ObjectKey, stored.StorageURI, stored.FileURL) {
+		return nil, nil
+	}
+	return s.resolveBookUploadContent(input, stored, ErrBookPDFNotFound)
+}
+
+func (s *BookService) resolveGenerationTemplateContents(contentInput *BookUploadInput, imageInput *BookUploadInput, sectionInput *BookUploadInput, contentUpload storedBookUpload, imageUpload storedBookUpload, sectionUpload storedBookUpload) (bookGenerationTemplates, error) {
+	contentTemplate, err := s.resolveOptionalBookUploadContent(contentInput, contentUpload)
+	if err != nil {
+		return bookGenerationTemplates{}, err
+	}
+	contentImageTemplate, err := s.resolveOptionalBookUploadContent(imageInput, imageUpload)
+	if err != nil {
+		return bookGenerationTemplates{}, err
+	}
+	sectionTemplate, err := s.resolveOptionalBookUploadContent(sectionInput, sectionUpload)
+	if err != nil {
+		return bookGenerationTemplates{}, err
+	}
+	return bookGenerationTemplates{
+		ContentTemplatePDF:      contentTemplate,
+		ContentImageTemplatePDF: contentImageTemplate,
+		SectionTemplatePDF:      sectionTemplate,
+	}, nil
+}
+
+func (s *BookService) loadGenerationTemplatesFromLayout(raw json.RawMessage) (bookGenerationTemplates, error) {
+	layout := parseBookLayoutSettings(raw)
+	contentTemplate, err := s.downloadBookTemplatePDF(layout.ContentPage.TemplatePDF)
+	if err != nil {
+		return bookGenerationTemplates{}, err
+	}
+	contentImageTemplate, err := s.downloadBookTemplatePDF(layout.ContentPage.ImageTemplatePDF)
+	if err != nil {
+		return bookGenerationTemplates{}, err
+	}
+	sectionTemplate, err := s.downloadBookTemplatePDF(layout.SectionPage.TemplatePDF)
+	if err != nil {
+		return bookGenerationTemplates{}, err
+	}
+	return bookGenerationTemplates{
+		ContentTemplatePDF:      contentTemplate,
+		ContentImageTemplatePDF: contentImageTemplate,
+		SectionTemplatePDF:      sectionTemplate,
+	}, nil
+}
+
+func (s *BookService) downloadBookTemplatePDF(ref bookTemplatePDF) ([]byte, error) {
+	if !hasBookTemplatePDF(ref) {
+		return nil, nil
+	}
+	data, _, err := s.downloadStoredBookObject(storedBookObjectRef{
+		ObjectKey: strings.TrimSpace(ref.ObjectKey),
+		FileURL:   coalesceString(ref.StorageURI, ref.FileURL),
+	}, ErrBookPDFNotFound)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func applyBookTemplatePDFUploadsToLayout(raw json.RawMessage, contentUpload storedBookUpload, imageUpload storedBookUpload, sectionUpload storedBookUpload) json.RawMessage {
+	layout := parseBookLayoutSettings(raw)
+	if hasStoredBookFile(contentUpload.ObjectKey, contentUpload.StorageURI, contentUpload.FileURL) {
+		layout.ContentPage.TemplatePDF = bookTemplatePDFFromStoredUpload(contentUpload)
+	}
+	if hasStoredBookFile(imageUpload.ObjectKey, imageUpload.StorageURI, imageUpload.FileURL) {
+		layout.ContentPage.ImageTemplatePDF = bookTemplatePDFFromStoredUpload(imageUpload)
+	}
+	if hasStoredBookFile(sectionUpload.ObjectKey, sectionUpload.StorageURI, sectionUpload.FileURL) {
+		layout.SectionPage.TemplatePDF = bookTemplatePDFFromStoredUpload(sectionUpload)
+	}
+	return mustMarshalBookLayoutSettings(layout)
+}
+
+func bookTemplatePDFFromStoredUpload(upload storedBookUpload) bookTemplatePDF {
+	return bookTemplatePDF{
+		FileName:   strings.TrimSpace(upload.FileName),
+		FileURL:    strings.TrimSpace(upload.FileURL),
+		StorageURI: strings.TrimSpace(upload.StorageURI),
+		ObjectKey:  strings.TrimSpace(upload.ObjectKey),
+		PageNumber: 1,
+	}
+}
+
+func hasBookTemplatePDF(ref bookTemplatePDF) bool {
+	return hasStoredBookFile(ref.ObjectKey, ref.StorageURI, ref.FileURL)
+}
+
+func (s *BookService) generateAndStoreVersionPDF(bookID int, version *BookVersion, sourcePDF []byte, sections []BookVersionSection, fields []BookVersionField, submissions []BookSubmission, valuesBySubmission map[int][]BookSubmissionValue, imagesBySubmission map[int]*storedBookUploadContent, templates bookGenerationTemplates) (storedBookUpload, error) {
+	generatedPDF, err := generateBookVersionPDF(sourcePDF, *version, sections, fields, submissions, valuesBySubmission, imagesBySubmission, templates)
 	if err != nil {
 		return storedBookUpload{}, err
 	}
@@ -2665,6 +2828,17 @@ func (s *BookService) storeVersionPDF(bookID int, versionNumber int, folder stri
 		return storedBookUpload{}, err
 	}
 	return s.storeBookUpload(input, s.buildVersionPDFObjectKey(bookID, versionNumber, folder, input.FileName, input.MimeType), "book-"+folder)
+}
+
+func (s *BookService) storeOptionalVersionPDF(bookID int, versionNumber int, folder string, input *BookUploadInput) (storedBookUpload, error) {
+	if input == nil {
+		return storedBookUpload{}, nil
+	}
+	cleaned := sanitizeBookUploadInput(*input)
+	if isEmptyBookUploadInput(cleaned) {
+		return storedBookUpload{}, nil
+	}
+	return s.storeVersionPDF(bookID, versionNumber, folder, cleaned)
 }
 
 func (s *BookService) storeSubmissionImage(bookID int, submissionID int, input BookUploadInput) (storedBookUpload, error) {

@@ -132,7 +132,7 @@ func TestGenerateBookVersionPDFAppendsSubmissionAndSectionPages(t *testing.T) {
 		},
 	}
 
-	generatedPDF, err := generateBookVersionPDF(sourcePDF, version, sections, fields, submissions, valuesBySubmission, nil)
+	generatedPDF, err := generateBookVersionPDF(sourcePDF, version, sections, fields, submissions, valuesBySubmission, nil, bookGenerationTemplates{})
 	if err != nil {
 		t.Fatalf("generateBookVersionPDF returned error: %v", err)
 	}

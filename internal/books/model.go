@@ -163,6 +163,9 @@ type SaveBookVersionRequest struct {
 	ActivateImmediately       bool                            `json:"activate_immediately"`
 	SourcePDF                 *BookUploadInput                `json:"source_pdf,omitempty"`
 	GeneratedPDF              *BookUploadInput                `json:"generated_pdf,omitempty"`
+	ContentTemplatePDF        *BookUploadInput                `json:"content_template_pdf,omitempty"`
+	ContentImageTemplatePDF   *BookUploadInput                `json:"content_image_template_pdf,omitempty"`
+	SectionTemplatePDF        *BookUploadInput                `json:"section_template_pdf,omitempty"`
 	CreatedBy                 *int                            `json:"created_by,omitempty"`
 	UpdatedBy                 *int                            `json:"updated_by,omitempty"`
 }

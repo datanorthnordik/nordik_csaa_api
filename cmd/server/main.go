@@ -9,6 +9,7 @@ import (
 	"nordikcsaaapi/internal/config"
 	"nordikcsaaapi/internal/events"
 	"nordikcsaaapi/internal/gallery"
+	"nordikcsaaapi/internal/knowledgecenter"
 	"nordikcsaaapi/internal/memorial"
 	"nordikcsaaapi/internal/menus"
 	"nordikcsaaapi/internal/newsletters"
@@ -74,6 +75,7 @@ func main() {
 
 	userService := &auth.AuthService{DB: db}
 	auth.RegisterRoutes(r, userService, &cfg)
+	emailSender := util.NewEmailService(&cfg)
 	eventService := &events.EventService{DB: db, BucketName: cfg.DriveBucketName, BucketPrefix: cfg.DriveBucketPrefix}
 	events.RegisterRoutes(r, eventService, auth.RequireBearerAuth(&cfg))
 	galleryService := &gallery.GalleryService{DB: db, BucketName: cfg.DriveBucketName, BucketPrefix: cfg.DriveBucketPrefix}
@@ -92,11 +94,16 @@ func main() {
 	resources.RegisterRoutes(r, resourceService, auth.RequireBearerAuth(&cfg))
 	memorialService := &memorial.MemorialService{DB: db, BucketName: cfg.DriveBucketName, BucketPrefix: cfg.DriveBucketPrefix}
 	memorial.RegisterRoutes(r, memorialService, auth.RequireBearerAuth(&cfg))
+	knowledgeCenterService := &knowledgecenter.KnowledgeCenterService{
+		DB:          db,
+		EmailSender: emailSender,
+	}
+	knowledgecenter.RegisterRoutes(r, knowledgeCenterService, auth.RequireBearerAuth(&cfg))
 	bookService := &books.BookService{
 		DB:           db,
 		BucketName:   cfg.DriveBucketName,
 		BucketPrefix: cfg.DriveBucketPrefix,
-		EmailSender:  util.NewEmailService(&cfg),
+		EmailSender:  emailSender,
 	}
 	books.RegisterRoutes(r, bookService, auth.RequireBearerAuth(&cfg))
 	r.GET("/health", func(c *gin.Context) {
