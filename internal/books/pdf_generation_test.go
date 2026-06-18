@@ -159,6 +159,9 @@ func TestGenerateBookVersionPDFAppendsSubmissionAndSectionPages(t *testing.T) {
 		!strings.Contains(page4Text, "4cupsall-purposeflour") {
 		t.Fatalf("expected appended recipe page to contain body labels, got %q", page4Text)
 	}
+	if strings.Contains(page4Text, "daisy'supjon") || strings.Contains(page4Text, "upjonorbreadonastick") {
+		t.Fatalf("expected appended recipe page to replace template text, got old template content %q", page4Text)
+	}
 	if !strings.Contains(page5Text, "campfireclassics") {
 		t.Fatalf("expected generated-only section divider page to contain section title, got %q", page5Text)
 	}

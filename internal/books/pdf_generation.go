@@ -868,11 +868,9 @@ func appendContentTemplatePage(pdfDoc *gofpdf.Fpdf, importer *gofpdi.Importer, c
 	}
 
 	pdfDoc.AddPageFormat(pageOrientation(template.Width, template.Height), gofpdf.SizeType{Wd: template.Width, Ht: template.Height})
-	importer.UseImportedTemplate(pdfDoc, template.ID, 0, 0, template.Width, template.Height)
+	drawCleanContentTemplatePage(pdfDoc, layout, template.Width, template.Height)
 
-	eraseLayout := mergedContentEraseLayout(layout, scaledDefaultContentPageLayout(layout.TemplatePageNumber, template.Width, template.Height))
-	drawMask(pdfDoc, eraseLayout.HeadingMask)
-	drawMask(pdfDoc, eraseLayout.BodyMask)
+	drawMask(pdfDoc, layout.HeadingMask)
 
 	if submission.Image != nil {
 		drawSubmissionImage(pdfDoc, layout.ImageArea, *submission.Image)
@@ -880,6 +878,14 @@ func appendContentTemplatePage(pdfDoc *gofpdf.Fpdf, importer *gofpdi.Importer, c
 	drawFittedTextBox(pdfDoc, layout.HeadingArea, submission.Heading)
 	drawBodyBlocks(pdfDoc, layout.BodyArea, submission.Body)
 	return pdfDoc.Error()
+}
+
+func drawCleanContentTemplatePage(pdfDoc *gofpdf.Fpdf, layout bookContentPageLayout, pageWidth float64, pageHeight float64) {
+	backgroundColor := chooseNonEmpty(strings.TrimSpace(layout.BodyMask.BackgroundColor), "#f7f0df")
+	r, g, b := parseHexColor(backgroundColor)
+	pdfDoc.SetAlpha(1, "Normal")
+	pdfDoc.SetFillColor(r, g, b)
+	pdfDoc.Rect(0, 0, pageWidth, pageHeight, "F")
 }
 
 func appendSectionTemplatePage(pdfDoc *gofpdf.Fpdf, importer *gofpdi.Importer, cache map[int]bookImportedTemplate, sourcePDF []byte, layout bookSectionPageLayout, title string) error {
