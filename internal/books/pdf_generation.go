@@ -164,21 +164,21 @@ func defaultBookLayoutSettingsModel() bookLayoutSettings {
 		Version: bookLayoutSettingsVersion,
 		ContentPage: bookContentPageLayout{
 			HeadingMask: bookMaskLayout{
-				X:               60,
-				Y:               100,
-				Width:           386,
-				Height:          70,
+				X:               48,
+				Y:               34,
+				Width:           516,
+				Height:          110,
 				BackgroundColor: "#7f9892",
-				Alpha:           0.98,
+				Alpha:           1,
 			},
 			HeadingArea: bookTextLayout{
-				X:           78,
-				Y:           112,
-				Width:       316,
-				Height:      86,
+				X:           86,
+				Y:           58,
+				Width:       440,
+				Height:      54,
 				FontFamily:  "Helvetica",
 				FontStyle:   "",
-				FontSize:    19,
+				FontSize:    20,
 				MinFontSize: 13,
 				LineHeight:  1.2,
 				TextAlign:   "C",
@@ -186,17 +186,17 @@ func defaultBookLayoutSettingsModel() bookLayoutSettings {
 			},
 			BodyMask: bookMaskLayout{
 				X:               54,
-				Y:               206,
-				Width:           392,
-				Height:          320,
+				Y:               140,
+				Width:           404,
+				Height:          390,
 				BackgroundColor: "#f7f0df",
-				Alpha:           0.94,
+				Alpha:           1,
 			},
 			BodyArea: bookBodyLayout{
-				X:                78,
-				Y:                214,
-				Width:            280,
-				Height:           314,
+				X:                72,
+				Y:                160,
+				Width:            330,
+				Height:           350,
 				FontFamily:       "Helvetica",
 				FontStyle:        "",
 				FontSize:         11,
@@ -212,10 +212,10 @@ func defaultBookLayoutSettingsModel() bookLayoutSettings {
 				ParagraphSpacing: 10,
 			},
 			ImageArea: bookImageLayout{
-				X:      316,
-				Y:      422,
-				Width:  108,
-				Height: 108,
+				X:      314,
+				Y:      542,
+				Width:  120,
+				Height: 120,
 				Alpha:  0.88,
 			},
 		},
@@ -556,14 +556,17 @@ func repairContentPageLayout(layout bookContentPageLayout, defaults bookContentP
 
 	if !isPlausibleMaskLayout(layout.HeadingMask, layout.PageWidth, layout.PageHeight, layout.PageWidth*0.22, layout.PageHeight*0.05) ||
 		!isPlausibleTextLayout(layout.HeadingArea, layout.PageWidth, layout.PageHeight, layout.PageWidth*0.18, layout.PageHeight*0.03) ||
-		layout.HeadingArea.Y > layout.PageHeight*0.4 {
+		layout.HeadingArea.Y > layout.PageHeight*0.12 ||
+		layout.HeadingMask.Y > layout.PageHeight*0.1 {
 		layout.HeadingMask = defaults.HeadingMask
 		layout.HeadingArea = defaults.HeadingArea
 	}
 
 	if !isPlausibleMaskLayout(layout.BodyMask, layout.PageWidth, layout.PageHeight, layout.PageWidth*0.26, layout.PageHeight*0.12) ||
 		!isPlausibleBodyLayout(layout.BodyArea, layout.PageWidth, layout.PageHeight) ||
-		layout.BodyArea.Y <= layout.HeadingArea.Y+layout.HeadingArea.Height*0.25 {
+		layout.BodyArea.Y <= layout.HeadingArea.Y+layout.HeadingArea.Height*0.25 ||
+		layout.BodyArea.Y > layout.PageHeight*0.25 ||
+		layout.BodyMask.Y > layout.PageHeight*0.24 {
 		layout.BodyMask = defaults.BodyMask
 		layout.BodyArea = defaults.BodyArea
 	}
@@ -578,6 +581,31 @@ func repairContentPageLayout(layout bookContentPageLayout, defaults bookContentP
 		layout.HeadingArea.TextAlign = defaults.HeadingArea.TextAlign
 	}
 	return layout
+}
+
+func mergedContentEraseLayout(layout bookContentPageLayout, defaults bookContentPageLayout) bookContentPageLayout {
+	layout.HeadingMask = mergeEraseMask(layout.HeadingMask, defaults.HeadingMask, layout.PageWidth, layout.PageHeight)
+	layout.BodyMask = mergeEraseMask(layout.BodyMask, defaults.BodyMask, layout.PageWidth, layout.PageHeight)
+	return layout
+}
+
+func mergedSectionEraseLayout(layout bookSectionPageLayout, defaults bookSectionPageLayout) bookSectionPageLayout {
+	layout.TitleMask = mergeEraseMask(layout.TitleMask, defaults.TitleMask, layout.PageWidth, layout.PageHeight)
+	return layout
+}
+
+func mergeEraseMask(layout bookMaskLayout, defaults bookMaskLayout, pageWidth float64, pageHeight float64) bookMaskLayout {
+	left := math.Min(layout.X, defaults.X)
+	top := math.Min(layout.Y, defaults.Y)
+	right := math.Max(layout.X+layout.Width, defaults.X+defaults.Width)
+	bottom := math.Max(layout.Y+layout.Height, defaults.Y+defaults.Height)
+	merged := defaults
+	merged.X = left
+	merged.Y = top
+	merged.Width = right - left
+	merged.Height = bottom - top
+	merged.Alpha = 1
+	return clampMaskLayout(merged, pageWidth, pageHeight)
 }
 
 func repairSectionPageLayout(layout bookSectionPageLayout, defaults bookSectionPageLayout) bookSectionPageLayout {
@@ -842,8 +870,9 @@ func appendContentTemplatePage(pdfDoc *gofpdf.Fpdf, importer *gofpdi.Importer, c
 	pdfDoc.AddPageFormat(pageOrientation(template.Width, template.Height), gofpdf.SizeType{Wd: template.Width, Ht: template.Height})
 	importer.UseImportedTemplate(pdfDoc, template.ID, 0, 0, template.Width, template.Height)
 
-	drawMask(pdfDoc, layout.HeadingMask)
-	drawMask(pdfDoc, layout.BodyMask)
+	eraseLayout := mergedContentEraseLayout(layout, scaledDefaultContentPageLayout(layout.TemplatePageNumber, template.Width, template.Height))
+	drawMask(pdfDoc, eraseLayout.HeadingMask)
+	drawMask(pdfDoc, eraseLayout.BodyMask)
 
 	if submission.Image != nil {
 		drawSubmissionImage(pdfDoc, layout.ImageArea, *submission.Image)
@@ -862,7 +891,8 @@ func appendSectionTemplatePage(pdfDoc *gofpdf.Fpdf, importer *gofpdi.Importer, c
 	pdfDoc.AddPageFormat(pageOrientation(template.Width, template.Height), gofpdf.SizeType{Wd: template.Width, Ht: template.Height})
 	importer.UseImportedTemplate(pdfDoc, template.ID, 0, 0, template.Width, template.Height)
 
-	drawMask(pdfDoc, layout.TitleMask)
+	eraseLayout := mergedSectionEraseLayout(layout, scaledDefaultSectionPageLayout(layout.TemplatePageNumber, template.Width, template.Height))
+	drawMask(pdfDoc, eraseLayout.TitleMask)
 	drawFittedTextBox(pdfDoc, layout.TitleArea, strings.TrimSpace(title))
 	return pdfDoc.Error()
 }
