@@ -53,6 +53,25 @@ func TestNormalizeSaveBookVersionRequestIgnoresClientLayoutSettings(t *testing.T
 	}
 }
 
+func TestNormalizeSaveBookVersionRequestIgnoresClientGeneratedPDF(t *testing.T) {
+	t.Helper()
+
+	req := validSaveBookVersionRequest()
+	req.GeneratedPDF = &BookUploadInput{
+		FileName: "manual.pdf",
+		MimeType: "application/pdf",
+		Content:  []byte("%PDF-1.4 manual"),
+	}
+
+	normalized, err := normalizeSaveBookVersionRequest(req, true)
+	if err != nil {
+		t.Fatalf("normalizeSaveBookVersionRequest returned error: %v", err)
+	}
+	if normalized.GeneratedPDF != nil {
+		t.Fatalf("expected client generated PDF upload to be ignored, got %#v", normalized.GeneratedPDF)
+	}
+}
+
 func TestNormalizeSaveBookVersionRequestRejectsDuplicateFieldLabels(t *testing.T) {
 	t.Helper()
 
