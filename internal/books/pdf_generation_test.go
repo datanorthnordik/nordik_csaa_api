@@ -2,6 +2,8 @@ package books
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -97,6 +99,38 @@ func TestDeriveInitialBookLayoutSettingsFromTemplatePages(t *testing.T) {
 	}
 	if layout.SectionPage.TitleArea.FontSize < 20 {
 		t.Fatalf("expected divider title font size to be derived from template, got %#v", layout.SectionPage.TitleArea)
+	}
+}
+
+func TestResolvePDFFontSkipsInvalidCustomFontCandidate(t *testing.T) {
+	t.Helper()
+
+	fontDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(fontDir, "GlacialIndifference-Regular.ttf"), []byte("not a real ttf"), 0o644); err != nil {
+		t.Fatalf("write invalid font candidate: %v", err)
+	}
+	t.Setenv("BOOK_FONT_DIR", fontDir)
+
+	pdf := gofpdf.NewCustom(&gofpdf.InitType{
+		OrientationStr: "P",
+		UnitStr:        "pt",
+		Size:           gofpdf.SizeType{Wd: 612, Ht: 792},
+	})
+
+	family, style := resolvePDFFont(pdf, "BookGlacial", "")
+	pdf.AddPage()
+	pdf.SetFont(family, style, 12)
+	if err := pdf.Error(); err != nil {
+		t.Fatalf("expected invalid custom font to fall back to usable font, got %v", err)
+	}
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("expected SplitText not to panic after font fallback, got %v", recovered)
+		}
+	}()
+	if lines := pdf.SplitText("4 cups all-purpose flour", 200); len(lines) == 0 {
+		t.Fatalf("expected SplitText to return lines with fallback font")
 	}
 }
 

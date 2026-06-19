@@ -2201,10 +2201,21 @@ func registerPDFCustomFont(pdfDoc *gofpdf.Fpdf, family string, style string) boo
 	}
 
 	for _, candidate := range customPDFFontCandidates(family, style) {
-		if _, err := os.Stat(candidate); err != nil {
+		fontBytes, err := os.ReadFile(candidate)
+		if err != nil {
 			continue
 		}
-		pdfDoc.AddUTF8Font(family, style, candidate)
+		pdfDoc.ClearError()
+		pdfDoc.AddUTF8FontFromBytes(family, style, fontBytes)
+		if pdfDoc.Error() != nil {
+			pdfDoc.ClearError()
+			continue
+		}
+		pdfDoc.SetFont(family, style, 12)
+		if pdfDoc.Error() != nil {
+			pdfDoc.ClearError()
+			continue
+		}
 		return true
 	}
 	return false
