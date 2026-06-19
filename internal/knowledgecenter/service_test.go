@@ -1,9 +1,23 @@
 package knowledgecenter
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
+
+type recordingKnowledgeCenterEmailSender struct {
+	to      []string
+	subject string
+	body    string
+}
+
+func (r *recordingKnowledgeCenterEmailSender) SendEmail(to []string, subject string, body string) error {
+	r.to = append([]string(nil), to...)
+	r.subject = subject
+	r.body = body
+	return nil
+}
 
 func TestNormalizeCreateKnowledgeCenterSubmissionRequest(t *testing.T) {
 	req, err := normalizeCreateKnowledgeCenterSubmissionRequest(CreateKnowledgeCenterSubmissionRequest{
@@ -135,5 +149,48 @@ func TestNormalizeKnowledgeCenterEmailList(t *testing.T) {
 
 	if len(resp) != 1 || resp[0] != "athul.narayanan@algomau.ca" {
 		t.Fatalf("unexpected normalized email list: %#v", resp)
+	}
+}
+
+func TestSendNewSubmissionEmailBestEffortBuildsUrgentActionableEmail(t *testing.T) {
+	sender := &recordingKnowledgeCenterEmailSender{}
+	service := &KnowledgeCenterService{EmailSender: sender}
+
+	service.sendNewSubmissionEmailBestEffort(KnowledgeCenterSubmission{
+		ID:             1,
+		SubmitterName:  "Alice Walker",
+		SubmitterEmail: "alice@example.com",
+		SubmitterPhone: "555-0100",
+		SubmissionType: KnowledgeCenterSubmissionTypeVideo,
+		Message:        "I have a clip to contribute.",
+		CreatedAt:      time.Date(2026, 6, 19, 14, 30, 0, 0, time.UTC),
+	})
+
+	if len(sender.to) != 1 || sender.to[0] != knowledgeCenterNotificationEmail {
+		t.Fatalf("unexpected recipients: %#v", sender.to)
+	}
+	if sender.subject != "Urgent: New Living History Hub submission from Alice Walker" {
+		t.Fatalf("unexpected subject: %q", sender.subject)
+	}
+
+	expectedSnippets := []string{
+		"Please log in to the CMS, open the Knowledge Center section, review this submission, and mark it as completed once action has been taken.",
+		knowledgeCenterCMSReviewURL,
+		"Friday, June 19, 2026 at 10:30 AM EDT",
+		"Content type: A video",
+		"\n\nI have a clip to contribute.\n\n",
+		"Please treat this submission as urgent",
+	}
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(sender.body, snippet) {
+			t.Fatalf("expected email body to contain %q, got:\n%s", snippet, sender.body)
+		}
+	}
+
+	if strings.Contains(sender.body, "Submission ID:") {
+		t.Fatalf("email body should not include submission ID, got:\n%s", sender.body)
+	}
+	if strings.Contains(sender.body, "2026-06-19T14:30:00Z") {
+		t.Fatalf("email body should use a readable date format, got:\n%s", sender.body)
 	}
 }

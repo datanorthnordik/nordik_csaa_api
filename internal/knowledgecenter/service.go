@@ -12,7 +12,10 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-const knowledgeCenterNotificationEmail = "athul.narayanan@algomau.ca"
+const (
+	knowledgeCenterNotificationEmail = "athul.narayanan@algomau.ca"
+	knowledgeCenterCMSReviewURL      = "https://nordikcsaacms-724838782318.us-west1.run.app/knowledge-center"
+)
 
 var (
 	ErrStoreUnavailable                  = errors.New("knowledge center service unavailable")
@@ -397,11 +400,11 @@ func (s *KnowledgeCenterService) sendNewSubmissionEmailBestEffort(submission Kno
 		return
 	}
 
-	subject := fmt.Sprintf("New Living History Hub submission from %s", strings.TrimSpace(submission.SubmitterName))
+	subject := fmt.Sprintf("Urgent: New Living History Hub submission from %s", strings.TrimSpace(submission.SubmitterName))
 	body := fmt.Sprintf(
-		"A new Living History Hub submission has been received.\n\nSubmission ID: %d\nSubmitted at: %s\nName: %s\nEmail: %s\nPhone: %s\nSubmission type: %s\n\nMessage:\n%s\n",
-		submission.ID,
-		submission.CreatedAt.Format(time.RFC3339),
+		"Hello Team,\n\nAn urgent new Living History Hub submission has been received and is ready for review.\n\nPlease log in to the CMS, open the Knowledge Center section, review this submission, and mark it as completed once action has been taken.\n\nCMS review link:\n%s\n\nSubmitted on:\n%s\n\nContributor details:\nName: %s\nEmail: %s\nPhone: %s\nContent type: %s\n\n%s\n\nPlease treat this submission as urgent and follow up with the contributor shortly for any additional details needed.\n",
+		knowledgeCenterCMSReviewURL,
+		formatKnowledgeCenterNotificationTime(submission.CreatedAt),
 		strings.TrimSpace(submission.SubmitterName),
 		strings.TrimSpace(submission.SubmitterEmail),
 		chooseNonEmpty(strings.TrimSpace(submission.SubmitterPhone), "Not provided"),
@@ -412,6 +415,15 @@ func (s *KnowledgeCenterService) sendNewSubmissionEmailBestEffort(submission Kno
 	if err := s.EmailSender.SendEmail(recipients, subject, body); err != nil {
 		log.Printf("knowledge center email send failed: recipients=%v subject=%q err=%v", recipients, subject, err)
 	}
+}
+
+func formatKnowledgeCenterNotificationTime(value time.Time) string {
+	location, err := time.LoadLocation("America/Toronto")
+	if err == nil {
+		value = value.In(location)
+	}
+
+	return value.Format("Monday, January 2, 2006 at 3:04 PM MST")
 }
 
 func normalizeKnowledgeCenterEmailList(emails []string) []string {
