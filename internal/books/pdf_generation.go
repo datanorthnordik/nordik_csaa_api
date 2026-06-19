@@ -12,6 +12,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -1262,6 +1263,10 @@ func analyzeTemplatePage(page rpdf.Page) (bookTemplateAnalysis, bool) {
 	if len(titleLines) > 0 {
 		titleBox := unionTextLines(titleLines)
 		titleFontName := dominantFontName(titleLines)
+		titleTextFontMissing := strings.TrimSpace(titleFontName) == ""
+		if titleTextFontMissing {
+			titleFontName = dominantPageFontName(page)
+		}
 		analysis.Title = titleBox
 		analysis.TitleMask = clampRect(expandRect(titleBox, math.Max(titleBox.Height*0.8, 18), math.Max(titleBox.Height*0.45, 10)), pageWidth, pageHeight)
 		analysis.TitleArea = clampRect(expandRect(titleBox, math.Max(titleBox.Height*0.25, 8), math.Max(titleBox.Height*0.2, 6)), pageWidth, pageHeight)
@@ -1269,7 +1274,7 @@ func analyzeTemplatePage(page rpdf.Page) (bookTemplateAnalysis, bool) {
 		analysis.TitleFontFamily, analysis.TitleFontStyle = mapPDFTitleFontToBuiltIn(titleFontName)
 		analysis.TitleTextTransform = detectTextTransform(titleLines)
 		analysis.TitleLetterSpacing = inferTitleLetterSpacing(titleLines, analysis.TitleFontSize)
-		if strings.TrimSpace(titleFontName) == "" && analysis.TitleFontSize > 0 {
+		if titleTextFontMissing && analysis.TitleFontSize > 0 {
 			analysis.TitleTextTransform = "uppercase"
 			if analysis.TitleLetterSpacing <= 0 {
 				analysis.TitleLetterSpacing = math.Max(analysis.TitleFontSize*0.16, 2.2)
@@ -1280,11 +1285,15 @@ func analyzeTemplatePage(page rpdf.Page) (bookTemplateAnalysis, bool) {
 
 	if len(bodyLines) > 0 {
 		bodyBox := unionTextLines(bodyLines)
+		bodyFontName := dominantFontName(bodyLines)
+		if strings.TrimSpace(bodyFontName) == "" {
+			bodyFontName = dominantPageFontName(page)
+		}
 		analysis.Body = bodyBox
 		analysis.BodyMask = clampRect(expandRect(bodyBox, math.Max(bodyBox.Width*0.04, 14), math.Max(bodyBox.Height*0.04, 10)), pageWidth, pageHeight)
 		analysis.BodyArea = clampRect(expandRect(bodyBox, math.Max(bodyBox.Width*0.015, 6), math.Max(bodyBox.Height*0.015, 4)), pageWidth, pageHeight)
 		analysis.BodyFontSize = dominantFontSize(bodyLines)
-		analysis.BodyFontFamily, analysis.BodyFontStyle = mapPDFBodyFontToBuiltIn(dominantFontName(bodyLines))
+		analysis.BodyFontFamily, analysis.BodyFontStyle = mapPDFBodyFontToBuiltIn(bodyFontName)
 		analysis.BodyLineHeight = dominantLineHeight(bodyLines, analysis.BodyFontSize)
 		analysis.BodyAlign = "L"
 	}
@@ -1508,6 +1517,43 @@ func dominantFontName(lines []bookTextLine) string {
 		}
 	}
 	return bestName
+}
+
+func dominantPageFontName(page rpdf.Page) string {
+	if page.V.IsNull() {
+		return ""
+	}
+	fonts := page.Resources().Key("Font")
+	if fonts.IsNull() {
+		return ""
+	}
+
+	counts := make(map[string]int)
+	bestName := ""
+	bestCount := 0
+	for _, key := range fonts.Keys() {
+		name := pageFontDescriptorName(fonts.Key(key))
+		if strings.TrimSpace(name) == "" {
+			name = fonts.Key(key).Key("BaseFont").Name()
+		}
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		counts[name]++
+		if counts[name] > bestCount {
+			bestName = name
+			bestCount = counts[name]
+		}
+	}
+	return bestName
+}
+
+func pageFontDescriptorName(font rpdf.Value) string {
+	descriptor := font.Key("FontDescriptor")
+	if descriptor.IsNull() {
+		descriptor = font.Key("DescendantFonts").Index(0).Key("FontDescriptor")
+	}
+	return descriptor.Key("FontName").Name()
 }
 
 func dominantFontSize(lines []bookTextLine) float64 {
@@ -1988,12 +2034,19 @@ func drawTrackedTextBox(pdfDoc *gofpdf.Fpdf, layout bookTextLayout, text string,
 		x = layout.X + math.Max(layout.Width-textWidth, 0)
 	}
 
-	y := layout.Y + math.Max((layout.Height-lineHeight)/2, 0) + (fontSize * 0.86)
+	y := layout.Y + math.Max((layout.Height-lineHeight)/2, 0) + (fontSize * trackedTextBaselineFactor(layout))
 	for _, char := range text {
 		value := string(char)
 		pdfDoc.Text(x, y, value)
 		x += pdfDoc.GetStringWidth(value) + letterSpacing
 	}
+}
+
+func trackedTextBaselineFactor(layout bookTextLayout) float64 {
+	if strings.EqualFold(strings.TrimSpace(layout.TextTransform), "uppercase") && layout.LetterSpacing > 0 {
+		return 1.08
+	}
+	return 0.86
 }
 
 func effectiveLetterSpacing(layout bookTextLayout, fontSize float64) float64 {
@@ -2136,7 +2189,7 @@ func resolvePDFFont(pdfDoc *gofpdf.Fpdf, family string, style string) (string, s
 	if registerPDFCustomFont(pdfDoc, family, style) {
 		return family, style
 	}
-	if family == "BookSansLight" || family == "BookSans" || family == "BookHand" {
+	if family == "BookSansLight" || family == "BookSans" || family == "BookHand" || family == "BookGlacial" {
 		return "Helvetica", style
 	}
 	return family, style
@@ -2165,6 +2218,7 @@ func customPDFFontCandidates(family string, style string) []string {
 			return []string{
 				`C:\Windows\Fonts\segoeui.ttf`,
 				`C:\Windows\Fonts\arial.ttf`,
+				`/usr/share/fonts/dejavu/DejaVuSans.ttf`,
 				`/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf`,
 				`/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf`,
 			}
@@ -2173,6 +2227,7 @@ func customPDFFontCandidates(family string, style string) []string {
 			`C:\Windows\Fonts\segoeuil.ttf`,
 			`C:\Windows\Fonts\segoeuisl.ttf`,
 			`C:\Windows\Fonts\arial.ttf`,
+			`/usr/share/fonts/dejavu/DejaVuSans.ttf`,
 			`/usr/share/fonts/truetype/dejavu/DejaVuSans-ExtraLight.ttf`,
 			`/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf`,
 			`/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf`,
@@ -2182,6 +2237,7 @@ func customPDFFontCandidates(family string, style string) []string {
 			return []string{
 				`C:\Windows\Fonts\segoeuib.ttf`,
 				`C:\Windows\Fonts\arialbd.ttf`,
+				`/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf`,
 				`/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf`,
 				`/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf`,
 			}
@@ -2189,14 +2245,39 @@ func customPDFFontCandidates(family string, style string) []string {
 		return []string{
 			`C:\Windows\Fonts\segoeui.ttf`,
 			`C:\Windows\Fonts\arial.ttf`,
+			`/usr/share/fonts/dejavu/DejaVuSans.ttf`,
 			`/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf`,
 			`/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf`,
 		}
+	case "BookGlacial":
+		if strings.Contains(style, "B") {
+			return fontAssetCandidates(
+				[]string{"GlacialIndifference-Bold.ttf", "Glacial-Indifference-Bold.ttf"},
+				[]string{
+					`C:\Windows\Fonts\GOTHICB.TTF`,
+					`C:\Windows\Fonts\GILB____.TTF`,
+					`/usr/share/fonts/dejavu/DejaVuSans.ttf`,
+					`/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf`,
+					`/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf`,
+				},
+			)
+		}
+		return fontAssetCandidates(
+			[]string{"GlacialIndifference-Regular.ttf", "Glacial-Indifference-Regular.ttf"},
+			[]string{
+				`C:\Windows\Fonts\GOTHIC.TTF`,
+				`C:\Windows\Fonts\GIL_____.TTF`,
+				`/usr/share/fonts/dejavu/DejaVuSans.ttf`,
+				`/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf`,
+				`/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf`,
+			},
+		)
 	case "BookHand":
 		if strings.Contains(style, "B") {
 			return []string{
 				`C:\Windows\Fonts\comicbd.ttf`,
 				`C:\Windows\Fonts\comic.ttf`,
+				`/usr/share/fonts/dejavu/DejaVuSans.ttf`,
 				`/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf`,
 				`/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf`,
 			}
@@ -2204,12 +2285,29 @@ func customPDFFontCandidates(family string, style string) []string {
 		return []string{
 			`C:\Windows\Fonts\comic.ttf`,
 			`C:\Windows\Fonts\comicbd.ttf`,
+			`/usr/share/fonts/dejavu/DejaVuSans.ttf`,
 			`/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf`,
 			`/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf`,
 		}
 	default:
 		return nil
 	}
+}
+
+func fontAssetCandidates(fileNames []string, fallbacks []string) []string {
+	dirs := []string{}
+	if dir := strings.TrimSpace(os.Getenv("BOOK_FONT_DIR")); dir != "" {
+		dirs = append(dirs, dir)
+	}
+	dirs = append(dirs, "internal/books/fonts", "assets/fonts", "/app/fonts")
+
+	candidates := make([]string, 0, len(dirs)*len(fileNames)+len(fallbacks))
+	for _, dir := range dirs {
+		for _, fileName := range fileNames {
+			candidates = append(candidates, filepath.Join(dir, fileName))
+		}
+	}
+	return append(candidates, fallbacks...)
 }
 
 func normalizeFontSelection(family string, style string) (string, string) {
@@ -2222,6 +2320,9 @@ func normalizeFontSelection(family string, style string) (string, string) {
 	switch lower {
 	case "arial":
 		family = "Helvetica"
+	case "bookglacial", "glacialindifference", "glacialindifference-regular", "glacialindifferenceregular", "centurygothic":
+		family = "BookGlacial"
+		style = strings.ReplaceAll(style, "B", "")
 	case "booksanslight", "opensans", "opensans-light", "opensanslight", "notosans", "notosans-regular", "notosansregular", "segoeuilight", "segoeui-light":
 		family = "BookSansLight"
 		style = strings.ReplaceAll(style, "B", "")
@@ -2233,7 +2334,10 @@ func normalizeFontSelection(family string, style string) (string, string) {
 	case "helvetica", "times", "courier":
 		family = strings.ToUpper(family[:1]) + strings.ToLower(family[1:])
 	default:
-		if strings.Contains(lower, "comic") {
+		if strings.Contains(lower, "glacial") || strings.Contains(lower, "centurygothic") {
+			family = "BookGlacial"
+			style = strings.ReplaceAll(style, "B", "")
+		} else if strings.Contains(lower, "comic") {
 			family = "BookHand"
 			style = strings.ReplaceAll(style, "B", "")
 		} else if strings.Contains(lower, "opensans") || strings.Contains(lower, "notosans") {
@@ -2271,9 +2375,11 @@ func mapPDFFontToBuiltIn(fontName string, role string) (string, string) {
 	switch {
 	case lower == "":
 		if role == "body" {
-			return "BookHand", ""
+			return "BookGlacial", ""
 		}
 		return "BookSansLight", ""
+	case strings.Contains(lower, "glacial"):
+		return "BookGlacial", style
 	case strings.Contains(lower, "comic"):
 		return "BookHand", ""
 	case strings.Contains(lower, "opensans-light"), strings.Contains(lower, "open-sans-light"):
