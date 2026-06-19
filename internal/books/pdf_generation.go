@@ -583,31 +583,59 @@ func applyTemplateStyleHints(reader *rpdf.Reader, layout bookLayoutSettings) boo
 		return layout
 	}
 
-	if layout.ContentPage.HeadingArea.TextTransform == "" {
+	if analysis.TitleFontFamily != "" {
+		layout.ContentPage.HeadingArea.FontFamily = analysis.TitleFontFamily
+		layout.ContentPage.HeadingArea.FontStyle = analysis.TitleFontStyle
+	}
+	if analysis.TitleFontSize > 0 {
+		layout.ContentPage.HeadingArea.FontSize = analysis.TitleFontSize
+		layout.ContentPage.HeadingArea.MinFontSize = math.Max(analysis.TitleFontSize*0.68, 11)
+	}
+	if analysis.TitleAlign != "" {
+		layout.ContentPage.HeadingArea.TextAlign = analysis.TitleAlign
+	}
+	if analysis.TitleTextTransform != "" {
 		layout.ContentPage.HeadingArea.TextTransform = analysis.TitleTextTransform
 	}
-	if layout.ContentPage.HeadingArea.LetterSpacing <= 0 {
+	if analysis.TitleLetterSpacing > 0 {
 		layout.ContentPage.HeadingArea.LetterSpacing = analysis.TitleLetterSpacing
-		if layout.ContentPage.HeadingArea.TextTransform == "uppercase" && layout.ContentPage.HeadingArea.LetterSpacing <= 0 {
-			layout.ContentPage.HeadingArea.LetterSpacing = math.Max(layout.ContentPage.HeadingArea.FontSize*0.08, 1.2)
-		}
 	}
-	if analysis.BodyFontFamily != "" && isGenericPDFSansFont(layout.ContentPage.BodyArea.FontFamily) {
+	if layout.ContentPage.HeadingArea.TextTransform == "uppercase" && layout.ContentPage.HeadingArea.LetterSpacing <= 0 {
+		layout.ContentPage.HeadingArea.LetterSpacing = math.Max(layout.ContentPage.HeadingArea.FontSize*0.08, 1.2)
+	}
+	layout.ContentPage.HeadingArea = widenCenteredHeadingArea(layout.ContentPage.HeadingArea, layout.ContentPage.PageWidth)
+
+	if analysis.BodyFontFamily != "" {
 		layout.ContentPage.BodyArea.FontFamily = analysis.BodyFontFamily
 		layout.ContentPage.BodyArea.FontStyle = analysis.BodyFontStyle
 		layout.ContentPage.BodyArea.LabelFontFamily = analysis.BodyFontFamily
 		layout.ContentPage.BodyArea.LabelFontStyle = analysis.BodyFontStyle
 	}
-	if analysis.BodyLineHeight > 0 && layout.ContentPage.BodyArea.LineHeight > 1.22 {
+	if analysis.BodyFontSize > 0 {
+		layout.ContentPage.BodyArea.FontSize = analysis.BodyFontSize
+		layout.ContentPage.BodyArea.MinFontSize = math.Max(analysis.BodyFontSize*0.72, 8)
+		layout.ContentPage.BodyArea.LabelFontSize = analysis.BodyFontSize
+		layout.ContentPage.BodyArea.LabelMinFontSize = math.Max(analysis.BodyFontSize*0.72, 8)
+	}
+	if analysis.BodyLineHeight > 0 {
 		layout.ContentPage.BodyArea.LineHeight = analysis.BodyLineHeight
 	}
 	layout.ContentPage.BodyArea.TextAlign = "L"
+	if layout.ContentPage.BodyArea.FontSize > 0 {
+		layout.ContentPage.BodyArea.ParagraphSpacing = math.Max(layout.ContentPage.BodyArea.FontSize*0.62, 5)
+	}
 	return layout
 }
 
-func isGenericPDFSansFont(family string) bool {
-	normalized := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(family), " ", ""))
-	return normalized == "" || normalized == "helvetica" || normalized == "arial"
+func widenCenteredHeadingArea(layout bookTextLayout, pageWidth float64) bookTextLayout {
+	if pageWidth <= 0 || normalizePDFTextAlign(layout.TextAlign, "L") != "C" {
+		return layout
+	}
+	targetWidth := math.Max(layout.Width, pageWidth*0.84)
+	targetWidth = math.Min(targetWidth, pageWidth)
+	layout.Width = targetWidth
+	layout.X = math.Max((pageWidth-targetWidth)/2, 0)
+	return layout
 }
 
 func repairContentPageLayout(layout bookContentPageLayout, defaults bookContentPageLayout) bookContentPageLayout {
@@ -652,6 +680,7 @@ func repairContentPageLayout(layout bookContentPageLayout, defaults bookContentP
 	if layout.BodyArea.FontSize > 0 && layout.BodyArea.ParagraphSpacing > layout.BodyArea.FontSize {
 		layout.BodyArea.ParagraphSpacing = math.Max(layout.BodyArea.FontSize*0.62, 5)
 	}
+	layout.HeadingArea = widenCenteredHeadingArea(layout.HeadingArea, layout.PageWidth)
 
 	if layout.HeadingArea.FontSize < layout.BodyArea.FontSize {
 		layout.HeadingArea.FontSize = defaults.HeadingArea.FontSize
@@ -1129,6 +1158,7 @@ func applyContentTemplateAnalysis(layout *bookContentPageLayout, analysis bookTe
 		if layout.HeadingArea.TextTransform == "uppercase" && layout.HeadingArea.LetterSpacing <= 0 {
 			layout.HeadingArea.LetterSpacing = math.Max(analysis.TitleFontSize*0.08, 1.2)
 		}
+		layout.HeadingArea = widenCenteredHeadingArea(layout.HeadingArea, layout.PageWidth)
 	}
 
 	if analysis.Body.Width > 0 {
@@ -1231,13 +1261,20 @@ func analyzeTemplatePage(page rpdf.Page) (bookTemplateAnalysis, bool) {
 
 	if len(titleLines) > 0 {
 		titleBox := unionTextLines(titleLines)
+		titleFontName := dominantFontName(titleLines)
 		analysis.Title = titleBox
 		analysis.TitleMask = clampRect(expandRect(titleBox, math.Max(titleBox.Height*0.8, 18), math.Max(titleBox.Height*0.45, 10)), pageWidth, pageHeight)
 		analysis.TitleArea = clampRect(expandRect(titleBox, math.Max(titleBox.Height*0.25, 8), math.Max(titleBox.Height*0.2, 6)), pageWidth, pageHeight)
 		analysis.TitleFontSize = dominantFontSize(titleLines)
-		analysis.TitleFontFamily, analysis.TitleFontStyle = mapPDFFontToBuiltIn(dominantFontName(titleLines))
+		analysis.TitleFontFamily, analysis.TitleFontStyle = mapPDFTitleFontToBuiltIn(titleFontName)
 		analysis.TitleTextTransform = detectTextTransform(titleLines)
 		analysis.TitleLetterSpacing = inferTitleLetterSpacing(titleLines, analysis.TitleFontSize)
+		if strings.TrimSpace(titleFontName) == "" && analysis.TitleFontSize > 0 {
+			analysis.TitleTextTransform = "uppercase"
+			if analysis.TitleLetterSpacing <= 0 {
+				analysis.TitleLetterSpacing = math.Max(analysis.TitleFontSize*0.16, 2.2)
+			}
+		}
 		analysis.TitleAlign = detectTextAlign(titleBox, pageWidth)
 	}
 
@@ -1247,7 +1284,7 @@ func analyzeTemplatePage(page rpdf.Page) (bookTemplateAnalysis, bool) {
 		analysis.BodyMask = clampRect(expandRect(bodyBox, math.Max(bodyBox.Width*0.04, 14), math.Max(bodyBox.Height*0.04, 10)), pageWidth, pageHeight)
 		analysis.BodyArea = clampRect(expandRect(bodyBox, math.Max(bodyBox.Width*0.015, 6), math.Max(bodyBox.Height*0.015, 4)), pageWidth, pageHeight)
 		analysis.BodyFontSize = dominantFontSize(bodyLines)
-		analysis.BodyFontFamily, analysis.BodyFontStyle = mapPDFFontToBuiltIn(dominantFontName(bodyLines))
+		analysis.BodyFontFamily, analysis.BodyFontStyle = mapPDFBodyFontToBuiltIn(dominantFontName(bodyLines))
 		analysis.BodyLineHeight = dominantLineHeight(bodyLines, analysis.BodyFontSize)
 		analysis.BodyAlign = "L"
 	}
@@ -2099,7 +2136,7 @@ func resolvePDFFont(pdfDoc *gofpdf.Fpdf, family string, style string) (string, s
 	if registerPDFCustomFont(pdfDoc, family, style) {
 		return family, style
 	}
-	if family == "BookSansLight" || family == "BookSans" {
+	if family == "BookSansLight" || family == "BookSans" || family == "BookHand" {
 		return "Helvetica", style
 	}
 	return family, style
@@ -2155,6 +2192,21 @@ func customPDFFontCandidates(family string, style string) []string {
 			`/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf`,
 			`/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf`,
 		}
+	case "BookHand":
+		if strings.Contains(style, "B") {
+			return []string{
+				`C:\Windows\Fonts\comicbd.ttf`,
+				`C:\Windows\Fonts\comic.ttf`,
+				`/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf`,
+				`/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf`,
+			}
+		}
+		return []string{
+			`C:\Windows\Fonts\comic.ttf`,
+			`C:\Windows\Fonts\comicbd.ttf`,
+			`/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf`,
+			`/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf`,
+		}
 	default:
 		return nil
 	}
@@ -2175,10 +2227,16 @@ func normalizeFontSelection(family string, style string) (string, string) {
 		style = strings.ReplaceAll(style, "B", "")
 	case "booksans", "segoeui", "segoeui-regular":
 		family = "BookSans"
+	case "bookhand", "comicsans", "comicsansms", "comic":
+		family = "BookHand"
+		style = strings.ReplaceAll(style, "B", "")
 	case "helvetica", "times", "courier":
 		family = strings.ToUpper(family[:1]) + strings.ToLower(family[1:])
 	default:
-		if strings.Contains(lower, "opensans") || strings.Contains(lower, "notosans") {
+		if strings.Contains(lower, "comic") {
+			family = "BookHand"
+			style = strings.ReplaceAll(style, "B", "")
+		} else if strings.Contains(lower, "opensans") || strings.Contains(lower, "notosans") {
 			family = "BookSansLight"
 			style = strings.ReplaceAll(style, "B", "")
 		} else if strings.Contains(lower, "times") {
@@ -2192,7 +2250,15 @@ func normalizeFontSelection(family string, style string) (string, string) {
 	return family, style
 }
 
-func mapPDFFontToBuiltIn(fontName string) (string, string) {
+func mapPDFTitleFontToBuiltIn(fontName string) (string, string) {
+	return mapPDFFontToBuiltIn(fontName, "title")
+}
+
+func mapPDFBodyFontToBuiltIn(fontName string) (string, string) {
+	return mapPDFFontToBuiltIn(fontName, "body")
+}
+
+func mapPDFFontToBuiltIn(fontName string, role string) (string, string) {
 	lower := strings.ToLower(strings.TrimSpace(fontName))
 	style := ""
 	if strings.Contains(lower, "bold") {
@@ -2204,7 +2270,12 @@ func mapPDFFontToBuiltIn(fontName string) (string, string) {
 
 	switch {
 	case lower == "":
+		if role == "body" {
+			return "BookHand", ""
+		}
 		return "BookSansLight", ""
+	case strings.Contains(lower, "comic"):
+		return "BookHand", ""
 	case strings.Contains(lower, "opensans-light"), strings.Contains(lower, "open-sans-light"):
 		return "BookSansLight", style
 	case strings.Contains(lower, "opensans"), strings.Contains(lower, "open-sans"), strings.Contains(lower, "notosans"):
