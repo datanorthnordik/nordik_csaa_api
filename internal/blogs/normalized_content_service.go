@@ -440,12 +440,8 @@ func (s *BlogService) saveBlogContentDetail(tx *gorm.DB, blogID int, input *Save
 				return uploaded, nil, err
 			}
 			for itemIndex, item := range section.Animation.Items {
-				itemRow := BlogAnimationItem{BlogSectionID: row.ID, SortOrder: itemIndex, Heading: item.Heading, SubHeading: item.SubHeading, Description: item.Description}
-				if err := tx.Create(&itemRow).Error; err != nil {
-					return uploaded, nil, err
-				}
 				asset, uploadedObject, err := s.storeBlogUploadInput(
-					s.animationItemImageObjectName(blogID, row.ID, itemRow.ID, item.Image.FileName, item.Image.MimeType),
+					s.animationItemImageObjectName(blogID, row.ID, itemIndex+1, item.Image.FileName, item.Image.MimeType),
 					*item.Image, "animation item image",
 				)
 				if err != nil {
@@ -455,7 +451,16 @@ func (s *BlogService) saveBlogContentDetail(tx *gorm.DB, blogID int, input *Save
 					uploaded = append(uploaded, uploadedObject)
 				}
 				reused[blogStoredObjectFingerprint(blogStoredObject{ObjectKey: asset.GCPObjectKey, StorageURL: asset.FileURL})] = struct{}{}
-				if err := tx.Model(&itemRow).Updates(map[string]any{"image_url": asset.FileURL, "image_object_key": asset.GCPObjectKey}).Error; err != nil {
+				itemRow := BlogAnimationItem{
+					BlogSectionID:  row.ID,
+					SortOrder:      itemIndex,
+					Heading:        item.Heading,
+					SubHeading:     item.SubHeading,
+					Description:    item.Description,
+					ImageURL:       asset.FileURL,
+					ImageObjectKey: asset.GCPObjectKey,
+				}
+				if err := tx.Create(&itemRow).Error; err != nil {
 					return uploaded, nil, err
 				}
 			}
