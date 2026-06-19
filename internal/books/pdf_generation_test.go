@@ -42,11 +42,28 @@ func TestBuildSubmissionPageContentJoinsHeadingFieldsAndSeparatesBodyBlocks(t *t
 	if body[0].Label != "Ingredients:" || body[1].Label != "Method:" {
 		t.Fatalf("expected body labels to be preserved per field, got %#v", body)
 	}
-	if body[0].Value != "3 cups flour\n\n1 cup water" {
+	if body[0].Value != "3 cups flour\n1 cup water" {
 		t.Fatalf("expected ingredients body to keep paragraph breaks, got %q", body[0].Value)
 	}
-	if body[1].Value != "Mix dry ingredients.\n\nBake until golden." {
+	if body[1].Value != "Mix dry ingredients.\nBake until golden." {
 		t.Fatalf("expected method body to keep paragraph breaks, got %q", body[1].Value)
+	}
+}
+
+func TestSanitizeRichTextToPlainTextFlattensListsWithoutBullets(t *testing.T) {
+	t.Helper()
+
+	input := `<ul><li><p><span style="font-size: 16px;">4 cups all-purpose flour</span></p></li><li><p><span style="font-size: 16px;">2 tablespoons baking powder</span></p></li></ul>`
+
+	got := sanitizeRichTextToPlainText(input)
+
+	if got != "4 cups all-purpose flour\n2 tablespoons baking powder" {
+		t.Fatalf("expected list items as compact plain lines, got %q", got)
+	}
+	for _, line := range strings.Split(got, "\n") {
+		if strings.TrimSpace(line) == "-" || strings.HasPrefix(strings.TrimSpace(line), "- ") {
+			t.Fatalf("expected bullets to be removed, got %q", got)
+		}
 	}
 }
 

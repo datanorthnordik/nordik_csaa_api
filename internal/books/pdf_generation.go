@@ -11,6 +11,7 @@ import (
 	"image/png"
 	"io"
 	"math"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -77,17 +78,19 @@ type bookMaskLayout struct {
 }
 
 type bookTextLayout struct {
-	X           float64 `json:"x"`
-	Y           float64 `json:"y"`
-	Width       float64 `json:"width"`
-	Height      float64 `json:"height"`
-	FontFamily  string  `json:"font_family"`
-	FontStyle   string  `json:"font_style"`
-	FontSize    float64 `json:"font_size"`
-	MinFontSize float64 `json:"min_font_size"`
-	LineHeight  float64 `json:"line_height"`
-	TextAlign   string  `json:"text_align"`
-	TextColor   string  `json:"text_color"`
+	X             float64 `json:"x"`
+	Y             float64 `json:"y"`
+	Width         float64 `json:"width"`
+	Height        float64 `json:"height"`
+	FontFamily    string  `json:"font_family"`
+	FontStyle     string  `json:"font_style"`
+	FontSize      float64 `json:"font_size"`
+	MinFontSize   float64 `json:"min_font_size"`
+	LineHeight    float64 `json:"line_height"`
+	TextAlign     string  `json:"text_align"`
+	TextColor     string  `json:"text_color"`
+	TextTransform string  `json:"text_transform,omitempty"`
+	LetterSpacing float64 `json:"letter_spacing,omitempty"`
 }
 
 type bookBodyLayout struct {
@@ -224,15 +227,15 @@ func defaultBookLayoutSettingsModel() bookLayoutSettings {
 				FontStyle:        "",
 				FontSize:         11,
 				MinFontSize:      8,
-				LineHeight:       1.35,
+				LineHeight:       1.08,
 				TextAlign:        "L",
 				TextColor:        "#2c261f",
 				LabelFontFamily:  "Helvetica",
-				LabelFontStyle:   "B",
+				LabelFontStyle:   "",
 				LabelFontSize:    11,
 				LabelMinFontSize: 8,
 				LabelTextColor:   "#2c261f",
-				ParagraphSpacing: 10,
+				ParagraphSpacing: 8,
 			},
 			ImageArea: bookImageLayout{
 				X:      314,
@@ -404,6 +407,8 @@ func normalizeTextLayout(layout bookTextLayout, defaults bookTextLayout) bookTex
 	layout.LineHeight = choosePositiveFloat(layout.LineHeight, defaults.LineHeight)
 	layout.TextAlign = normalizePDFTextAlign(layout.TextAlign, defaults.TextAlign)
 	layout.TextColor = chooseNonEmpty(strings.TrimSpace(layout.TextColor), defaults.TextColor)
+	layout.TextTransform = chooseNonEmpty(strings.TrimSpace(layout.TextTransform), defaults.TextTransform)
+	layout.LetterSpacing = chooseNonNegativeFloat(layout.LetterSpacing, defaults.LetterSpacing)
 	if layout.MinFontSize > layout.FontSize {
 		layout.MinFontSize = layout.FontSize
 	}
@@ -508,6 +513,7 @@ func scaleTextLayout(layout bookTextLayout, scaleX float64, scaleY float64, font
 	layout.Height *= scaleY
 	layout.FontSize *= fontScale
 	layout.MinFontSize *= fontScale
+	layout.LetterSpacing *= fontScale
 	return layout
 }
 
@@ -564,7 +570,44 @@ func resolveBookLayoutSettings(reader *rpdf.Reader, version BookVersion, layout 
 		normalizeSectionPageLayout(layout.SectionPage, sectionDefaults),
 		sectionDefaults,
 	)
+	layout = applyTemplateStyleHints(reader, layout)
 	return layout
+}
+
+func applyTemplateStyleHints(reader *rpdf.Reader, layout bookLayoutSettings) bookLayoutSettings {
+	if reader == nil {
+		return layout
+	}
+	analysis, ok := analyzeTemplatePage(reader.Page(layout.ContentPage.TemplatePageNumber))
+	if !ok {
+		return layout
+	}
+
+	if layout.ContentPage.HeadingArea.TextTransform == "" {
+		layout.ContentPage.HeadingArea.TextTransform = analysis.TitleTextTransform
+	}
+	if layout.ContentPage.HeadingArea.LetterSpacing <= 0 {
+		layout.ContentPage.HeadingArea.LetterSpacing = analysis.TitleLetterSpacing
+		if layout.ContentPage.HeadingArea.TextTransform == "uppercase" && layout.ContentPage.HeadingArea.LetterSpacing <= 0 {
+			layout.ContentPage.HeadingArea.LetterSpacing = math.Max(layout.ContentPage.HeadingArea.FontSize*0.08, 1.2)
+		}
+	}
+	if analysis.BodyFontFamily != "" && isGenericPDFSansFont(layout.ContentPage.BodyArea.FontFamily) {
+		layout.ContentPage.BodyArea.FontFamily = analysis.BodyFontFamily
+		layout.ContentPage.BodyArea.FontStyle = analysis.BodyFontStyle
+		layout.ContentPage.BodyArea.LabelFontFamily = analysis.BodyFontFamily
+		layout.ContentPage.BodyArea.LabelFontStyle = analysis.BodyFontStyle
+	}
+	if analysis.BodyLineHeight > 0 && layout.ContentPage.BodyArea.LineHeight > 1.22 {
+		layout.ContentPage.BodyArea.LineHeight = analysis.BodyLineHeight
+	}
+	layout.ContentPage.BodyArea.TextAlign = "L"
+	return layout
+}
+
+func isGenericPDFSansFont(family string) bool {
+	normalized := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(family), " ", ""))
+	return normalized == "" || normalized == "helvetica" || normalized == "arial"
 }
 
 func repairContentPageLayout(layout bookContentPageLayout, defaults bookContentPageLayout) bookContentPageLayout {
@@ -596,6 +639,18 @@ func repairContentPageLayout(layout bookContentPageLayout, defaults bookContentP
 
 	if !isPlausibleImageLayout(layout.ImageArea, layout.PageWidth, layout.PageHeight) {
 		layout.ImageArea = defaults.ImageArea
+	}
+
+	layout.BodyArea.TextAlign = "L"
+	if layout.BodyArea.LineHeight > 1.22 {
+		layout.BodyArea.LineHeight = math.Max(defaults.BodyArea.LineHeight, 1.08)
+	}
+	if strings.Contains(strings.ToUpper(layout.BodyArea.LabelFontStyle), "B") &&
+		strings.EqualFold(layout.BodyArea.LabelFontFamily, layout.BodyArea.FontFamily) {
+		layout.BodyArea.LabelFontStyle = layout.BodyArea.FontStyle
+	}
+	if layout.BodyArea.FontSize > 0 && layout.BodyArea.ParagraphSpacing > layout.BodyArea.FontSize {
+		layout.BodyArea.ParagraphSpacing = math.Max(layout.BodyArea.FontSize*0.62, 5)
 	}
 
 	if layout.HeadingArea.FontSize < layout.BodyArea.FontSize {
@@ -1069,6 +1124,11 @@ func applyContentTemplateAnalysis(layout *bookContentPageLayout, analysis bookTe
 		layout.HeadingArea.TextAlign = analysis.TitleAlign
 		layout.HeadingArea.FontFamily = analysis.TitleFontFamily
 		layout.HeadingArea.FontStyle = analysis.TitleFontStyle
+		layout.HeadingArea.TextTransform = analysis.TitleTextTransform
+		layout.HeadingArea.LetterSpacing = analysis.TitleLetterSpacing
+		if layout.HeadingArea.TextTransform == "uppercase" && layout.HeadingArea.LetterSpacing <= 0 {
+			layout.HeadingArea.LetterSpacing = math.Max(analysis.TitleFontSize*0.08, 1.2)
+		}
 	}
 
 	if analysis.Body.Width > 0 {
@@ -1082,13 +1142,15 @@ func applyContentTemplateAnalysis(layout *bookContentPageLayout, analysis bookTe
 		layout.BodyArea.Height = analysis.BodyArea.Height
 		layout.BodyArea.FontSize = analysis.BodyFontSize
 		layout.BodyArea.MinFontSize = math.Max(analysis.BodyFontSize*0.72, 8)
+		layout.BodyArea.LineHeight = choosePositiveFloat(analysis.BodyLineHeight, layout.BodyArea.LineHeight)
 		layout.BodyArea.LabelFontSize = analysis.BodyFontSize
 		layout.BodyArea.LabelMinFontSize = math.Max(analysis.BodyFontSize*0.72, 8)
-		layout.BodyArea.TextAlign = analysis.BodyAlign
+		layout.BodyArea.TextAlign = "L"
 		layout.BodyArea.FontFamily = analysis.BodyFontFamily
 		layout.BodyArea.FontStyle = analysis.BodyFontStyle
 		layout.BodyArea.LabelFontFamily = analysis.BodyFontFamily
-		layout.BodyArea.LabelFontStyle = "B"
+		layout.BodyArea.LabelFontStyle = analysis.BodyFontStyle
+		layout.BodyArea.ParagraphSpacing = math.Max(analysis.BodyFontSize*0.62, 5)
 	}
 
 	if analysis.ImageArea.Width > 0 {
@@ -1119,23 +1181,26 @@ func applySectionTemplateAnalysis(layout *bookSectionPageLayout, analysis bookTe
 }
 
 type bookTemplateAnalysis struct {
-	PageWidth       float64
-	PageHeight      float64
-	Title           bookRect
-	TitleMask       bookRect
-	TitleArea       bookRect
-	TitleFontSize   float64
-	TitleFontFamily string
-	TitleFontStyle  string
-	TitleAlign      string
-	Body            bookRect
-	BodyMask        bookRect
-	BodyArea        bookRect
-	BodyFontSize    float64
-	BodyFontFamily  string
-	BodyFontStyle   string
-	BodyAlign       string
-	ImageArea       bookImageLayout
+	PageWidth          float64
+	PageHeight         float64
+	Title              bookRect
+	TitleMask          bookRect
+	TitleArea          bookRect
+	TitleFontSize      float64
+	TitleFontFamily    string
+	TitleFontStyle     string
+	TitleTextTransform string
+	TitleLetterSpacing float64
+	TitleAlign         string
+	Body               bookRect
+	BodyMask           bookRect
+	BodyArea           bookRect
+	BodyFontSize       float64
+	BodyFontFamily     string
+	BodyFontStyle      string
+	BodyLineHeight     float64
+	BodyAlign          string
+	ImageArea          bookImageLayout
 }
 
 func analyzeTemplatePage(page rpdf.Page) (bookTemplateAnalysis, bool) {
@@ -1171,6 +1236,8 @@ func analyzeTemplatePage(page rpdf.Page) (bookTemplateAnalysis, bool) {
 		analysis.TitleArea = clampRect(expandRect(titleBox, math.Max(titleBox.Height*0.25, 8), math.Max(titleBox.Height*0.2, 6)), pageWidth, pageHeight)
 		analysis.TitleFontSize = dominantFontSize(titleLines)
 		analysis.TitleFontFamily, analysis.TitleFontStyle = mapPDFFontToBuiltIn(dominantFontName(titleLines))
+		analysis.TitleTextTransform = detectTextTransform(titleLines)
+		analysis.TitleLetterSpacing = inferTitleLetterSpacing(titleLines, analysis.TitleFontSize)
 		analysis.TitleAlign = detectTextAlign(titleBox, pageWidth)
 	}
 
@@ -1181,7 +1248,8 @@ func analyzeTemplatePage(page rpdf.Page) (bookTemplateAnalysis, bool) {
 		analysis.BodyArea = clampRect(expandRect(bodyBox, math.Max(bodyBox.Width*0.015, 6), math.Max(bodyBox.Height*0.015, 4)), pageWidth, pageHeight)
 		analysis.BodyFontSize = dominantFontSize(bodyLines)
 		analysis.BodyFontFamily, analysis.BodyFontStyle = mapPDFFontToBuiltIn(dominantFontName(bodyLines))
-		analysis.BodyAlign = detectTextAlign(bodyBox, pageWidth)
+		analysis.BodyLineHeight = dominantLineHeight(bodyLines, analysis.BodyFontSize)
+		analysis.BodyAlign = "L"
 	}
 
 	analysis.ImageArea = inferImageArea(pageWidth, pageHeight, analysis.BodyMask)
@@ -1422,6 +1490,82 @@ func dominantFontSize(lines []bookTextLine) float64 {
 	return values[len(values)/2]
 }
 
+func dominantLineHeight(lines []bookTextLine, fontSize float64) float64 {
+	if len(lines) < 2 || fontSize <= 0 {
+		return 0
+	}
+
+	sortedLines := append([]bookTextLine(nil), lines...)
+	sort.Slice(sortedLines, func(i, j int) bool {
+		if almostEqual(sortedLines[i].Y, sortedLines[j].Y) {
+			return sortedLines[i].X < sortedLines[j].X
+		}
+		return sortedLines[i].Y < sortedLines[j].Y
+	})
+
+	gaps := make([]float64, 0, len(sortedLines)-1)
+	for idx := 1; idx < len(sortedLines); idx++ {
+		gap := sortedLines[idx].Y - sortedLines[idx-1].Y
+		if gap <= fontSize*0.45 || gap > fontSize*2.2 {
+			continue
+		}
+		gaps = append(gaps, gap)
+	}
+	if len(gaps) == 0 {
+		return 0
+	}
+	sort.Float64s(gaps)
+	lineHeight := gaps[len(gaps)/2] / fontSize
+	return math.Max(0.92, math.Min(lineHeight, 1.22))
+}
+
+func detectTextTransform(lines []bookTextLine) string {
+	letters := 0
+	uppercase := 0
+	for _, line := range lines {
+		for _, char := range line.Text {
+			if char < 'A' || (char > 'Z' && char < 'a') || char > 'z' {
+				continue
+			}
+			letters++
+			if char >= 'A' && char <= 'Z' {
+				uppercase++
+			}
+		}
+	}
+	if letters > 0 && float64(uppercase)/float64(letters) >= 0.82 {
+		return "uppercase"
+	}
+	return ""
+}
+
+func inferTitleLetterSpacing(lines []bookTextLine, fontSize float64) float64 {
+	if len(lines) == 0 || fontSize <= 0 {
+		return 0
+	}
+
+	text := strings.Join(textLineStrings(lines), " ")
+	compact := strings.ReplaceAll(text, " ", "")
+	if len([]rune(compact)) < 4 {
+		return 0
+	}
+	spaceCount := strings.Count(text, " ")
+	if float64(spaceCount)/float64(len([]rune(compact))) >= 0.35 {
+		return math.Max(fontSize*0.16, 2.2)
+	}
+	return 0
+}
+
+func textLineStrings(lines []bookTextLine) []string {
+	resp := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if strings.TrimSpace(line.Text) != "" {
+			resp = append(resp, strings.TrimSpace(line.Text))
+		}
+	}
+	return resp
+}
+
 func detectTextAlign(rect bookRect, pageWidth float64) string {
 	center := rect.X + (rect.Width / 2)
 	if math.Abs(center-(pageWidth/2)) <= pageWidth*0.12 {
@@ -1550,64 +1694,49 @@ func sanitizeRichTextToPlainText(raw string) string {
 	}
 
 	tokenizer := html.NewTokenizer(strings.NewReader(trimmed))
-	var builder strings.Builder
-	wroteText := false
+	lines := make([]string, 0)
+	var current strings.Builder
 
-	writeLineBreak := func(force bool) {
-		if builder.Len() == 0 {
+	flushLine := func() {
+		line := strings.TrimSpace(current.String())
+		current.Reset()
+		if line == "" {
 			return
 		}
-		current := builder.String()
-		if strings.HasSuffix(current, "\n") {
-			if force && !strings.HasSuffix(current, "\n\n") {
-				builder.WriteByte('\n')
-			}
+		lines = append(lines, line)
+	}
+	appendText := func(value string) {
+		text := normalizeInlineText(value)
+		if text == "" {
 			return
 		}
-		builder.WriteByte('\n')
-		if force {
-			builder.WriteByte('\n')
+		if current.Len() > 0 {
+			current.WriteByte(' ')
 		}
+		current.WriteString(text)
 	}
 
 	for {
 		switch tokenizer.Next() {
 		case html.ErrorToken:
-			return normalizePlainText(builder.String())
+			flushLine()
+			return normalizePlainText(strings.Join(lines, "\n"))
 		case html.StartTagToken, html.SelfClosingTagToken:
 			token := tokenizer.Token()
 			switch strings.ToLower(token.Data) {
 			case "br":
-				writeLineBreak(false)
-			case "p", "div":
-				if wroteText {
-					writeLineBreak(true)
-				}
-			case "li":
-				if wroteText {
-					writeLineBreak(false)
-				}
-				builder.WriteString("- ")
+				flushLine()
+			case "p", "div", "li":
+				flushLine()
 			}
 		case html.EndTagToken:
 			token := tokenizer.Token()
 			switch strings.ToLower(token.Data) {
-			case "p", "div":
-				if wroteText {
-					writeLineBreak(true)
-				}
-			case "li":
-				if wroteText {
-					writeLineBreak(false)
-				}
+			case "p", "div", "li":
+				flushLine()
 			}
 		case html.TextToken:
-			text := normalizeInlineText(htmlstd.UnescapeString(string(tokenizer.Text())))
-			if text == "" {
-				continue
-			}
-			builder.WriteString(text)
-			wroteText = true
+			appendText(htmlstd.UnescapeString(string(tokenizer.Text())))
 		}
 	}
 }
@@ -1777,14 +1906,20 @@ func drawFittedTextBox(pdfDoc *gofpdf.Fpdf, layout bookTextLayout, text string) 
 	if text == "" || layout.Width <= 0 || layout.Height <= 0 {
 		return
 	}
+	text = applyTextTransform(text, layout.TextTransform)
 
-	family, style := normalizeFontSelection(layout.FontFamily, layout.FontStyle)
+	family, style := resolvePDFFont(pdfDoc, layout.FontFamily, layout.FontStyle)
 	fontSize := fitTextFontSize(pdfDoc, layout, text, family, style)
 	lineHeight := fontSize * layout.LineHeight
 
 	pdfDoc.SetFont(family, style, fontSize)
 	r, g, b := parseHexColor(layout.TextColor)
 	pdfDoc.SetTextColor(r, g, b)
+	if layout.LetterSpacing > 0 {
+		drawTrackedTextBox(pdfDoc, layout, text, fontSize, lineHeight)
+		return
+	}
+
 	lines := pdfDoc.SplitText(text, layout.Width)
 	if len(lines) == 0 {
 		lines = []string{text}
@@ -1796,6 +1931,56 @@ func drawFittedTextBox(pdfDoc *gofpdf.Fpdf, layout bookTextLayout, text string) 
 	pdfDoc.MultiCell(layout.Width, lineHeight, text, "", normalizePDFTextAlign(layout.TextAlign, "L"), false)
 }
 
+func applyTextTransform(text string, transform string) string {
+	switch strings.ToLower(strings.TrimSpace(transform)) {
+	case "uppercase":
+		return strings.ToUpper(text)
+	default:
+		return text
+	}
+}
+
+func drawTrackedTextBox(pdfDoc *gofpdf.Fpdf, layout bookTextLayout, text string, fontSize float64, lineHeight float64) {
+	letterSpacing := effectiveLetterSpacing(layout, fontSize)
+	textWidth := measureTrackedTextWidth(pdfDoc, text, letterSpacing)
+	x := layout.X
+	switch normalizePDFTextAlign(layout.TextAlign, "L") {
+	case "C":
+		x = layout.X + math.Max((layout.Width-textWidth)/2, 0)
+	case "R":
+		x = layout.X + math.Max(layout.Width-textWidth, 0)
+	}
+
+	y := layout.Y + math.Max((layout.Height-lineHeight)/2, 0) + (fontSize * 0.86)
+	for _, char := range text {
+		value := string(char)
+		pdfDoc.Text(x, y, value)
+		x += pdfDoc.GetStringWidth(value) + letterSpacing
+	}
+}
+
+func effectiveLetterSpacing(layout bookTextLayout, fontSize float64) float64 {
+	if layout.LetterSpacing <= 0 {
+		return 0
+	}
+	if layout.FontSize <= 0 || fontSize <= 0 {
+		return layout.LetterSpacing
+	}
+	return layout.LetterSpacing * (fontSize / layout.FontSize)
+}
+
+func measureTrackedTextWidth(pdfDoc *gofpdf.Fpdf, text string, letterSpacing float64) float64 {
+	width := 0.0
+	runes := []rune(text)
+	for idx, char := range runes {
+		width += pdfDoc.GetStringWidth(string(char))
+		if idx < len(runes)-1 {
+			width += letterSpacing
+		}
+	}
+	return width
+}
+
 func fitTextFontSize(pdfDoc *gofpdf.Fpdf, layout bookTextLayout, text string, family string, style string) float64 {
 	fontSize := layout.FontSize
 	minFontSize := layout.MinFontSize
@@ -1804,6 +1989,13 @@ func fitTextFontSize(pdfDoc *gofpdf.Fpdf, layout bookTextLayout, text string, fa
 	}
 	for fontSize >= minFontSize {
 		pdfDoc.SetFont(family, style, fontSize)
+		if layout.LetterSpacing > 0 {
+			if measureTrackedTextWidth(pdfDoc, text, effectiveLetterSpacing(layout, fontSize)) <= layout.Width && fontSize*layout.LineHeight <= layout.Height {
+				return fontSize
+			}
+			fontSize -= 0.5
+			continue
+		}
 		lines := pdfDoc.SplitText(text, layout.Width)
 		if len(lines) == 0 {
 			lines = []string{text}
@@ -1821,8 +2013,8 @@ func drawBodyBlocks(pdfDoc *gofpdf.Fpdf, layout bookBodyLayout, blocks []bookBod
 		return
 	}
 
-	bodyFamily, bodyStyle := normalizeFontSelection(layout.FontFamily, layout.FontStyle)
-	labelFamily, labelStyle := normalizeFontSelection(layout.LabelFontFamily, layout.LabelFontStyle)
+	bodyFamily, bodyStyle := resolvePDFFont(pdfDoc, layout.FontFamily, layout.FontStyle)
+	labelFamily, labelStyle := resolvePDFFont(pdfDoc, layout.LabelFontFamily, layout.LabelFontStyle)
 	bodyFontSize, labelFontSize := fitBodyFontSizes(pdfDoc, layout, blocks, bodyFamily, bodyStyle, labelFamily, labelStyle)
 	bodyLineHeight := bodyFontSize * layout.LineHeight
 	labelLineHeight := labelFontSize * layout.LineHeight
@@ -1902,20 +2094,96 @@ func measureBodyBlocksHeight(pdfDoc *gofpdf.Fpdf, layout bookBodyLayout, blocks 
 	return total
 }
 
+func resolvePDFFont(pdfDoc *gofpdf.Fpdf, family string, style string) (string, string) {
+	family, style = normalizeFontSelection(family, style)
+	if registerPDFCustomFont(pdfDoc, family, style) {
+		return family, style
+	}
+	if family == "BookSansLight" || family == "BookSans" {
+		return "Helvetica", style
+	}
+	return family, style
+}
+
+func registerPDFCustomFont(pdfDoc *gofpdf.Fpdf, family string, style string) bool {
+	if pdfDoc == nil {
+		return false
+	}
+
+	for _, candidate := range customPDFFontCandidates(family, style) {
+		if _, err := os.Stat(candidate); err != nil {
+			continue
+		}
+		pdfDoc.AddUTF8Font(family, style, candidate)
+		return true
+	}
+	return false
+}
+
+func customPDFFontCandidates(family string, style string) []string {
+	style = strings.ToUpper(strings.TrimSpace(style))
+	switch family {
+	case "BookSansLight":
+		if strings.Contains(style, "B") {
+			return []string{
+				`C:\Windows\Fonts\segoeui.ttf`,
+				`C:\Windows\Fonts\arial.ttf`,
+				`/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf`,
+				`/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf`,
+			}
+		}
+		return []string{
+			`C:\Windows\Fonts\segoeuil.ttf`,
+			`C:\Windows\Fonts\segoeuisl.ttf`,
+			`C:\Windows\Fonts\arial.ttf`,
+			`/usr/share/fonts/truetype/dejavu/DejaVuSans-ExtraLight.ttf`,
+			`/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf`,
+			`/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf`,
+		}
+	case "BookSans":
+		if strings.Contains(style, "B") {
+			return []string{
+				`C:\Windows\Fonts\segoeuib.ttf`,
+				`C:\Windows\Fonts\arialbd.ttf`,
+				`/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf`,
+				`/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf`,
+			}
+		}
+		return []string{
+			`C:\Windows\Fonts\segoeui.ttf`,
+			`C:\Windows\Fonts\arial.ttf`,
+			`/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf`,
+			`/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf`,
+		}
+	default:
+		return nil
+	}
+}
+
 func normalizeFontSelection(family string, style string) (string, string) {
 	family = strings.TrimSpace(family)
 	style = strings.ToUpper(strings.TrimSpace(style))
 	if family == "" {
-		family = "Helvetica"
+		family = "BookSansLight"
 	}
-	switch strings.ToLower(family) {
+	lower := strings.ToLower(strings.ReplaceAll(family, " ", ""))
+	switch lower {
 	case "arial":
 		family = "Helvetica"
+	case "booksanslight", "opensans", "opensans-light", "opensanslight", "notosans", "notosans-regular", "notosansregular", "segoeuilight", "segoeui-light":
+		family = "BookSansLight"
+		style = strings.ReplaceAll(style, "B", "")
+	case "booksans", "segoeui", "segoeui-regular":
+		family = "BookSans"
 	case "helvetica", "times", "courier":
+		family = strings.ToUpper(family[:1]) + strings.ToLower(family[1:])
 	default:
-		if strings.Contains(strings.ToLower(family), "times") {
+		if strings.Contains(lower, "opensans") || strings.Contains(lower, "notosans") {
+			family = "BookSansLight"
+			style = strings.ReplaceAll(style, "B", "")
+		} else if strings.Contains(lower, "times") {
 			family = "Times"
-		} else if strings.Contains(strings.ToLower(family), "courier") {
+		} else if strings.Contains(lower, "courier") {
 			family = "Courier"
 		} else {
 			family = "Helvetica"
@@ -1935,6 +2203,12 @@ func mapPDFFontToBuiltIn(fontName string) (string, string) {
 	}
 
 	switch {
+	case lower == "":
+		return "BookSansLight", ""
+	case strings.Contains(lower, "opensans-light"), strings.Contains(lower, "open-sans-light"):
+		return "BookSansLight", style
+	case strings.Contains(lower, "opensans"), strings.Contains(lower, "open-sans"), strings.Contains(lower, "notosans"):
+		return "BookSansLight", style
 	case strings.Contains(lower, "times"):
 		return "Times", style
 	case strings.Contains(lower, "courier"):
@@ -2012,6 +2286,13 @@ func normalizePDFTextAlign(value string, fallback string) string {
 
 func choosePositiveFloat(value float64, fallback float64) float64 {
 	if value > 0 {
+		return value
+	}
+	return fallback
+}
+
+func chooseNonNegativeFloat(value float64, fallback float64) float64 {
+	if value >= 0 {
 		return value
 	}
 	return fallback
