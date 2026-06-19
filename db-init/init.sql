@@ -1586,6 +1586,487 @@ AFTER INSERT OR UPDATE OR DELETE ON page_section_documents
 FOR EACH ROW
 EXECUTE FUNCTION touch_page_detail_from_section_child();
 
+-- Blogs Migration
+-- Prerequisites: tables users(id) must already exist.
+
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS blogs (
+    id SERIAL PRIMARY KEY,
+    publish_date DATE NOT NULL,
+    heading VARCHAR(255) NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    cover_image_url TEXT,
+    cover_image_object_key TEXT,
+    created_by INT,
+    updated_by INT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_blogs_created_by
+        FOREIGN KEY (created_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT fk_blogs_updated_by
+        FOREIGN KEY (updated_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT chk_blogs_heading_not_blank
+        CHECK (btrim(heading) <> ''),
+
+    CONSTRAINT chk_blogs_description_not_blank
+        CHECK (btrim(description) <> '')
+);
+
+-- Remove the initial JSONB prototype now that blog content is normalized.
+ALTER TABLE blogs DROP COLUMN IF EXISTS blog_detail;
+
+CREATE TABLE IF NOT EXISTS blog_details (
+    id SERIAL PRIMARY KEY,
+    blog_id INT NOT NULL UNIQUE,
+    settings JSONB NOT NULL DEFAULT '{}'::jsonb,
+    schema_version INT NOT NULL DEFAULT 1,
+    created_by INT,
+    updated_by INT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_blog_details_blog
+        FOREIGN KEY (blog_id) REFERENCES blogs(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT fk_blog_details_created_by
+        FOREIGN KEY (created_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+    CONSTRAINT fk_blog_details_updated_by
+        FOREIGN KEY (updated_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+    CONSTRAINT chk_blog_details_settings_is_object
+        CHECK (jsonb_typeof(settings) = 'object'),
+    CONSTRAINT chk_blog_details_schema_version
+        CHECK (schema_version > 0)
+);
+
+CREATE TABLE IF NOT EXISTS blog_sections (
+    id SERIAL PRIMARY KEY,
+    blog_detail_id INT NOT NULL,
+    section_name VARCHAR(150) NOT NULL,
+    section_type VARCHAR(50) NOT NULL,
+    sort_order INT NOT NULL DEFAULT -1,
+    is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    settings JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_blog_sections_detail
+        FOREIGN KEY (blog_detail_id) REFERENCES blog_details(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT chk_blog_sections_name_not_blank
+        CHECK (btrim(section_name) <> ''),
+    CONSTRAINT chk_blog_sections_type
+        CHECK (section_type IN ('heading', 'image', 'typography', 'action', 'video', 'animation')),
+    CONSTRAINT chk_blog_sections_sort_order
+        CHECK (sort_order >= 0),
+    CONSTRAINT chk_blog_sections_settings_is_object
+        CHECK (jsonb_typeof(settings) = 'object'),
+    CONSTRAINT uq_blog_sections_detail_sort
+        UNIQUE (blog_detail_id, sort_order)
+);
+
+CREATE TABLE IF NOT EXISTS blog_section_heading_modules (
+    blog_section_id INT PRIMARY KEY,
+    heading_text VARCHAR(255) NOT NULL,
+    underline_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_blog_heading_section
+        FOREIGN KEY (blog_section_id) REFERENCES blog_sections(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT chk_blog_heading_text_not_blank
+        CHECK (btrim(heading_text) <> '')
+);
+
+CREATE TABLE IF NOT EXISTS blog_section_image_modules (
+    blog_section_id INT PRIMARY KEY,
+    image_url TEXT,
+    image_object_key TEXT,
+    caption TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_blog_image_section
+        FOREIGN KEY (blog_section_id) REFERENCES blog_sections(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT chk_blog_image_reference
+        CHECK (btrim(image_url) <> '' OR btrim(COALESCE(image_object_key, '')) <> '')
+);
+
+CREATE TABLE IF NOT EXISTS blog_section_typography_modules (
+    blog_section_id INT PRIMARY KEY,
+    body_html TEXT NOT NULL,
+    body_text TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_blog_typography_section
+        FOREIGN KEY (blog_section_id) REFERENCES blog_sections(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT chk_blog_typography_body_not_blank
+        CHECK (btrim(body_text) <> '')
+);
+
+CREATE TABLE IF NOT EXISTS blog_section_action_modules (
+    blog_section_id INT PRIMARY KEY,
+    action_text VARCHAR(255) NOT NULL,
+    action_type VARCHAR(20) NOT NULL,
+    target_url TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_blog_action_section
+        FOREIGN KEY (blog_section_id) REFERENCES blog_sections(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT chk_blog_action_text_not_blank
+        CHECK (btrim(action_text) <> ''),
+    CONSTRAINT chk_blog_action_type
+        CHECK (action_type IN ('link', 'video')),
+    CONSTRAINT chk_blog_action_target_not_blank
+        CHECK (btrim(target_url) <> '')
+);
+
+CREATE TABLE IF NOT EXISTS blog_section_video_modules (
+    blog_section_id INT PRIMARY KEY,
+    youtube_url TEXT NOT NULL,
+    caption TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_blog_video_section
+        FOREIGN KEY (blog_section_id) REFERENCES blog_sections(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT chk_blog_video_url_not_blank
+        CHECK (btrim(youtube_url) <> '')
+);
+
+CREATE TABLE IF NOT EXISTS blog_section_animation_modules (
+    blog_section_id INT PRIMARY KEY,
+    navigation VARCHAR(20) NOT NULL,
+    image_position VARCHAR(20) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_blog_animation_section
+        FOREIGN KEY (blog_section_id) REFERENCES blog_sections(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT chk_blog_animation_navigation
+        CHECK (navigation IN ('vertical', 'horizontal')),
+    CONSTRAINT chk_blog_animation_image_position
+        CHECK (image_position IN ('left', 'right'))
+);
+
+CREATE TABLE IF NOT EXISTS blog_animation_items (
+    id SERIAL PRIMARY KEY,
+    blog_section_id INT NOT NULL,
+    sort_order INT NOT NULL DEFAULT -1,
+    heading VARCHAR(255) NOT NULL,
+    sub_heading VARCHAR(255) NOT NULL,
+    description TEXT NOT NULL,
+    image_url TEXT,
+    image_object_key TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_blog_animation_items_section
+        FOREIGN KEY (blog_section_id) REFERENCES blog_section_animation_modules(blog_section_id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT uq_blog_animation_items_section_sort
+        UNIQUE (blog_section_id, sort_order),
+    CONSTRAINT chk_blog_animation_items_sort_order
+        CHECK (sort_order >= 0),
+    CONSTRAINT chk_blog_animation_items_heading_not_blank
+        CHECK (btrim(heading) <> ''),
+    CONSTRAINT chk_blog_animation_items_sub_heading_not_blank
+        CHECK (btrim(sub_heading) <> ''),
+    CONSTRAINT chk_blog_animation_items_description_not_blank
+        CHECK (btrim(description) <> ''),
+    CONSTRAINT chk_blog_animation_items_image_reference
+        CHECK (btrim(image_url) <> '' OR btrim(COALESCE(image_object_key, '')) <> '')
+);
+
+CREATE INDEX IF NOT EXISTS idx_blogs_publish_date
+    ON blogs(publish_date DESC);
+
+CREATE INDEX IF NOT EXISTS idx_blogs_heading
+    ON blogs(heading);
+
+CREATE INDEX IF NOT EXISTS idx_blogs_created_by
+    ON blogs(created_by);
+
+CREATE INDEX IF NOT EXISTS idx_blogs_updated_by
+    ON blogs(updated_by);
+
+CREATE INDEX IF NOT EXISTS idx_blog_details_blog_id
+    ON blog_details(blog_id);
+
+CREATE INDEX IF NOT EXISTS idx_blog_sections_detail_sort
+    ON blog_sections(blog_detail_id, sort_order, id);
+
+CREATE INDEX IF NOT EXISTS idx_blog_sections_type
+    ON blog_sections(section_type);
+
+CREATE INDEX IF NOT EXISTS idx_blog_animation_items_section_sort
+    ON blog_animation_items(blog_section_id, sort_order, id);
+
+CREATE OR REPLACE FUNCTION assign_blog_section_sort_order()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.sort_order >= 0 THEN
+        RETURN NEW;
+    END IF;
+
+    PERFORM 1
+    FROM blog_details
+    WHERE id = NEW.blog_detail_id
+    FOR UPDATE;
+
+    SELECT COALESCE(MAX(sort_order), -1) + 1
+    INTO NEW.sort_order
+    FROM blog_sections
+    WHERE blog_detail_id = NEW.blog_detail_id
+      AND id <> COALESCE(NEW.id, 0);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION assign_blog_animation_item_sort_order()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.sort_order >= 0 THEN
+        RETURN NEW;
+    END IF;
+
+    PERFORM 1
+    FROM blog_sections
+    WHERE id = NEW.blog_section_id
+    FOR UPDATE;
+
+    SELECT COALESCE(MAX(sort_order), -1) + 1
+    INTO NEW.sort_order
+    FROM blog_animation_items
+    WHERE blog_section_id = NEW.blog_section_id
+      AND id <> COALESCE(NEW.id, 0);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION touch_blog_from_detail()
+RETURNS TRIGGER AS $$
+DECLARE
+    target_blog_id INT;
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        target_blog_id := OLD.blog_id;
+    ELSIF TG_OP = 'INSERT' THEN
+        target_blog_id := NEW.blog_id;
+    ELSE
+        target_blog_id := COALESCE(NEW.blog_id, OLD.blog_id);
+    END IF;
+
+    UPDATE blogs
+    SET updated_at = CURRENT_TIMESTAMP
+    WHERE id = target_blog_id;
+
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION touch_blog_detail_from_section()
+RETURNS TRIGGER AS $$
+DECLARE
+    target_detail_id INT;
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        target_detail_id := OLD.blog_detail_id;
+    ELSIF TG_OP = 'INSERT' THEN
+        target_detail_id := NEW.blog_detail_id;
+    ELSE
+        target_detail_id := COALESCE(NEW.blog_detail_id, OLD.blog_detail_id);
+    END IF;
+
+    UPDATE blog_details
+    SET updated_at = CURRENT_TIMESTAMP
+    WHERE id = target_detail_id;
+
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION touch_blog_detail_from_section_child()
+RETURNS TRIGGER AS $$
+DECLARE
+    target_section_id INT;
+    target_detail_id INT;
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        target_section_id := OLD.blog_section_id;
+    ELSIF TG_OP = 'INSERT' THEN
+        target_section_id := NEW.blog_section_id;
+    ELSE
+        target_section_id := COALESCE(NEW.blog_section_id, OLD.blog_section_id);
+    END IF;
+
+    SELECT blog_detail_id
+    INTO target_detail_id
+    FROM blog_sections
+    WHERE id = target_section_id;
+
+    UPDATE blog_details
+    SET updated_at = CURRENT_TIMESTAMP
+    WHERE id = target_detail_id;
+
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION validate_blog_section_type()
+RETURNS TRIGGER AS $$
+DECLARE
+    expected_type TEXT := TG_ARGV[0];
+    actual_type TEXT;
+BEGIN
+    SELECT section_type
+    INTO actual_type
+    FROM blog_sections
+    WHERE id = NEW.blog_section_id;
+
+    IF actual_type IS NULL THEN
+        RAISE EXCEPTION 'blog_section_id % does not exist', NEW.blog_section_id;
+    END IF;
+    IF actual_type <> expected_type THEN
+        RAISE EXCEPTION 'blog_section_id % must reference a % section, found %',
+            NEW.blog_section_id, expected_type, actual_type;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_blogs_set_updated_at ON blogs;
+CREATE TRIGGER trg_blogs_set_updated_at
+BEFORE UPDATE ON blogs
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_blog_details_set_updated_at ON blog_details;
+CREATE TRIGGER trg_blog_details_set_updated_at
+BEFORE UPDATE ON blog_details
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_blog_details_touch_blog ON blog_details;
+CREATE TRIGGER trg_blog_details_touch_blog
+AFTER INSERT OR UPDATE OR DELETE ON blog_details
+FOR EACH ROW
+EXECUTE FUNCTION touch_blog_from_detail();
+
+DROP TRIGGER IF EXISTS trg_blog_sections_assign_sort_order ON blog_sections;
+CREATE TRIGGER trg_blog_sections_assign_sort_order
+BEFORE INSERT OR UPDATE ON blog_sections
+FOR EACH ROW
+EXECUTE FUNCTION assign_blog_section_sort_order();
+
+DROP TRIGGER IF EXISTS trg_blog_sections_set_updated_at ON blog_sections;
+CREATE TRIGGER trg_blog_sections_set_updated_at
+BEFORE UPDATE ON blog_sections
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_blog_sections_touch_detail ON blog_sections;
+CREATE TRIGGER trg_blog_sections_touch_detail
+AFTER INSERT OR UPDATE OR DELETE ON blog_sections
+FOR EACH ROW
+EXECUTE FUNCTION touch_blog_detail_from_section();
+
+DROP TRIGGER IF EXISTS trg_blog_animation_items_assign_sort_order ON blog_animation_items;
+CREATE TRIGGER trg_blog_animation_items_assign_sort_order
+BEFORE INSERT OR UPDATE ON blog_animation_items
+FOR EACH ROW
+EXECUTE FUNCTION assign_blog_animation_item_sort_order();
+
+DROP TRIGGER IF EXISTS trg_blog_animation_items_set_updated_at ON blog_animation_items;
+CREATE TRIGGER trg_blog_animation_items_set_updated_at
+BEFORE UPDATE ON blog_animation_items
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_blog_animation_items_touch_detail ON blog_animation_items;
+CREATE TRIGGER trg_blog_animation_items_touch_detail
+AFTER INSERT OR UPDATE OR DELETE ON blog_animation_items
+FOR EACH ROW
+EXECUTE FUNCTION touch_blog_detail_from_section_child();
+
+DO $$
+DECLARE
+    table_name TEXT;
+    expected_type TEXT;
+BEGIN
+    FOR table_name, expected_type IN
+        SELECT *
+        FROM (VALUES
+            ('blog_section_heading_modules', 'heading'),
+            ('blog_section_image_modules', 'image'),
+            ('blog_section_typography_modules', 'typography'),
+            ('blog_section_action_modules', 'action'),
+            ('blog_section_video_modules', 'video'),
+            ('blog_section_animation_modules', 'animation')
+        ) AS module_tables(table_name, expected_type)
+    LOOP
+        EXECUTE format('DROP TRIGGER IF EXISTS %I ON %I', 'trg_' || table_name || '_set_updated_at', table_name);
+        EXECUTE format(
+            'CREATE TRIGGER %I BEFORE UPDATE ON %I FOR EACH ROW EXECUTE FUNCTION set_updated_at()',
+            'trg_' || table_name || '_set_updated_at',
+            table_name
+        );
+        EXECUTE format('DROP TRIGGER IF EXISTS %I ON %I', 'trg_' || table_name || '_touch_detail', table_name);
+        EXECUTE format(
+            'CREATE TRIGGER %I AFTER INSERT OR UPDATE OR DELETE ON %I FOR EACH ROW EXECUTE FUNCTION touch_blog_detail_from_section_child()',
+            'trg_' || table_name || '_touch_detail',
+            table_name
+        );
+        EXECUTE format('DROP TRIGGER IF EXISTS %I ON %I', 'trg_' || table_name || '_validate_type', table_name);
+        EXECUTE format(
+            'CREATE TRIGGER %I BEFORE INSERT OR UPDATE ON %I FOR EACH ROW EXECUTE FUNCTION validate_blog_section_type(%L)',
+            'trg_' || table_name || '_validate_type',
+            table_name,
+            expected_type
+        );
+    END LOOP;
+END;
+$$;
+
+COMMIT;
+
 -- Press Entries Migration
 -- Prerequisites: tables users(id) must already exist.
 
