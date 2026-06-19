@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"nordikcsaaapi/internal/apiresponse"
 	"nordikcsaaapi/internal/auth"
+	"nordikcsaaapi/internal/blogs"
 	"nordikcsaaapi/internal/books"
 	"nordikcsaaapi/internal/config"
 	"nordikcsaaapi/internal/events"
@@ -82,6 +83,8 @@ func main() {
 	gallery.RegisterRoutes(r, galleryService, auth.RequireBearerAuth(&cfg))
 	videoService := &video.VideoService{DB: db, BucketName: cfg.DriveBucketName, BucketPrefix: cfg.DriveBucketPrefix}
 	video.RegisterRoutes(r, videoService, auth.RequireBearerAuth(&cfg))
+	blogService := &blogs.BlogService{DB: db, BucketName: cfg.DriveBucketName, BucketPrefix: cfg.DriveBucketPrefix}
+	blogs.RegisterRoutes(r, blogService, auth.RequireBearerAuth(&cfg))
 	pageService := &pages.PageService{DB: db, BucketName: cfg.DriveBucketName, BucketPrefix: cfg.DriveBucketPrefix}
 	pages.RegisterRoutes(r, pageService, auth.RequireBearerAuth(&cfg))
 	menuService := &menus.MenuService{DB: db}
