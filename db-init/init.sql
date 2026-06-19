@@ -2312,6 +2312,18 @@ CREATE TABLE IF NOT EXISTS book_versions (
     source_pdf_file_url TEXT,
     source_pdf_storage_uri TEXT,
     source_pdf_object_key TEXT,
+    content_template_pdf_file_name VARCHAR(255) NOT NULL DEFAULT '',
+    content_template_pdf_file_url TEXT,
+    content_template_pdf_storage_uri TEXT,
+    content_template_pdf_object_key TEXT,
+    content_image_template_pdf_file_name VARCHAR(255) NOT NULL DEFAULT '',
+    content_image_template_pdf_file_url TEXT,
+    content_image_template_pdf_storage_uri TEXT,
+    content_image_template_pdf_object_key TEXT,
+    section_template_pdf_file_name VARCHAR(255) NOT NULL DEFAULT '',
+    section_template_pdf_file_url TEXT,
+    section_template_pdf_storage_uri TEXT,
+    section_template_pdf_object_key TEXT,
     generated_pdf_file_name VARCHAR(255) NOT NULL DEFAULT '',
     generated_pdf_file_url TEXT,
     generated_pdf_storage_uri TEXT,
@@ -2358,6 +2370,20 @@ CREATE TABLE IF NOT EXISTS book_versions (
     CONSTRAINT chk_book_versions_source_pdf_file_name_not_blank
         CHECK (BTRIM(source_pdf_file_name) <> '')
 );
+
+ALTER TABLE book_versions
+    ADD COLUMN IF NOT EXISTS content_template_pdf_file_name VARCHAR(255) NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS content_template_pdf_file_url TEXT,
+    ADD COLUMN IF NOT EXISTS content_template_pdf_storage_uri TEXT,
+    ADD COLUMN IF NOT EXISTS content_template_pdf_object_key TEXT,
+    ADD COLUMN IF NOT EXISTS content_image_template_pdf_file_name VARCHAR(255) NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS content_image_template_pdf_file_url TEXT,
+    ADD COLUMN IF NOT EXISTS content_image_template_pdf_storage_uri TEXT,
+    ADD COLUMN IF NOT EXISTS content_image_template_pdf_object_key TEXT,
+    ADD COLUMN IF NOT EXISTS section_template_pdf_file_name VARCHAR(255) NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS section_template_pdf_file_url TEXT,
+    ADD COLUMN IF NOT EXISTS section_template_pdf_storage_uri TEXT,
+    ADD COLUMN IF NOT EXISTS section_template_pdf_object_key TEXT;
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_book_versions_book_id_version_number
     ON book_versions(book_id, version_number);

@@ -34,28 +34,40 @@ type Book struct {
 }
 
 type BookVersion struct {
-	ID                        int             `gorm:"primaryKey;autoIncrement" json:"id"`
-	BookID                    int             `gorm:"not null;column:book_id" json:"book_id"`
-	VersionNumber             int             `gorm:"not null;column:version_number" json:"version_number"`
-	SourcePageCount           int             `gorm:"not null;column:source_page_count" json:"source_page_count"`
-	ContentTemplatePageNumber int             `gorm:"not null;column:content_template_page_number" json:"content_template_page_number"`
-	SectionTemplatePageNumber int             `gorm:"not null;column:section_template_page_number" json:"section_template_page_number"`
-	AllowPageImage            bool            `gorm:"not null;default:false;column:allow_page_image" json:"allow_page_image"`
-	AllowNewSections          bool            `gorm:"not null;default:true;column:allow_new_sections" json:"allow_new_sections"`
-	LayoutSettings            json.RawMessage `gorm:"type:jsonb;not null;column:layout_settings" json:"layout_settings"`
-	SourcePDFFileName         string          `gorm:"size:255;not null;column:source_pdf_file_name" json:"source_pdf_file_name"`
-	SourcePDFFileURL          string          `gorm:"column:source_pdf_file_url" json:"source_pdf_file_url"`
-	SourcePDFStorageURI       string          `gorm:"column:source_pdf_storage_uri" json:"source_pdf_storage_uri"`
-	SourcePDFObjectKey        string          `gorm:"column:source_pdf_object_key" json:"source_pdf_object_key"`
-	GeneratedPDFFileName      string          `gorm:"size:255;not null;column:generated_pdf_file_name" json:"generated_pdf_file_name"`
-	GeneratedPDFFileURL       string          `gorm:"column:generated_pdf_file_url" json:"generated_pdf_file_url"`
-	GeneratedPDFStorageURI    string          `gorm:"column:generated_pdf_storage_uri" json:"generated_pdf_storage_uri"`
-	GeneratedPDFObjectKey     string          `gorm:"column:generated_pdf_object_key" json:"generated_pdf_object_key"`
-	LastGeneratedAt           *time.Time      `gorm:"column:last_generated_at" json:"last_generated_at,omitempty"`
-	CreatedBy                 *int            `gorm:"column:created_by" json:"created_by,omitempty"`
-	UpdatedBy                 *int            `gorm:"column:updated_by" json:"updated_by,omitempty"`
-	CreatedAt                 time.Time       `json:"created_at"`
-	UpdatedAt                 time.Time       `json:"updated_at"`
+	ID                                int             `gorm:"primaryKey;autoIncrement" json:"id"`
+	BookID                            int             `gorm:"not null;column:book_id" json:"book_id"`
+	VersionNumber                     int             `gorm:"not null;column:version_number" json:"version_number"`
+	SourcePageCount                   int             `gorm:"not null;column:source_page_count" json:"source_page_count"`
+	ContentTemplatePageNumber         int             `gorm:"not null;column:content_template_page_number" json:"content_template_page_number"`
+	SectionTemplatePageNumber         int             `gorm:"not null;column:section_template_page_number" json:"section_template_page_number"`
+	AllowPageImage                    bool            `gorm:"not null;default:false;column:allow_page_image" json:"allow_page_image"`
+	AllowNewSections                  bool            `gorm:"not null;default:true;column:allow_new_sections" json:"allow_new_sections"`
+	LayoutSettings                    json.RawMessage `gorm:"type:jsonb;not null;column:layout_settings" json:"layout_settings"`
+	SourcePDFFileName                 string          `gorm:"size:255;not null;column:source_pdf_file_name" json:"source_pdf_file_name"`
+	SourcePDFFileURL                  string          `gorm:"column:source_pdf_file_url" json:"source_pdf_file_url"`
+	SourcePDFStorageURI               string          `gorm:"column:source_pdf_storage_uri" json:"source_pdf_storage_uri"`
+	SourcePDFObjectKey                string          `gorm:"column:source_pdf_object_key" json:"source_pdf_object_key"`
+	ContentTemplatePDFFileName        string          `gorm:"size:255;not null;default:'';column:content_template_pdf_file_name" json:"content_template_pdf_file_name"`
+	ContentTemplatePDFFileURL         string          `gorm:"column:content_template_pdf_file_url" json:"content_template_pdf_file_url"`
+	ContentTemplatePDFStorageURI      string          `gorm:"column:content_template_pdf_storage_uri" json:"content_template_pdf_storage_uri"`
+	ContentTemplatePDFObjectKey       string          `gorm:"column:content_template_pdf_object_key" json:"content_template_pdf_object_key"`
+	ContentImageTemplatePDFFileName   string          `gorm:"size:255;not null;default:'';column:content_image_template_pdf_file_name" json:"content_image_template_pdf_file_name"`
+	ContentImageTemplatePDFFileURL    string          `gorm:"column:content_image_template_pdf_file_url" json:"content_image_template_pdf_file_url"`
+	ContentImageTemplatePDFStorageURI string          `gorm:"column:content_image_template_pdf_storage_uri" json:"content_image_template_pdf_storage_uri"`
+	ContentImageTemplatePDFObjectKey  string          `gorm:"column:content_image_template_pdf_object_key" json:"content_image_template_pdf_object_key"`
+	SectionTemplatePDFFileName        string          `gorm:"size:255;not null;default:'';column:section_template_pdf_file_name" json:"section_template_pdf_file_name"`
+	SectionTemplatePDFFileURL         string          `gorm:"column:section_template_pdf_file_url" json:"section_template_pdf_file_url"`
+	SectionTemplatePDFStorageURI      string          `gorm:"column:section_template_pdf_storage_uri" json:"section_template_pdf_storage_uri"`
+	SectionTemplatePDFObjectKey       string          `gorm:"column:section_template_pdf_object_key" json:"section_template_pdf_object_key"`
+	GeneratedPDFFileName              string          `gorm:"size:255;not null;column:generated_pdf_file_name" json:"generated_pdf_file_name"`
+	GeneratedPDFFileURL               string          `gorm:"column:generated_pdf_file_url" json:"generated_pdf_file_url"`
+	GeneratedPDFStorageURI            string          `gorm:"column:generated_pdf_storage_uri" json:"generated_pdf_storage_uri"`
+	GeneratedPDFObjectKey             string          `gorm:"column:generated_pdf_object_key" json:"generated_pdf_object_key"`
+	LastGeneratedAt                   *time.Time      `gorm:"column:last_generated_at" json:"last_generated_at,omitempty"`
+	CreatedBy                         *int            `gorm:"column:created_by" json:"created_by,omitempty"`
+	UpdatedBy                         *int            `gorm:"column:updated_by" json:"updated_by,omitempty"`
+	CreatedAt                         time.Time       `json:"created_at"`
+	UpdatedAt                         time.Time       `json:"updated_at"`
 }
 
 type BookVersionSection struct {
