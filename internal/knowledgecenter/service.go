@@ -51,14 +51,13 @@ func (s *KnowledgeCenterService) ListSubmissions(filter ListKnowledgeCenterSubmi
 		return nil, err
 	}
 
-	searchQuery := s.applySearchFilter(s.DB.Model(&KnowledgeCenterSubmission{}), normalized.SearchTerm)
-
-	summary, err := s.countByStatus(searchQuery)
+	summary, err := s.countByStatus(s.submissionsBaseQuery(normalized.SearchTerm))
 	if err != nil {
 		return nil, err
 	}
 
-	itemQuery := searchQuery.Where("status = ?", normalized.Status)
+	itemQuery := s.submissionsBaseQuery(normalized.SearchTerm).
+		Where("status = ?", normalized.Status)
 
 	var totalItems int64
 	if err := itemQuery.Count(&totalItems).Error; err != nil {
@@ -305,6 +304,10 @@ func (s *KnowledgeCenterService) applySearchFilter(query *gorm.DB, searchTerm st
 		pattern,
 		pattern,
 	)
+}
+
+func (s *KnowledgeCenterService) submissionsBaseQuery(searchTerm string) *gorm.DB {
+	return s.applySearchFilter(s.DB.Model(&KnowledgeCenterSubmission{}), searchTerm)
 }
 
 func (s *KnowledgeCenterService) countByStatus(query *gorm.DB) (KnowledgeCenterSubmissionsSummary, error) {
