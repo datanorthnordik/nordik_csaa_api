@@ -1,0 +1,83 @@
+name: Promote API to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Docker image tag to promote, example: v45-a1b2c3d"
+        required: true
+        type: string
+      confirm:
+        description: "Confirm production deployment"
+        required: true
+        type: choice
+        options:
+          - "NO"
+          - "YES"
+
+jobs:
+  promote-production:
+    name: Promote Selected API Image to Production
+    runs-on: ubuntu-latest
+
+    if: ${{ inputs.confirm == 'YES' }}
+
+    environment: production
+
+    permissions:
+      contents: read
+      id-token: write
+
+    env:
+      PROJECT_ID: planar-ray-472112-e8
+      REGION: us-west1
+
+      PROD_CLOUD_RUN_SERVICE: nordikcsaaapiprod
+
+      REGISTRY: us-west1-docker.pkg.dev
+      AR_REPO: nordikcsaaapi
+      IMAGE_NAME: nordikcsaaapi
+
+    steps:
+      - id: auth
+        name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Validate image tag
+        run: |
+          if [[ ! "${{ inputs.image_tag }}" =~ ^v[0-9]+-[a-f0-9]{7}$ ]]; then
+            echo "Invalid image tag format."
+            echo "Expected format: v45-a1b2c3d"
+            exit 1
+          fi
+
+      - name: Compute image URI
+        run: |
+          IMAGE_URI="${REGISTRY}/${PROJECT_ID}/${AR_REPO}/${IMAGE_NAME}:${{ inputs.image_tag }}"
+          echo "IMAGE_URI=$IMAGE_URI" >> "$GITHUB_ENV"
+
+          echo "### API Production Promotion" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Image tag: \`${{ inputs.image_tag }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Image URI: \`$IMAGE_URI\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Production Cloud Run service: \`${PROD_CLOUD_RUN_SERVICE}\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify image exists in Artifact Registry
+        run: |
+          gcloud artifacts docker images describe "$IMAGE_URI" \
+            --project "$PROJECT_ID"
+
+      - name: Deploy selected image to Production Cloud Run
+        run: |
+          gcloud run deploy "$PROD_CLOUD_RUN_SERVICE" \
+            --image "$IMAGE_URI" \
+            --region "$REGION" \
+            --project "$PROJECT_ID" \
+            --update-labels env=production,app=nordik-csaa,component=api \
+            --quiet
