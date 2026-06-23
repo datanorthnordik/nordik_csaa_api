@@ -79,5 +79,6 @@ jobs:
             --image "$IMAGE_URI" \
             --region "$REGION" \
             --project "$PROJECT_ID" \
+            --allow-unauthenticated \
             --update-labels env=production,app=nordik-csaa,component=api \
             --quiet
