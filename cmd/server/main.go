@@ -128,6 +128,7 @@ func buildCORSConfig() cors.Config {
 			"http://localhost:5173",
 			"https://nordikcsaacms*-724838782318.us-west1.run.app",
 			"https://nordikcsaawebsite*-724838782318.us-west1.run.app",
+			"https://childrenofshingwauk*",
 		},
 		AllowWildcard:    true,
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
