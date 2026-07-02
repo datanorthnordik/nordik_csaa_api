@@ -14,17 +14,17 @@ type BookshelfEntry struct {
 	BookGCPObjectKey        string    `gorm:"column:book_gcp_object_key" json:"book_gcp_object_key,omitempty"`
 	BookFileURL             string    `gorm:"column:book_file_url" json:"book_file_url"`
 	BookMimeType            string    `gorm:"size:255;column:book_mime_type" json:"book_mime_type"`
-	BookFileSize            int64     `gorm:"column:book_file_size,omitempty" json:"book_file_size"`
+	BookFileSize            int64     `gorm:"column:book_file_size" json:"book_file_size"`
 	AuthorImageFileName     string    `gorm:"size:255;column:author_image_file_name" json:"author_image_file_name"`
 	AuthorImageGCPObjectKey string    `gorm:"column:author_image_gcp_object_key" json:"author_image_gcp_object_key,omitempty"`
 	AuthorImageFileURL      string    `gorm:"column:author_image_file_url" json:"author_image_file_url"`
 	AuthorImageMimeType     string    `gorm:"size:255;column:author_image_mime_type" json:"author_image_mime_type"`
-	AuthorImageFileSize     int64     `gorm:"column:author_image_file_size,omitempty" json:"author_image_file_size"`
+	AuthorImageFileSize     int64     `gorm:"column:author_image_file_size" json:"author_image_file_size"`
 	CoverImageFileName      string    `gorm:"size:255;column:cover_image_file_name" json:"cover_image_file_name"`
 	CoverImageGCPObjectKey  string    `gorm:"column:cover_image_gcp_object_key" json:"cover_image_gcp_object_key,omitempty"`
 	CoverImageFileURL       string    `gorm:"column:cover_image_file_url" json:"cover_image_file_url"`
 	CoverImageMimeType      string    `gorm:"size:255;column:cover_image_mime_type" json:"cover_image_mime_type"`
-	CoverImageFileSize      int64     `gorm:"column:cover_image_file_size,omitempty" json:"cover_image_file_size"`
+	CoverImageFileSize      int64     `gorm:"column:cover_image_file_size" json:"cover_image_file_size"`
 	CreatedBy               *int      `gorm:"column:created_by" json:"created_by,omitempty"`
 	UpdatedBy               *int      `gorm:"column:updated_by" json:"updated_by,omitempty"`
 	CreatedAt               time.Time `json:"created_at"`
