@@ -2566,6 +2566,152 @@ BEFORE UPDATE ON resource_entries
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
+CREATE TABLE IF NOT EXISTS bookshelf_entries (
+    id SERIAL PRIMARY KEY,
+    author VARCHAR(255) NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    book_link TEXT NOT NULL DEFAULT '',
+    author_bio TEXT NOT NULL DEFAULT '',
+    book_teaser TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    book_file_name VARCHAR(255) NOT NULL DEFAULT '',
+    book_gcp_object_key TEXT,
+    book_file_url TEXT NOT NULL DEFAULT '',
+    book_mime_type VARCHAR(255),
+    book_file_size BIGINT,
+    author_image_file_name VARCHAR(255) NOT NULL DEFAULT '',
+    author_image_gcp_object_key TEXT,
+    author_image_file_url TEXT NOT NULL DEFAULT '',
+    author_image_mime_type VARCHAR(255),
+    author_image_file_size BIGINT,
+    cover_image_file_name VARCHAR(255) NOT NULL DEFAULT '',
+    cover_image_gcp_object_key TEXT,
+    cover_image_file_url TEXT NOT NULL DEFAULT '',
+    cover_image_mime_type VARCHAR(255),
+    cover_image_file_size BIGINT,
+    created_by INT,
+    updated_by INT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_bookshelf_entries_created_by
+        FOREIGN KEY (created_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT fk_bookshelf_entries_updated_by
+        FOREIGN KEY (updated_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL
+);
+
+ALTER TABLE bookshelf_entries
+    ADD COLUMN IF NOT EXISTS book_link TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE bookshelf_entries
+    ADD COLUMN IF NOT EXISTS author_bio TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE bookshelf_entries
+    ADD COLUMN IF NOT EXISTS book_teaser TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE bookshelf_entries
+    ADD COLUMN IF NOT EXISTS author_image_file_name VARCHAR(255) NOT NULL DEFAULT '';
+
+ALTER TABLE bookshelf_entries
+    ADD COLUMN IF NOT EXISTS author_image_gcp_object_key TEXT;
+
+ALTER TABLE bookshelf_entries
+    ADD COLUMN IF NOT EXISTS author_image_file_url TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE bookshelf_entries
+    ADD COLUMN IF NOT EXISTS author_image_mime_type VARCHAR(255);
+
+ALTER TABLE bookshelf_entries
+    ADD COLUMN IF NOT EXISTS author_image_file_size BIGINT;
+
+ALTER TABLE bookshelf_entries
+    DROP CONSTRAINT IF EXISTS chk_bookshelf_entries_author_not_blank;
+
+ALTER TABLE bookshelf_entries
+    DROP CONSTRAINT IF EXISTS chk_bookshelf_entries_title_not_blank;
+
+ALTER TABLE bookshelf_entries
+    DROP CONSTRAINT IF EXISTS chk_bookshelf_entries_author_bio_not_blank;
+
+ALTER TABLE bookshelf_entries
+    DROP CONSTRAINT IF EXISTS chk_bookshelf_entries_book_teaser_not_blank;
+
+ALTER TABLE bookshelf_entries
+    DROP CONSTRAINT IF EXISTS chk_bookshelf_entries_description_not_blank;
+
+ALTER TABLE bookshelf_entries
+    DROP CONSTRAINT IF EXISTS chk_bookshelf_entries_book_file_name_not_blank;
+
+ALTER TABLE bookshelf_entries
+    DROP CONSTRAINT IF EXISTS chk_bookshelf_entries_book_file_url_not_blank;
+
+ALTER TABLE bookshelf_entries
+    DROP CONSTRAINT IF EXISTS chk_bookshelf_entries_book_file_size;
+
+ALTER TABLE bookshelf_entries
+    DROP CONSTRAINT IF EXISTS chk_bookshelf_entries_author_image_file_size;
+
+ALTER TABLE bookshelf_entries
+    DROP CONSTRAINT IF EXISTS chk_bookshelf_entries_cover_image_file_size;
+
+ALTER TABLE bookshelf_entries
+    ADD CONSTRAINT chk_bookshelf_entries_author_not_blank
+        CHECK (BTRIM(author) <> '');
+
+ALTER TABLE bookshelf_entries
+    ADD CONSTRAINT chk_bookshelf_entries_title_not_blank
+        CHECK (BTRIM(title) <> '');
+
+ALTER TABLE bookshelf_entries
+    ADD CONSTRAINT chk_bookshelf_entries_description_not_blank
+        CHECK (BTRIM(description) <> '');
+
+ALTER TABLE bookshelf_entries
+    ADD CONSTRAINT chk_bookshelf_entries_book_file_name_not_blank
+        CHECK (BTRIM(book_file_name) <> '');
+
+ALTER TABLE bookshelf_entries
+    ADD CONSTRAINT chk_bookshelf_entries_book_file_url_not_blank
+        CHECK (BTRIM(book_file_url) <> '');
+
+ALTER TABLE bookshelf_entries
+    ADD CONSTRAINT chk_bookshelf_entries_book_file_size
+        CHECK (book_file_size IS NULL OR book_file_size >= 0);
+
+ALTER TABLE bookshelf_entries
+    ADD CONSTRAINT chk_bookshelf_entries_author_image_file_size
+        CHECK (author_image_file_size IS NULL OR author_image_file_size >= 0);
+
+ALTER TABLE bookshelf_entries
+    ADD CONSTRAINT chk_bookshelf_entries_cover_image_file_size
+        CHECK (cover_image_file_size IS NULL OR cover_image_file_size >= 0);
+
+CREATE INDEX IF NOT EXISTS idx_bookshelf_entries_author
+    ON bookshelf_entries(author);
+
+CREATE INDEX IF NOT EXISTS idx_bookshelf_entries_title
+    ON bookshelf_entries(title);
+
+CREATE INDEX IF NOT EXISTS idx_bookshelf_entries_updated_at
+    ON bookshelf_entries(updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_bookshelf_entries_created_by
+    ON bookshelf_entries(created_by);
+
+CREATE INDEX IF NOT EXISTS idx_bookshelf_entries_updated_by
+    ON bookshelf_entries(updated_by);
+
+DROP TRIGGER IF EXISTS trg_bookshelf_entries_set_updated_at ON bookshelf_entries;
+CREATE TRIGGER trg_bookshelf_entries_set_updated_at
+BEFORE UPDATE ON bookshelf_entries
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
 -- Memorial Migration
 -- Prerequisites: table users(id) must already exist.
 

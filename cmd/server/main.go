@@ -7,6 +7,7 @@ import (
 	"nordikcsaaapi/internal/auth"
 	"nordikcsaaapi/internal/blogs"
 	"nordikcsaaapi/internal/books"
+	"nordikcsaaapi/internal/bookshelf"
 	"nordikcsaaapi/internal/config"
 	"nordikcsaaapi/internal/events"
 	"nordikcsaaapi/internal/gallery"
@@ -95,6 +96,8 @@ func main() {
 	press.RegisterRoutes(r, pressService, auth.RequireBearerAuth(&cfg))
 	resourceService := &resources.ResourceService{DB: db, BucketName: cfg.DriveBucketName, BucketPrefix: cfg.DriveBucketPrefix}
 	resources.RegisterRoutes(r, resourceService, auth.RequireBearerAuth(&cfg))
+	bookshelfService := &bookshelf.BookshelfService{DB: db, BucketName: cfg.DriveBucketName, BucketPrefix: cfg.DriveBucketPrefix}
+	bookshelf.RegisterRoutes(r, bookshelfService, auth.RequireBearerAuth(&cfg))
 	memorialService := &memorial.MemorialService{DB: db, BucketName: cfg.DriveBucketName, BucketPrefix: cfg.DriveBucketPrefix}
 	memorial.RegisterRoutes(r, memorialService, auth.RequireBearerAuth(&cfg))
 	knowledgeCenterService := &knowledgecenter.KnowledgeCenterService{
@@ -128,7 +131,9 @@ func buildCORSConfig() cors.Config {
 			"http://localhost:5173",
 			"https://nordikcsaacms*-724838782318.us-west1.run.app",
 			"https://nordikcsaawebsite*-724838782318.us-west1.run.app",
-			"https://childrenofshingwauk*",
+			"https://childrenofshingwauk.org",
+			"https://childrenofshingwauk.store",
+			"https://childrenofshingwauk.xyz",
 		},
 		AllowWildcard:    true,
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
