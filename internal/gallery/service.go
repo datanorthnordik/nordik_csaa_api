@@ -10,15 +10,17 @@ import (
 	"nordikcsaaapi/internal/util"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
-const defaultGalleryAssetLimit = 20
+const defaultGalleryAssetLimit = 50
 
 var (
-	ErrStoreUnavailable         = errors.New("gallery store unavailable")
-	ErrGalleryNotFound          = errors.New("gallery not found")
-	ErrGalleryImageNotFound     = errors.New("gallery image not found")
-	ErrMediaBucketNotConfigured = errors.New("drive bucket is not configured")
+	ErrStoreUnavailable          = errors.New("gallery store unavailable")
+	ErrGalleryNotFound           = errors.New("gallery not found")
+	ErrGalleryImageNotFound      = errors.New("gallery image not found")
+	ErrGalleryAssetLimitExceeded = fmt.Errorf("gallery cannot contain more than %d images", defaultGalleryAssetLimit)
+	ErrMediaBucketNotConfigured  = errors.New("drive bucket is not configured")
 )
 
 var (
@@ -437,12 +439,22 @@ func (s *GalleryService) AddGalleryImages(id int, req AddGalleryImagesRequest, u
 	defer rollbackOnPanic(tx)
 
 	var galleryRow Gallery
-	if err := tx.First(&galleryRow, id).Error; err != nil {
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&galleryRow, id).Error; err != nil {
 		tx.Rollback()
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrGalleryNotFound
 		}
 		return nil, err
+	}
+
+	var imageCount int64
+	if err := tx.Model(&GalleryImage{}).Where("gallery_id = ?", id).Count(&imageCount).Error; err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	if imageCount+int64(len(req.Images)) > defaultGalleryAssetLimit {
+		tx.Rollback()
+		return nil, ErrGalleryAssetLimitExceeded
 	}
 
 	startSortOrder, err := s.nextGalleryImageSortOrder(tx, id)
@@ -686,6 +698,9 @@ func normalizeSaveGalleryRequest(req SaveGalleryRequest) (SaveGalleryRequest, er
 func normalizeAddGalleryImagesRequest(req AddGalleryImagesRequest) (AddGalleryImagesRequest, error) {
 	if len(req.Images) == 0 {
 		return req, errors.New("images are required")
+	}
+	if len(req.Images) > defaultGalleryAssetLimit {
+		return req, ErrGalleryAssetLimitExceeded
 	}
 	cleaned := make([]GalleryUploadInput, 0, len(req.Images))
 	for _, item := range req.Images {

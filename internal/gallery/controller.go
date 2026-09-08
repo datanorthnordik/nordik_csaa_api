@@ -1,6 +1,7 @@
 package gallery
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -243,6 +244,9 @@ func writeGalleryError(c *gin.Context, err error) {
 func isClientSafeGalleryError(err error) bool {
 	if err == nil {
 		return false
+	}
+	if errors.Is(err, ErrGalleryAssetLimitExceeded) {
+		return true
 	}
 
 	message := strings.ToLower(strings.TrimSpace(err.Error()))

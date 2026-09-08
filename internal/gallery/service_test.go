@@ -87,11 +87,14 @@ func TestCreateUpdateDeleteGalleryAndImages(t *testing.T) {
 	}
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "galleries" WHERE "galleries"."id" = $1 ORDER BY "galleries"."id" LIMIT $2`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "galleries" WHERE "galleries"."id" = $1 ORDER BY "galleries"."id" LIMIT $2 FOR UPDATE`)).
 		WithArgs(5, 1).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "name", "description", "cover_image_url", "cover_image_object_key", "cover_image_alt_text", "published", "created_by", "updated_by", "created_at", "updated_at",
 		}).AddRow(5, "Homepage", "", "", "", "", true, 7, 7, now, now))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT count(*) FROM "gallery_images" WHERE gallery_id = $1`)).
+		WithArgs(5).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COALESCE(MAX(sort_order), -1) AS max_sort_order FROM "gallery_images" WHERE gallery_id = $1`)).
 		WithArgs(5).
 		WillReturnRows(sqlmock.NewRows([]string{"max_sort_order"}).AddRow(-1))
@@ -150,6 +153,95 @@ func TestCreateUpdateDeleteGalleryAndImages(t *testing.T) {
 
 	if err := svc.DeleteGallery(5); err != nil {
 		t.Fatalf("DeleteGallery returned error: %v", err)
+	}
+}
+
+func TestGetGalleryAssetLimit(t *testing.T) {
+	db, mock, cleanup := setupMockDB(t)
+	defer cleanup()
+	svc := &GalleryService{DB: db}
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "galleries" WHERE "galleries"."id" = $1 ORDER BY "galleries"."id" LIMIT $2`)).
+		WithArgs(5, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name"}).AddRow(5, "Homepage"))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "gallery_images" WHERE gallery_id = $1 ORDER BY sort_order ASC,id ASC`)).
+		WithArgs(5).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+	resp, err := svc.GetGallery(5)
+	if err != nil || resp.AssetLimit != 50 {
+		t.Fatalf("expected gallery asset limit 50, got resp=%#v err=%v", resp, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAddGalleryImagesAssetLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		existingCount int
+		incomingCount int
+		wantError     bool
+	}{
+		{name: "upload 50 images", incomingCount: 50},
+		{name: "upload the 50th image", existingCount: 49, incomingCount: 1},
+		{name: "reject a batch exceeding remaining capacity", existingCount: 49, incomingCount: 2, wantError: true},
+		{name: "reject the 51st image", existingCount: 50, incomingCount: 1, wantError: true},
+		{name: "reject an oversized batch", incomingCount: 51, wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, mock, cleanup := setupMockDB(t)
+			defer cleanup()
+			svc := &GalleryService{DB: db, BucketName: "drive-bucket"}
+			restore := stubHooks()
+			defer restore()
+			uploadCount := 0
+			uploadBytesToGCSHook = func(data []byte, bucketName, objectName, contentType string) (string, int64, error) {
+				uploadCount++
+				return "gs://" + bucketName + "/" + objectName, int64(len(data)), nil
+			}
+
+			if tc.incomingCount <= 50 {
+				mock.ExpectBegin()
+				mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "galleries" WHERE "galleries"."id" = $1 ORDER BY "galleries"."id" LIMIT $2 FOR UPDATE`)).
+					WithArgs(5, 1).
+					WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(5))
+				mock.ExpectQuery(regexp.QuoteMeta(`SELECT count(*) FROM "gallery_images" WHERE gallery_id = $1`)).
+					WithArgs(5).
+					WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(tc.existingCount))
+				if tc.wantError {
+					mock.ExpectRollback()
+				} else {
+					mock.ExpectQuery(regexp.QuoteMeta(`SELECT COALESCE(MAX(sort_order), -1) AS max_sort_order FROM "gallery_images" WHERE gallery_id = $1`)).
+						WithArgs(5).
+						WillReturnRows(sqlmock.NewRows([]string{"max_sort_order"}).AddRow(tc.existingCount - 1))
+					for idx := 0; idx < tc.incomingCount; idx++ {
+						mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO "gallery_images"`)).
+							WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(tc.existingCount + idx + 1))
+					}
+					mock.ExpectExec(regexp.QuoteMeta(`UPDATE "galleries" SET "updated_at"`)).
+						WillReturnResult(sqlmock.NewResult(0, 1))
+					mock.ExpectCommit()
+				}
+			}
+
+			images := make([]GalleryUploadInput, tc.incomingCount)
+			for idx := range images {
+				images[idx] = GalleryUploadInput{FileName: "image.png", MimeType: "image/png", Content: []byte("image")}
+			}
+			resp, err := svc.AddGalleryImages(5, AddGalleryImagesRequest{Images: images}, nil)
+			if tc.wantError {
+				if !errors.Is(err, ErrGalleryAssetLimitExceeded) || resp != nil || uploadCount != 0 {
+					t.Fatalf("expected limit validation before uploads, got resp=%#v err=%v uploads=%d", resp, err, uploadCount)
+				}
+			} else if err != nil || resp.UploadedCount != tc.incomingCount || uploadCount != tc.incomingCount {
+				t.Fatalf("unexpected upload result: resp=%#v err=%v uploads=%d", resp, err, uploadCount)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 

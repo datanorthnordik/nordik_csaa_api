@@ -77,7 +77,7 @@ func (f *fakeGalleryService) GetGallery(id int) (*GalleryDetailResponse, error) 
 		return nil, f.detailErr
 	}
 	if f.detailResp == nil {
-		return &GalleryDetailResponse{ID: id, AssetLimit: 20}, nil
+		return &GalleryDetailResponse{ID: id, AssetLimit: 50}, nil
 	}
 	return f.detailResp, nil
 }
@@ -245,7 +245,7 @@ func TestListAndGetGalleryEndpoints(t *testing.T) {
 		listResp: &GalleryListResponse{
 			Items: []GallerySummaryItem{{ID: 4, Name: "Homepage", AssetCount: 2}},
 		},
-		detailResp: &GalleryDetailResponse{ID: 4, Name: "Homepage", AssetLimit: 20},
+		detailResp: &GalleryDetailResponse{ID: 4, Name: "Homepage", AssetLimit: 50},
 	}
 	router := setupRouter(service)
 
@@ -360,6 +360,20 @@ func TestAddAndDeleteGalleryImagesEndpoints(t *testing.T) {
 	if res.Code != http.StatusOK || len(service.gotDeleteURLs) != 2 {
 		t.Fatalf("unexpected delete image result: status=%d urls=%#v", res.Code, service.gotDeleteURLs)
 	}
+}
+
+func TestAddGalleryImagesLimitValidation(t *testing.T) {
+	router := setupProtectedRouter(&fakeGalleryService{addImagesErr: ErrGalleryAssetLimitExceeded})
+	res := httptest.NewRecorder()
+	req := newGalleryMultipartRequest(t, http.MethodPost, "/api/galleries/4/images", `{"images":[{"mime_type":"image/png"}]}`, map[string]multipartUploadTestFile{
+		"images[0].file": {Filename: "banner.png", Data: []byte("hello")},
+	})
+	req.Header.Set("Authorization", "Bearer "+signToken(t))
+	router.ServeHTTP(res, req)
+	if !strings.Contains(res.Body.String(), "gallery cannot contain more than 50 images") {
+		t.Fatalf("expected gallery limit validation message, got %s", res.Body.String())
+	}
+	assertError(t, res, http.StatusBadRequest, "validation_error")
 }
 
 func TestUpdateAndReorderGalleryImagesEndpoints(t *testing.T) {
