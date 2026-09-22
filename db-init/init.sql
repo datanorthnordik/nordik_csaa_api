@@ -3337,6 +3337,7 @@ EXECUTE FUNCTION set_updated_at();
 CREATE TABLE IF NOT EXISTS recording_collections (
     id SERIAL PRIMARY KEY,
     name VARCHAR(150) NOT NULL,
+    placement_key VARCHAR(100),
     created_by INT,
     updated_by INT,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -3355,8 +3356,14 @@ CREATE TABLE IF NOT EXISTS recording_collections (
         ON DELETE SET NULL,
 
     CONSTRAINT chk_recording_collections_name_not_blank
-        CHECK (BTRIM(name) <> '')
+        CHECK (BTRIM(name) <> ''),
+
+    CONSTRAINT chk_recording_collections_placement_key_not_blank
+        CHECK (placement_key IS NULL OR BTRIM(placement_key) <> '')
 );
+
+ALTER TABLE recording_collections
+    ADD COLUMN IF NOT EXISTS placement_key VARCHAR(100);
 
 CREATE TABLE IF NOT EXISTS recording_collection_items (
     id SERIAL PRIMARY KEY,
@@ -3396,6 +3403,10 @@ CREATE TABLE IF NOT EXISTS recording_collection_items (
 CREATE INDEX IF NOT EXISTS idx_recording_collections_name
     ON recording_collections(name);
 
+CREATE UNIQUE INDEX IF NOT EXISTS ux_recording_collections_placement_key
+    ON recording_collections(placement_key)
+    WHERE placement_key IS NOT NULL;
+
 CREATE INDEX IF NOT EXISTS idx_recording_collections_created_by
     ON recording_collections(created_by);
 
@@ -3425,5 +3436,25 @@ CREATE TRIGGER trg_recording_collection_items_set_updated_at
 BEFORE UPDATE ON recording_collection_items
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
+
+-- This stable placement backs the Recordings tab on the Living History Hub.
+-- It intentionally starts empty; administrators add its recording items in CMS.
+UPDATE recording_collections
+SET placement_key = 'living-history-recordings'
+WHERE name = 'Living History Recordings'
+  AND placement_key IS NULL
+  AND NOT EXISTS (
+      SELECT 1
+      FROM recording_collections
+      WHERE placement_key = 'living-history-recordings'
+  );
+
+INSERT INTO recording_collections (name, placement_key)
+SELECT 'Living History Recordings', 'living-history-recordings'
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM recording_collections
+    WHERE placement_key = 'living-history-recordings'
+);
 
 COMMIT;

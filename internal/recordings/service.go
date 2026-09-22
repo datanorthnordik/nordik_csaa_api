@@ -82,11 +82,12 @@ func (s *RecordingService) ListRecordingCollections() (*RecordingCollectionListR
 	items := make([]RecordingCollectionSummaryItem, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, RecordingCollectionSummaryItem{
-			ID:        row.ID,
-			Name:      row.Name,
-			ItemCount: counts[row.ID],
-			CreatedAt: row.CreatedAt,
-			UpdatedAt: row.UpdatedAt,
+			ID:           row.ID,
+			Name:         row.Name,
+			PlacementKey: row.PlacementKey,
+			ItemCount:    counts[row.ID],
+			CreatedAt:    row.CreatedAt,
+			UpdatedAt:    row.UpdatedAt,
 		})
 	}
 
@@ -103,20 +104,46 @@ func (s *RecordingService) GetRecordingCollection(id int) (*RecordingCollectionD
 		return nil, err
 	}
 
-	items, err := s.loadRecordingItems(s.DB, id)
+	return s.buildRecordingCollectionDetail(row)
+}
+
+func (s *RecordingService) GetRecordingCollectionByPlacementKey(placementKey string) (*RecordingCollectionDetailResponse, error) {
+	if s.DB == nil {
+		return nil, ErrStoreUnavailable
+	}
+
+	placementKey = strings.TrimSpace(placementKey)
+	if placementKey == "" {
+		return nil, errors.New("placement key is required")
+	}
+
+	var row RecordingCollection
+	if err := s.DB.Where("placement_key = ?", placementKey).First(&row).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrRecordingCollectionNotFound
+		}
+		return nil, err
+	}
+
+	return s.buildRecordingCollectionDetail(row)
+}
+
+func (s *RecordingService) buildRecordingCollectionDetail(row RecordingCollection) (*RecordingCollectionDetailResponse, error) {
+	items, err := s.loadRecordingItems(s.DB, row.ID)
 	if err != nil {
 		return nil, err
 	}
 
 	return &RecordingCollectionDetailResponse{
-		ID:        row.ID,
-		Name:      row.Name,
-		ItemCount: len(items),
-		Items:     items,
-		CreatedBy: row.CreatedBy,
-		UpdatedBy: row.UpdatedBy,
-		CreatedAt: row.CreatedAt,
-		UpdatedAt: row.UpdatedAt,
+		ID:           row.ID,
+		Name:         row.Name,
+		PlacementKey: row.PlacementKey,
+		ItemCount:    len(items),
+		Items:        items,
+		CreatedBy:    row.CreatedBy,
+		UpdatedBy:    row.UpdatedBy,
+		CreatedAt:    row.CreatedAt,
+		UpdatedAt:    row.UpdatedAt,
 	}, nil
 }
 
@@ -371,6 +398,12 @@ func (s *RecordingService) UpdateRecordingItem(id int, itemID int, req UpdateRec
 	oldObjects := make([]recordingStoredObject, 0, 1)
 	uploadedObjects := make([]string, 0, 1)
 	hasNewRecording := recordingInputHasMedia(req)
+	if hasNewRecording {
+		if err := validateRecordingMediaType(req); err != nil {
+			tx.Rollback()
+			return nil, err
+		}
+	}
 
 	if req.RemoveRecording && !hasNewRecording {
 		oldObjects = append(oldObjects, recordingStoredObject{
@@ -397,6 +430,11 @@ func (s *RecordingService) UpdateRecordingItem(id int, itemID int, req UpdateRec
 
 		row.RecordingURL = recordingURL
 		row.RecordingObjectKey = objectKey
+	}
+	if strings.TrimSpace(row.RecordingURL) == "" && strings.TrimSpace(row.RecordingObjectKey) == "" {
+		tx.Rollback()
+		s.cleanupObjects(uploadedObjects)
+		return nil, errors.New("recording file is required")
 	}
 
 	row.UpdatedBy = userID
@@ -525,6 +563,34 @@ func validateRecordingItemInput(input RecordingItemInput) error {
 	if strings.TrimSpace(input.Title) == "" {
 		return errors.New("title is required")
 	}
+	if !recordingInputHasMedia(input) {
+		return errors.New("recording file is required")
+	}
+	if err := validateRecordingMediaType(input); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateRecordingMediaType(input RecordingItemInput) error {
+	if !recordingInputHasMedia(input) {
+		return nil
+	}
+
+	mimeType := strings.ToLower(strings.TrimSpace(input.MimeType))
+	if mimeType != "" && !strings.HasPrefix(mimeType, "audio/") {
+		return errors.New("only audio recording uploads are supported")
+	}
+
+	extension := strings.ToLower(path.Ext(strings.TrimSpace(input.FileName)))
+	if mimeType == "" && (len(input.Content) > 0 || strings.TrimSpace(input.DataBase64) != "") {
+		switch extension {
+		case ".aac", ".flac", ".m4a", ".mp3", ".oga", ".ogg", ".wav", ".webm":
+		default:
+			return errors.New("only audio recording uploads are supported")
+		}
+	}
+
 	return nil
 }
 

@@ -40,6 +40,22 @@ func (rc *RecordingController) GetRecordingCollection(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+func (rc *RecordingController) GetRecordingCollectionByPlacementKey(c *gin.Context) {
+	placementKey := strings.TrimSpace(c.Param("placementKey"))
+	if placementKey == "" {
+		apiresponse.WritePathParamError(c, "placementKey")
+		return
+	}
+
+	resp, err := rc.RecordingService.GetRecordingCollectionByPlacementKey(placementKey)
+	if err != nil {
+		writeRecordingError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
 func (rc *RecordingController) GetRecordingItemContent(c *gin.Context) {
 	id, itemID, ok := pathRecordingCollectionAndItemIDs(c)
 	if !ok {
@@ -186,7 +202,8 @@ func isClientSafeRecordingError(err error) bool {
 	switch {
 	case strings.Contains(message, " is required"),
 		strings.Contains(message, " are required"),
-		strings.Contains(message, "use multipart/form-data"):
+		strings.Contains(message, "use multipart/form-data"),
+		strings.Contains(message, "audio recording uploads"):
 		return true
 	default:
 		return false

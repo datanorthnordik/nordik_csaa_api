@@ -66,11 +66,44 @@ func TestRecordingServiceStoreUnavailable(t *testing.T) {
 	if _, err := svc.GetRecordingCollection(1); !errors.Is(err, ErrStoreUnavailable) {
 		t.Fatalf("expected ErrStoreUnavailable from GetRecordingCollection, got %v", err)
 	}
+	if _, err := svc.GetRecordingCollectionByPlacementKey("living-history-recordings"); !errors.Is(err, ErrStoreUnavailable) {
+		t.Fatalf("expected ErrStoreUnavailable from GetRecordingCollectionByPlacementKey, got %v", err)
+	}
 	if _, err := svc.CreateRecordingCollection(SaveRecordingCollectionRequest{Name: "X"}, nil); !errors.Is(err, ErrStoreUnavailable) {
 		t.Fatalf("expected ErrStoreUnavailable from CreateRecordingCollection, got %v", err)
 	}
 	if err := svc.DeleteRecordingCollection(1); !errors.Is(err, ErrStoreUnavailable) {
 		t.Fatalf("expected ErrStoreUnavailable from DeleteRecordingCollection, got %v", err)
+	}
+}
+
+func TestGetRecordingCollectionByPlacementKey(t *testing.T) {
+	db, mock, cleanup := setupMockDB(t)
+	defer cleanup()
+
+	svc := &RecordingService{DB: db}
+	now := time.Date(2026, time.September, 22, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "recording_collections" WHERE placement_key = $1`)).
+		WithArgs("living-history-recordings", 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "placement_key", "created_at", "updated_at"}).
+			AddRow(8, "Living History Recordings", "living-history-recordings", now, now))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "recording_collection_items" WHERE recording_collection_id = $1`)).
+		WithArgs(8).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "recording_collection_id", "title", "sort_order", "created_at", "updated_at"}))
+
+	resp, err := svc.GetRecordingCollectionByPlacementKey(" living-history-recordings ")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.ID != 8 || resp.Name != "Living History Recordings" || resp.PlacementKey != "living-history-recordings" {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+	if len(resp.Items) != 0 {
+		t.Fatalf("expected seeded collection to be empty, got %+v", resp.Items)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
 	}
 }
 
@@ -85,7 +118,48 @@ func TestCreateRecordingCollectionRequiresName(t *testing.T) {
 	}
 }
 
-func TestCreateRecordingCollectionWithItemsWithoutRecording(t *testing.T) {
+func TestCreateRecordingCollectionAllowsEmptyCollection(t *testing.T) {
+	db, mock, cleanup := setupMockDB(t)
+	defer cleanup()
+
+	svc := &RecordingService{DB: db}
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO "recording_collections"`)).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(5))
+	mock.ExpectCommit()
+
+	resp, err := svc.CreateRecordingCollection(SaveRecordingCollectionRequest{
+		Name: "Living History Recordings",
+	}, intPtr(7))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp == nil || resp.ID != 5 || resp.Name != "Living History Recordings" {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestCreateRecordingCollectionRequiresRecordingForEachItem(t *testing.T) {
+	db, _, cleanup := setupMockDB(t)
+	defer cleanup()
+
+	svc := &RecordingService{DB: db}
+	_, err := svc.CreateRecordingCollection(SaveRecordingCollectionRequest{
+		Name: "Oral Histories",
+		Items: []RecordingItemInput{
+			{Title: "Episode 1", Description: "A story told at the gathering."},
+		},
+	}, intPtr(7))
+	if err == nil || err.Error() != "recording file is required" {
+		t.Fatalf("expected recording requirement error, got %v", err)
+	}
+}
+
+func TestCreateRecordingCollectionWithRecording(t *testing.T) {
 	db, mock, cleanup := setupMockDB(t)
 	defer cleanup()
 
@@ -103,7 +177,13 @@ func TestCreateRecordingCollectionWithItemsWithoutRecording(t *testing.T) {
 	resp, err := svc.CreateRecordingCollection(SaveRecordingCollectionRequest{
 		Name: "Oral Histories",
 		Items: []RecordingItemInput{
-			{Title: "Episode 1", Description: "A story told at the gathering."},
+			{
+				Title:       "Episode 1",
+				Description: "A story told at the gathering.",
+				FileName:    "episode-1.mp3",
+				MimeType:    "audio/mpeg",
+				Content:     []byte("audio-bytes"),
+			},
 		},
 	}, intPtr(7))
 	if err != nil {
@@ -129,7 +209,7 @@ func TestAddRecordingItemsCollectionNotFound(t *testing.T) {
 	mock.ExpectRollback()
 
 	_, err := svc.AddRecordingItems(99, AddRecordingItemsRequest{
-		Items: []RecordingItemInput{{Title: "Episode 1"}},
+		Items: []RecordingItemInput{{Title: "Episode 1", FileURL: "gs://drive-bucket/episode-1.mp3"}},
 	}, nil)
 	if !errors.Is(err, ErrRecordingCollectionNotFound) {
 		t.Fatalf("expected ErrRecordingCollectionNotFound, got %v", err)

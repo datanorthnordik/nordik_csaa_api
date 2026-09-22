@@ -3,12 +3,13 @@ package recordings
 import "time"
 
 type RecordingCollection struct {
-	ID        int       `gorm:"primaryKey;autoIncrement" json:"id"`
-	Name      string    `gorm:"size:150;not null;uniqueIndex" json:"name"`
-	CreatedBy *int      `gorm:"column:created_by" json:"created_by,omitempty"`
-	UpdatedBy *int      `gorm:"column:updated_by" json:"updated_by,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID           int       `gorm:"primaryKey;autoIncrement" json:"id"`
+	Name         string    `gorm:"size:150;not null;uniqueIndex" json:"name"`
+	PlacementKey string    `gorm:"size:100;column:placement_key" json:"placement_key,omitempty"`
+	CreatedBy    *int      `gorm:"column:created_by" json:"created_by,omitempty"`
+	UpdatedBy    *int      `gorm:"column:updated_by" json:"updated_by,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type RecordingCollectionItem struct {
@@ -27,8 +28,7 @@ type RecordingCollectionItem struct {
 
 // RecordingItemInput accepts an item either as a plain reference (file_url /
 // storage_uri / object_key) or as an inline upload (content / data_base64). The
-// recording itself is optional: an item may be created with a title and
-// description only and have its recording attached later.
+// recording is required for items; collections themselves may remain empty.
 type RecordingItemInput struct {
 	Title           string `json:"title"`
 	Description     string `json:"description"`
@@ -60,11 +60,12 @@ type AddRecordingItemsRequest struct {
 type UpdateRecordingItemRequest = RecordingItemInput
 
 type RecordingCollectionSummaryItem struct {
-	ID        int       `json:"id"`
-	Name      string    `json:"name"`
-	ItemCount int       `json:"item_count"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID           int       `json:"id"`
+	Name         string    `json:"name"`
+	PlacementKey string    `json:"placement_key,omitempty"`
+	ItemCount    int       `json:"item_count"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type RecordingCollectionListResponse struct {
@@ -87,14 +88,15 @@ type RecordingItemResponse struct {
 }
 
 type RecordingCollectionDetailResponse struct {
-	ID        int                     `json:"id"`
-	Name      string                  `json:"name"`
-	ItemCount int                     `json:"item_count"`
-	Items     []RecordingItemResponse `json:"items"`
-	CreatedBy *int                    `json:"created_by,omitempty"`
-	UpdatedBy *int                    `json:"updated_by,omitempty"`
-	CreatedAt time.Time               `json:"created_at"`
-	UpdatedAt time.Time               `json:"updated_at"`
+	ID           int                     `json:"id"`
+	Name         string                  `json:"name"`
+	PlacementKey string                  `json:"placement_key,omitempty"`
+	ItemCount    int                     `json:"item_count"`
+	Items        []RecordingItemResponse `json:"items"`
+	CreatedBy    *int                    `json:"created_by,omitempty"`
+	UpdatedBy    *int                    `json:"updated_by,omitempty"`
+	CreatedAt    time.Time               `json:"created_at"`
+	UpdatedAt    time.Time               `json:"updated_at"`
 }
 
 type RecordingCollectionMutationResponse struct {
