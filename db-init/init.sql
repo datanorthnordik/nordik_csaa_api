@@ -3330,4 +3330,100 @@ BEFORE UPDATE ON knowledge_center_submissions
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
+-- ============================================================================
+-- Recordings
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS recording_collections (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(150) NOT NULL,
+    created_by INT,
+    updated_by INT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT uq_recording_collections_name UNIQUE (name),
+
+    CONSTRAINT fk_recording_collections_created_by
+        FOREIGN KEY (created_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT fk_recording_collections_updated_by
+        FOREIGN KEY (updated_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT chk_recording_collections_name_not_blank
+        CHECK (BTRIM(name) <> '')
+);
+
+CREATE TABLE IF NOT EXISTS recording_collection_items (
+    id SERIAL PRIMARY KEY,
+    recording_collection_id INT NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    recording_url TEXT,
+    recording_object_key TEXT,
+    sort_order INT NOT NULL DEFAULT 0,
+    created_by INT,
+    updated_by INT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_recording_collection_items_collection
+        FOREIGN KEY (recording_collection_id) REFERENCES recording_collections(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_recording_collection_items_created_by
+        FOREIGN KEY (created_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT fk_recording_collection_items_updated_by
+        FOREIGN KEY (updated_by) REFERENCES users(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+
+    CONSTRAINT chk_recording_collection_items_title_not_blank
+        CHECK (BTRIM(title) <> ''),
+
+    CONSTRAINT chk_recording_collection_items_sort_order
+        CHECK (sort_order >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_recording_collections_name
+    ON recording_collections(name);
+
+CREATE INDEX IF NOT EXISTS idx_recording_collections_created_by
+    ON recording_collections(created_by);
+
+CREATE INDEX IF NOT EXISTS idx_recording_collections_updated_by
+    ON recording_collections(updated_by);
+
+CREATE INDEX IF NOT EXISTS idx_recording_collection_items_collection_id
+    ON recording_collection_items(recording_collection_id);
+
+CREATE INDEX IF NOT EXISTS idx_recording_collection_items_created_by
+    ON recording_collection_items(created_by);
+
+CREATE INDEX IF NOT EXISTS idx_recording_collection_items_updated_by
+    ON recording_collection_items(updated_by);
+
+CREATE INDEX IF NOT EXISTS idx_recording_collection_items_collection_sort
+    ON recording_collection_items(recording_collection_id, sort_order, id);
+
+DROP TRIGGER IF EXISTS trg_recording_collections_set_updated_at ON recording_collections;
+CREATE TRIGGER trg_recording_collections_set_updated_at
+BEFORE UPDATE ON recording_collections
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_recording_collection_items_set_updated_at ON recording_collection_items;
+CREATE TRIGGER trg_recording_collection_items_set_updated_at
+BEFORE UPDATE ON recording_collection_items
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
 COMMIT;
