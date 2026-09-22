@@ -17,6 +17,7 @@ import (
 	"nordikcsaaapi/internal/newsletters"
 	"nordikcsaaapi/internal/pages"
 	"nordikcsaaapi/internal/press"
+	"nordikcsaaapi/internal/recordings"
 	"nordikcsaaapi/internal/resources"
 	"nordikcsaaapi/internal/util"
 	"nordikcsaaapi/internal/video"
@@ -94,6 +95,8 @@ func main() {
 	newsletters.RegisterRoutes(r, newsletterService, auth.RequireBearerAuth(&cfg))
 	pressService := &press.PressService{DB: db, BucketName: cfg.DriveBucketName, BucketPrefix: cfg.DriveBucketPrefix}
 	press.RegisterRoutes(r, pressService, auth.RequireBearerAuth(&cfg))
+	recordingService := &recordings.RecordingService{DB: db, BucketName: cfg.DriveBucketName, BucketPrefix: cfg.DriveBucketPrefix}
+	recordings.RegisterRoutes(r, recordingService, auth.RequireBearerAuth(&cfg))
 	resourceService := &resources.ResourceService{DB: db, BucketName: cfg.DriveBucketName, BucketPrefix: cfg.DriveBucketPrefix}
 	resources.RegisterRoutes(r, resourceService, auth.RequireBearerAuth(&cfg))
 	bookshelfService := &bookshelf.BookshelfService{DB: db, BucketName: cfg.DriveBucketName, BucketPrefix: cfg.DriveBucketPrefix}
