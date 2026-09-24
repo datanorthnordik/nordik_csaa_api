@@ -154,6 +154,11 @@ type NewsletterMediaContent struct {
 	FileName    string
 }
 
+type NewsletterDownloadArchive struct {
+	Content  []byte
+	FileName string
+}
+
 func (NewsletterEntry) TableName() string {
 	return "newsletter_entries"
 }

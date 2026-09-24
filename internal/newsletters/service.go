@@ -1,6 +1,8 @@
 package newsletters
 
 import (
+	"archive/zip"
+	"bytes"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -176,6 +178,61 @@ func (s *NewsletterService) GetNewsletterMediaContent(id int, mediaID int) (*New
 		return nil, err
 	}
 
+	return s.downloadNewsletterMedia(media)
+}
+
+func (s *NewsletterService) GetNewsletterDownloadArchive(id int) (*NewsletterDownloadArchive, error) {
+	if s.DB == nil {
+		return nil, ErrStoreUnavailable
+	}
+
+	entry, err := s.getNewsletterEntryModel(id)
+	if err != nil {
+		return nil, err
+	}
+
+	var mediaList []NewsletterMedia
+	if err := s.DB.Where("newsletter_entry_id = ?", id).Order("sort_order ASC, id ASC").Find(&mediaList).Error; err != nil {
+		return nil, err
+	}
+	if len(mediaList) == 0 {
+		return nil, ErrNewsletterMediaNotFound
+	}
+
+	var archive bytes.Buffer
+	zipWriter := zip.NewWriter(&archive)
+	usedNames := make(map[string]int, len(mediaList))
+
+	for _, media := range mediaList {
+		content, err := s.downloadNewsletterMedia(media)
+		if err != nil {
+			_ = zipWriter.Close()
+			return nil, err
+		}
+
+		fileName := uniqueNewsletterArchiveFileName(media, usedNames)
+		writer, err := zipWriter.Create(fileName)
+		if err != nil {
+			_ = zipWriter.Close()
+			return nil, err
+		}
+		if _, err := writer.Write(content.Content); err != nil {
+			_ = zipWriter.Close()
+			return nil, err
+		}
+	}
+
+	if err := zipWriter.Close(); err != nil {
+		return nil, err
+	}
+
+	return &NewsletterDownloadArchive{
+		Content:  archive.Bytes(),
+		FileName: newsletterArchiveFileName(entry.Title),
+	}, nil
+}
+
+func (s *NewsletterService) downloadNewsletterMedia(media NewsletterMedia) (*NewsletterMediaContent, error) {
 	objectKey := strings.TrimSpace(media.GCPObjectKey)
 	bucketName, objectKey, err := s.resolveStoredObjectReference(objectKey, media.FileURL)
 	if err != nil {
@@ -201,6 +258,43 @@ func (s *NewsletterService) GetNewsletterMediaContent(id int, mediaID int) (*New
 		ContentType: contentType,
 		FileName:    media.FileName,
 	}, nil
+}
+
+func uniqueNewsletterArchiveFileName(media NewsletterMedia, usedNames map[string]int) string {
+	extension := filepath.Ext(strings.TrimSpace(media.FileName))
+	baseName := strings.TrimSpace(media.DisplayName)
+	if baseName == "" {
+		baseName = strings.TrimSuffix(strings.TrimSpace(media.FileName), extension)
+	}
+	if filepath.Ext(baseName) == "" {
+		baseName += extension
+	}
+
+	fileName := sanitizeStoredFilename(baseName)
+	if fileName == "" {
+		fileName = fmt.Sprintf("newsletter-book-%d%s", media.ID, extension)
+	}
+
+	normalized := strings.ToLower(fileName)
+	usedNames[normalized]++
+	if usedNames[normalized] == 1 {
+		return fileName
+	}
+
+	ext := filepath.Ext(fileName)
+	name := strings.TrimSuffix(fileName, ext)
+	return fmt.Sprintf("%s-%d%s", name, usedNames[normalized], ext)
+}
+
+func newsletterArchiveFileName(title string) string {
+	fileName := sanitizeStoredFilename(strings.TrimSpace(title))
+	if fileName == "" {
+		fileName = "newsletter"
+	}
+	if !strings.EqualFold(filepath.Ext(fileName), ".zip") {
+		fileName += ".zip"
+	}
+	return fileName
 }
 
 func (s *NewsletterService) CreateNewsletterEntry(req SaveNewsletterEntryRequest, userID *int) (*NewsletterMutationResponse, error) {

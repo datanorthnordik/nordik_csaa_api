@@ -24,6 +24,7 @@ type fakeNewsletterService struct {
 	listResp            *NewsletterListResponse
 	detailResp          *NewsletterDetailResponse
 	mediaContentResp    *NewsletterMediaContent
+	downloadArchiveResp *NewsletterDownloadArchive
 	createResp          *NewsletterMutationResponse
 	updateResp          *NewsletterMutationResponse
 	addMediaResp        *AddNewsletterMediaResponse
@@ -33,6 +34,7 @@ type fakeNewsletterService struct {
 	listErr             error
 	detailErr           error
 	mediaContentErr     error
+	downloadArchiveErr  error
 	createErr           error
 	updateErr           error
 	deleteErr           error
@@ -94,6 +96,17 @@ func (f *fakeNewsletterService) GetNewsletterMediaContent(id int, mediaID int) (
 		return &NewsletterMediaContent{Content: []byte("media"), ContentType: "application/pdf", FileName: "agenda.pdf"}, nil
 	}
 	return f.mediaContentResp, nil
+}
+
+func (f *fakeNewsletterService) GetNewsletterDownloadArchive(id int) (*NewsletterDownloadArchive, error) {
+	f.gotDetailID = id
+	if f.downloadArchiveErr != nil {
+		return nil, f.downloadArchiveErr
+	}
+	if f.downloadArchiveResp == nil {
+		return &NewsletterDownloadArchive{Content: []byte("archive"), FileName: "newsletter.zip"}, nil
+	}
+	return f.downloadArchiveResp, nil
 }
 
 func (f *fakeNewsletterService) CreateNewsletterEntry(req SaveNewsletterEntryRequest, userID *int) (*NewsletterMutationResponse, error) {
@@ -301,6 +314,36 @@ func TestGetNewsletterMediaContentEndpointDefaultsAndErrors(t *testing.T) {
 	req = httptest.NewRequest(http.MethodGet, "/api/newsletters/5/media/8/content", nil)
 	router.ServeHTTP(res, req)
 	assertNewsletterAPIError(t, res, http.StatusNotFound, "not_found", "newsletter media not found")
+}
+
+func TestGetNewsletterDownloadArchiveEndpoint(t *testing.T) {
+	service := &fakeNewsletterService{
+		downloadArchiveResp: &NewsletterDownloadArchive{
+			Content:  []byte("zip-content"),
+			FileName: "Summer Update.zip",
+		},
+	}
+	router := setupNewsletterRouter(service)
+
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/newsletters/5/download", nil)
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", res.Code, res.Body.String())
+	}
+	if service.gotDetailID != 5 {
+		t.Fatalf("expected newsletter id 5, got %d", service.gotDetailID)
+	}
+	if res.Body.String() != "zip-content" {
+		t.Fatalf("unexpected response body: %q", res.Body.String())
+	}
+	if got := res.Header().Get("Content-Type"); !strings.Contains(got, "application/zip") {
+		t.Fatalf("expected zip content type, got %q", got)
+	}
+	if got := res.Header().Get("Content-Disposition"); !strings.Contains(got, "Summer Update.zip") {
+		t.Fatalf("expected archive filename, got %q", got)
+	}
 }
 
 func TestCreateAndUpdateNewsletterEntryEndpoints(t *testing.T) {

@@ -9,6 +9,7 @@ func RegisterRoutes(r *gin.Engine, ns NewsletterServicePort, protected ...gin.Ha
 	{
 		publicGroup.GET("", controller.ListNewsletterEntries)
 		publicGroup.GET("/:id", controller.GetNewsletterEntry)
+		publicGroup.GET("/:id/download", controller.GetNewsletterDownloadArchive)
 		publicGroup.GET("/:id/media/:mediaId/content", controller.GetNewsletterMediaContent)
 
 		postHandlers := withProtected(controller.CreateNewsletterEntry, protected...)
