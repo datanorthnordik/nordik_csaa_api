@@ -6,6 +6,7 @@ package recordings
 type RecordingServicePort interface {
 	ListRecordingCollections() (*RecordingCollectionListResponse, error)
 	GetRecordingCollection(id int) (*RecordingCollectionDetailResponse, error)
+	GetRecordingCollectionByTitle(title string) (*RecordingCollectionDetailResponse, error)
 	GetRecordingCollectionByPlacementKey(placementKey string) (*RecordingCollectionDetailResponse, error)
 	GetRecordingItemContent(id int, itemID int) (*RecordingMediaContent, error)
 	CreateRecordingCollection(req SaveRecordingCollectionRequest, userID *int) (*RecordingCollectionMutationResponse, error)

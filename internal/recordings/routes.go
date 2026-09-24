@@ -15,6 +15,7 @@ func RegisterRoutes(r *gin.Engine, rs RecordingServicePort, protected ...gin.Han
 		deleteItemHandlers := withProtected(controller.DeleteRecordingItem, protected...)
 
 		group.GET("", controller.ListRecordingCollections)
+		group.GET("/by-title", controller.GetRecordingCollectionByTitle)
 		group.GET("/placement/:placementKey", controller.GetRecordingCollectionByPlacementKey)
 		group.GET("/:id", controller.GetRecordingCollection)
 		group.GET("/:id/items/:itemId/content", controller.GetRecordingItemContent)

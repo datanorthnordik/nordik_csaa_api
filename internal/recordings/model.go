@@ -17,8 +17,8 @@ type RecordingCollectionItem struct {
 	RecordingCollectionID int       `gorm:"not null;column:recording_collection_id" json:"recording_collection_id"`
 	Title                 string    `gorm:"size:255;not null" json:"title"`
 	Description           string    `gorm:"column:description" json:"description"`
-	RecordingURL          string    `gorm:"column:recording_url" json:"recording_url"`
-	RecordingObjectKey    string    `gorm:"column:recording_object_key" json:"recording_object_key"`
+	RecordingURL          string    `gorm:"column:recording_url" json:"-"`
+	RecordingObjectKey    string    `gorm:"column:recording_object_key" json:"-"`
 	SortOrder             int       `gorm:"not null;default:0;column:sort_order" json:"sort_order"`
 	CreatedBy             *int      `gorm:"column:created_by" json:"created_by,omitempty"`
 	UpdatedBy             *int      `gorm:"column:updated_by" json:"updated_by,omitempty"`
@@ -78,8 +78,6 @@ type RecordingItemResponse struct {
 	Title                 string    `json:"title"`
 	Description           string    `json:"description"`
 	RecordingURL          string    `json:"recording_url"`
-	StorageURI            string    `json:"storage_uri,omitempty"`
-	GCPObjectKey          string    `json:"gcp_object_key,omitempty"`
 	SortOrder             int       `json:"sort_order"`
 	CreatedBy             *int      `json:"created_by,omitempty"`
 	UpdatedBy             *int      `json:"updated_by,omitempty"`

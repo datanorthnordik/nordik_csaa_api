@@ -1,8 +1,10 @@
 package recordings
 
 import (
+	"encoding/json"
 	"errors"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -66,6 +68,9 @@ func TestRecordingServiceStoreUnavailable(t *testing.T) {
 	if _, err := svc.GetRecordingCollection(1); !errors.Is(err, ErrStoreUnavailable) {
 		t.Fatalf("expected ErrStoreUnavailable from GetRecordingCollection, got %v", err)
 	}
+	if _, err := svc.GetRecordingCollectionByTitle("Living History Recordings"); !errors.Is(err, ErrStoreUnavailable) {
+		t.Fatalf("expected ErrStoreUnavailable from GetRecordingCollectionByTitle, got %v", err)
+	}
 	if _, err := svc.GetRecordingCollectionByPlacementKey("living-history-recordings"); !errors.Is(err, ErrStoreUnavailable) {
 		t.Fatalf("expected ErrStoreUnavailable from GetRecordingCollectionByPlacementKey, got %v", err)
 	}
@@ -74,6 +79,62 @@ func TestRecordingServiceStoreUnavailable(t *testing.T) {
 	}
 	if err := svc.DeleteRecordingCollection(1); !errors.Is(err, ErrStoreUnavailable) {
 		t.Fatalf("expected ErrStoreUnavailable from DeleteRecordingCollection, got %v", err)
+	}
+}
+
+func TestGetRecordingCollectionByTitle(t *testing.T) {
+	db, mock, cleanup := setupMockDB(t)
+	defer cleanup()
+
+	svc := &RecordingService{DB: db}
+	now := time.Date(2026, time.September, 23, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "recording_collections" WHERE name = $1`)).
+		WithArgs("Living History Recordings", 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "created_at", "updated_at"}).
+			AddRow(12, "Living History Recordings", now, now))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "recording_collection_items" WHERE recording_collection_id = $1`)).
+		WithArgs(12).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "recording_collection_id", "title", "description", "recording_url", "recording_object_key", "sort_order", "created_at", "updated_at",
+		}).AddRow(31, 12, "Interview", "An oral history", "gs://private-bucket/recordings/interview.mp3", "recordings/interview.mp3", 0, now, now))
+
+	resp, err := svc.GetRecordingCollectionByTitle(" Living History Recordings ")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.ID != 12 || resp.Name != "Living History Recordings" || len(resp.Items) != 1 {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+	if resp.Items[0].RecordingURL != "/api/recordings/12/items/31/content" {
+		t.Fatalf("unexpected media URL: %q", resp.Items[0].RecordingURL)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestRecordingItemResponseDoesNotExposeStorageDetails(t *testing.T) {
+	response := mapRecordingItemResponse(RecordingCollectionItem{
+		ID:                    31,
+		RecordingCollectionID: 12,
+		Title:                 "Interview",
+		RecordingURL:          "gs://private-bucket/recordings/interview.mp3",
+		RecordingObjectKey:    "recordings/interview.mp3",
+	})
+
+	payload, err := json.Marshal(response)
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+	body := string(payload)
+	for _, forbidden := range []string{"storage_uri", "gcp_object_key", "private-bucket", "recordings/interview.mp3"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("serialized response exposes %q: %s", forbidden, body)
+		}
+	}
+	if !strings.Contains(body, `"recording_url":"/api/recordings/12/items/31/content"`) {
+		t.Fatalf("serialized response is missing the safe media URL: %s", body)
 	}
 }
 
