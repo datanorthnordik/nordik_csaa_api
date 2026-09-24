@@ -92,6 +92,29 @@ func (nc *NewsletterController) GetNewsletterMediaContent(c *gin.Context) {
 	c.Data(http.StatusOK, contentType, resp.Content)
 }
 
+func (nc *NewsletterController) GetNewsletterDownloadArchive(c *gin.Context) {
+	if nc.NewsletterService == nil {
+		apiresponse.WriteInternalError(c)
+		return
+	}
+
+	id, ok := pathInt(c, "id")
+	if !ok {
+		return
+	}
+
+	resp, err := nc.NewsletterService.GetNewsletterDownloadArchive(id)
+	if err != nil {
+		writeNewsletterError(c, err)
+		return
+	}
+
+	if fileName := sanitizeContentDispositionFilename(resp.FileName); fileName != "" {
+		c.Header("Content-Disposition", "attachment; filename="+strconv.Quote(fileName))
+	}
+	c.Data(http.StatusOK, "application/zip", resp.Content)
+}
+
 func (nc *NewsletterController) CreateNewsletterEntry(c *gin.Context) {
 	if nc.NewsletterService == nil {
 		apiresponse.WriteInternalError(c)

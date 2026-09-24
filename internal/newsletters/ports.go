@@ -4,6 +4,7 @@ type NewsletterServicePort interface {
 	ListNewsletterEntries(filter ListNewsletterFilter) (*NewsletterListResponse, error)
 	GetNewsletterEntry(id int) (*NewsletterDetailResponse, error)
 	GetNewsletterMediaContent(id int, mediaID int) (*NewsletterMediaContent, error)
+	GetNewsletterDownloadArchive(id int) (*NewsletterDownloadArchive, error)
 	CreateNewsletterEntry(req SaveNewsletterEntryRequest, userID *int) (*NewsletterMutationResponse, error)
 	UpdateNewsletterEntry(id int, req SaveNewsletterEntryRequest, userID *int) (*NewsletterMutationResponse, error)
 	DeleteNewsletterEntry(id int) error

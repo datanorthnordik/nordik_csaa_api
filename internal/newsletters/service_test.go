@@ -1,7 +1,10 @@
 package newsletters
 
 import (
+	"archive/zip"
+	"bytes"
 	"errors"
+	"io"
 	"regexp"
 	"strings"
 	"testing"
@@ -93,6 +96,9 @@ func TestNewsletterServiceStoreUnavailable(t *testing.T) {
 	}
 	if _, err := svc.GetNewsletterMediaContent(1, 2); !errors.Is(err, ErrStoreUnavailable) {
 		t.Fatalf("expected GetNewsletterMediaContent ErrStoreUnavailable, got %v", err)
+	}
+	if _, err := svc.GetNewsletterDownloadArchive(1); !errors.Is(err, ErrStoreUnavailable) {
+		t.Fatalf("expected GetNewsletterDownloadArchive ErrStoreUnavailable, got %v", err)
 	}
 	if _, err := svc.CreateNewsletterEntry(req, intPtr(7)); !errors.Is(err, ErrStoreUnavailable) {
 		t.Fatalf("expected CreateNewsletterEntry ErrStoreUnavailable, got %v", err)
@@ -327,6 +333,66 @@ func TestGetNewsletterMediaContentAndObjectResolution(t *testing.T) {
 		))
 	if _, err := svc.GetNewsletterMediaContent(9, 7); !errors.Is(err, ErrMediaBucketNotConfigured) {
 		t.Fatalf("expected ErrMediaBucketNotConfigured, got %v", err)
+	}
+}
+
+func TestGetNewsletterDownloadArchiveIncludesEveryMediaItem(t *testing.T) {
+	db, mock, cleanup := setupMockNewsletterDB(t)
+	defer cleanup()
+
+	svc := &NewsletterService{DB: db, BucketName: "drive-bucket"}
+	recorder, restore := stubNewsletterHooks(nil, nil, nil)
+	defer restore()
+
+	now := time.Date(2026, 9, 24, 10, 0, 0, 0, time.UTC)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "newsletter_entries" WHERE "newsletter_entries"."id" = $1 ORDER BY "newsletter_entries"."id" LIMIT $2`)).
+		WithArgs(9, 1).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "title", "category", "send_date", "content_html", "status", "visibility", "created_at", "updated_at",
+		}).AddRow(9, "Fall Update", "csaa", now, "", "published", "public", now, now))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "newsletter_media" WHERE newsletter_entry_id = $1 ORDER BY sort_order ASC, id ASC`)).
+		WithArgs(9).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "newsletter_entry_id", "display_name", "file_name", "gcp_object_key", "file_url", "mime_type", "file_size", "media_role", "sort_order", "created_at", "updated_at",
+		}).
+			AddRow(4, 9, "English Edition", "english.pdf", "newsletters/english.pdf", "", "application/pdf", 100, "attachment", 0, now, now).
+			AddRow(5, 9, "French Edition", "french.pdf", "newsletters/french.pdf", "", "application/pdf", 100, "attachment", 1, now, now))
+
+	archive, err := svc.GetNewsletterDownloadArchive(9)
+	if err != nil {
+		t.Fatalf("GetNewsletterDownloadArchive returned error: %v", err)
+	}
+	if archive.FileName != "Fall Update.zip" {
+		t.Fatalf("unexpected archive name: %q", archive.FileName)
+	}
+	if len(recorder.downloads) != 2 {
+		t.Fatalf("expected two storage downloads, got %#v", recorder.downloads)
+	}
+
+	reader, err := zip.NewReader(bytes.NewReader(archive.Content), int64(len(archive.Content)))
+	if err != nil {
+		t.Fatalf("open generated zip: %v", err)
+	}
+	if len(reader.File) != 2 {
+		t.Fatalf("expected two files in archive, got %d", len(reader.File))
+	}
+	for index, expectedName := range []string{"English Edition.pdf", "French Edition.pdf"} {
+		if reader.File[index].Name != expectedName {
+			t.Fatalf("expected archive file %q, got %q", expectedName, reader.File[index].Name)
+		}
+		file, err := reader.File[index].Open()
+		if err != nil {
+			t.Fatalf("open archive file: %v", err)
+		}
+		content, err := io.ReadAll(file)
+		_ = file.Close()
+		if err != nil || len(content) == 0 {
+			t.Fatalf("read archive file %q: %v", expectedName, err)
+		}
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
 	}
 }
 
