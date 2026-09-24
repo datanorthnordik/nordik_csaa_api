@@ -6,6 +6,7 @@ import (
 	"path"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"nordikcsaaapi/internal/util"
 
@@ -17,6 +18,11 @@ var (
 	ErrRecordingCollectionNotFound = errors.New("recording collection not found")
 	ErrRecordingItemNotFound       = errors.New("recording item not found")
 	ErrMediaBucketNotConfigured    = errors.New("drive bucket is not configured")
+)
+
+const (
+	recordingItemTitleMaxLength       = 250
+	recordingItemDescriptionMaxLength = 1000
 )
 
 var (
@@ -411,9 +417,9 @@ func (s *RecordingService) UpdateRecordingItem(id int, itemID int, req UpdateRec
 	}
 	row.Description = req.Description
 
-	if strings.TrimSpace(row.Title) == "" {
+	if err := validateRecordingItemText(row.Title, row.Description); err != nil {
 		tx.Rollback()
-		return nil, errors.New("title is required")
+		return nil, err
 	}
 
 	oldObjects := make([]recordingStoredObject, 0, 1)
@@ -581,14 +587,29 @@ func sanitizeRecordingItemInput(input RecordingItemInput) RecordingItemInput {
 }
 
 func validateRecordingItemInput(input RecordingItemInput) error {
-	if strings.TrimSpace(input.Title) == "" {
-		return errors.New("title is required")
+	if err := validateRecordingItemText(input.Title, input.Description); err != nil {
+		return err
 	}
 	if !recordingInputHasMedia(input) {
 		return errors.New("recording file is required")
 	}
 	if err := validateRecordingMediaType(input); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateRecordingItemText(title string, description string) error {
+	title = strings.TrimSpace(title)
+	description = strings.TrimSpace(description)
+	if title == "" {
+		return errors.New("title is required")
+	}
+	if utf8.RuneCountInString(title) > recordingItemTitleMaxLength {
+		return fmt.Errorf("title must be %d characters or fewer", recordingItemTitleMaxLength)
+	}
+	if utf8.RuneCountInString(description) > recordingItemDescriptionMaxLength {
+		return fmt.Errorf("description must be %d characters or fewer", recordingItemDescriptionMaxLength)
 	}
 	return nil
 }

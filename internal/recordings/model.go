@@ -15,7 +15,7 @@ type RecordingCollection struct {
 type RecordingCollectionItem struct {
 	ID                    int       `gorm:"primaryKey;autoIncrement" json:"id"`
 	RecordingCollectionID int       `gorm:"not null;column:recording_collection_id" json:"recording_collection_id"`
-	Title                 string    `gorm:"size:255;not null" json:"title"`
+	Title                 string    `gorm:"size:250;not null" json:"title"`
 	Description           string    `gorm:"column:description" json:"description"`
 	RecordingURL          string    `gorm:"column:recording_url" json:"-"`
 	RecordingObjectKey    string    `gorm:"column:recording_object_key" json:"-"`

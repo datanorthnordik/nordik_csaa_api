@@ -220,6 +220,18 @@ func TestCreateRecordingCollectionRequiresRecordingForEachItem(t *testing.T) {
 	}
 }
 
+func TestValidateRecordingItemTextLengthLimits(t *testing.T) {
+	if err := validateRecordingItemText(strings.Repeat("é", 250), strings.Repeat("d", 1000)); err != nil {
+		t.Fatalf("expected boundary lengths to pass, got %v", err)
+	}
+	if err := validateRecordingItemText(strings.Repeat("t", 251), ""); err == nil || err.Error() != "title must be 250 characters or fewer" {
+		t.Fatalf("expected title length error, got %v", err)
+	}
+	if err := validateRecordingItemText("Valid title", strings.Repeat("d", 1001)); err == nil || err.Error() != "description must be 1000 characters or fewer" {
+		t.Fatalf("expected description length error, got %v", err)
+	}
+}
+
 func TestCreateRecordingCollectionWithRecording(t *testing.T) {
 	db, mock, cleanup := setupMockDB(t)
 	defer cleanup()

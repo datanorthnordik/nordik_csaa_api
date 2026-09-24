@@ -218,6 +218,7 @@ func isClientSafeRecordingError(err error) bool {
 	switch {
 	case strings.Contains(message, " is required"),
 		strings.Contains(message, " are required"),
+		strings.Contains(message, "characters or fewer"),
 		strings.Contains(message, "use multipart/form-data"),
 		strings.Contains(message, "audio recording uploads"):
 		return true
