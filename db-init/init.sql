@@ -3368,7 +3368,7 @@ ALTER TABLE recording_collections
 CREATE TABLE IF NOT EXISTS recording_collection_items (
     id SERIAL PRIMARY KEY,
     recording_collection_id INT NOT NULL,
-    title VARCHAR(255) NOT NULL,
+    title VARCHAR(250) NOT NULL,
     description TEXT,
     recording_url TEXT,
     recording_object_key TEXT,
@@ -3396,9 +3396,41 @@ CREATE TABLE IF NOT EXISTS recording_collection_items (
     CONSTRAINT chk_recording_collection_items_title_not_blank
         CHECK (BTRIM(title) <> ''),
 
+    CONSTRAINT chk_recording_collection_items_title_length
+        CHECK (CHAR_LENGTH(title) <= 250),
+
+    CONSTRAINT chk_recording_collection_items_description_length
+        CHECK (description IS NULL OR CHAR_LENGTH(description) <= 1000),
+
     CONSTRAINT chk_recording_collection_items_sort_order
         CHECK (sort_order >= 0)
 );
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_recording_collection_items_title_length'
+    ) THEN
+        ALTER TABLE recording_collection_items
+            ADD CONSTRAINT chk_recording_collection_items_title_length
+            CHECK (CHAR_LENGTH(title) <= 250) NOT VALID;
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_recording_collection_items_description_length'
+    ) THEN
+        ALTER TABLE recording_collection_items
+            ADD CONSTRAINT chk_recording_collection_items_description_length
+            CHECK (description IS NULL OR CHAR_LENGTH(description) <= 1000) NOT VALID;
+    END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_recording_collections_name
     ON recording_collections(name);
