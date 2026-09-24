@@ -107,6 +107,27 @@ func (s *RecordingService) GetRecordingCollection(id int) (*RecordingCollectionD
 	return s.buildRecordingCollectionDetail(row)
 }
 
+func (s *RecordingService) GetRecordingCollectionByTitle(title string) (*RecordingCollectionDetailResponse, error) {
+	if s.DB == nil {
+		return nil, ErrStoreUnavailable
+	}
+
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return nil, errors.New("title is required")
+	}
+
+	var row RecordingCollection
+	if err := s.DB.Where("name = ?", title).First(&row).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrRecordingCollectionNotFound
+		}
+		return nil, err
+	}
+
+	return s.buildRecordingCollectionDetail(row)
+}
+
 func (s *RecordingService) GetRecordingCollectionByPlacementKey(placementKey string) (*RecordingCollectionDetailResponse, error) {
 	if s.DB == nil {
 		return nil, ErrStoreUnavailable
@@ -616,8 +637,6 @@ func mapRecordingItemResponse(row RecordingCollectionItem) RecordingItemResponse
 		Title:                 row.Title,
 		Description:           row.Description,
 		RecordingURL:          recordingURL,
-		StorageURI:            row.RecordingURL,
-		GCPObjectKey:          row.RecordingObjectKey,
 		SortOrder:             row.SortOrder,
 		CreatedBy:             row.CreatedBy,
 		UpdatedBy:             row.UpdatedBy,

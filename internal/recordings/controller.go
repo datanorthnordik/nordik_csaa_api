@@ -40,6 +40,22 @@ func (rc *RecordingController) GetRecordingCollection(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+func (rc *RecordingController) GetRecordingCollectionByTitle(c *gin.Context) {
+	title := strings.TrimSpace(c.Query("title"))
+	if title == "" {
+		apiresponse.WriteValidationError(c, "title is required")
+		return
+	}
+
+	resp, err := rc.RecordingService.GetRecordingCollectionByTitle(title)
+	if err != nil {
+		writeRecordingError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
 func (rc *RecordingController) GetRecordingCollectionByPlacementKey(c *gin.Context) {
 	placementKey := strings.TrimSpace(c.Param("placementKey"))
 	if placementKey == "" {
