@@ -2067,6 +2067,203 @@ $$;
 
 COMMIT;
 
+-- ============================================================================
+-- Latest homepage content
+-- Keeps a denormalized, publication-ordered feed of at most 10 public records
+-- across events, press entries, and newsletters.
+-- ============================================================================
+
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS latest_content (
+    id SERIAL PRIMARY KEY,
+    source_type VARCHAR(20) NOT NULL,
+    source_id INT NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    display_date TIMESTAMP NOT NULL,
+    published_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT uq_latest_content_source UNIQUE (source_type, source_id),
+
+    CONSTRAINT chk_latest_content_source_type
+        CHECK (source_type IN ('event', 'press', 'newsletter')),
+
+    CONSTRAINT chk_latest_content_source_id
+        CHECK (source_id > 0),
+
+    CONSTRAINT chk_latest_content_title_not_blank
+        CHECK (BTRIM(title) <> '')
+);
+
+CREATE INDEX IF NOT EXISTS idx_latest_content_publication_order
+    ON latest_content(published_at DESC, id DESC);
+
+DROP TRIGGER IF EXISTS trg_latest_content_set_updated_at ON latest_content;
+CREATE TRIGGER trg_latest_content_set_updated_at
+BEFORE UPDATE ON latest_content
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+CREATE OR REPLACE FUNCTION latest_content_plain_text(value TEXT)
+RETURNS TEXT AS $$
+    SELECT LEFT(
+        BTRIM(
+            REGEXP_REPLACE(
+                REGEXP_REPLACE(COALESCE(value, ''), '<[^>]+>', ' ', 'g'),
+                '[[:space:]]+',
+                ' ',
+                'g'
+            )
+        ),
+        1000
+    );
+$$ LANGUAGE SQL IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION prune_latest_content()
+RETURNS VOID AS $$
+BEGIN
+    -- Serialize pruning so concurrent publications cannot leave more than 10 rows.
+    PERFORM pg_advisory_xact_lock(hashtext('latest_content_top_10'));
+
+    DELETE FROM latest_content
+    WHERE id IN (
+        SELECT id
+        FROM latest_content
+        ORDER BY published_at DESC, id DESC
+        OFFSET 10
+    );
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION sync_event_latest_content()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        DELETE FROM latest_content
+        WHERE source_type = 'event' AND source_id = OLD.id;
+        RETURN OLD;
+    END IF;
+
+    IF NOT (NEW.published AND NEW.privacy_type = 'public') THEN
+        DELETE FROM latest_content
+        WHERE source_type = 'event' AND source_id = NEW.id;
+        RETURN NEW;
+    END IF;
+
+    IF TG_OP = 'UPDATE' AND OLD.published AND OLD.privacy_type = 'public' THEN
+        UPDATE latest_content
+        SET title = NEW.title,
+            description = latest_content_plain_text(NEW.teaser),
+            display_date = NEW.start_at
+        WHERE source_type = 'event' AND source_id = NEW.id;
+        RETURN NEW;
+    END IF;
+
+    INSERT INTO latest_content (
+        source_type, source_id, title, description, display_date, published_at
+    ) VALUES (
+        'event', NEW.id, NEW.title, latest_content_plain_text(NEW.teaser),
+        NEW.start_at, CURRENT_TIMESTAMP
+    )
+    ON CONFLICT (source_type, source_id) DO UPDATE
+    SET title = EXCLUDED.title,
+        description = EXCLUDED.description,
+        display_date = EXCLUDED.display_date;
+
+    PERFORM prune_latest_content();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION sync_press_latest_content()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        DELETE FROM latest_content
+        WHERE source_type = 'press' AND source_id = OLD.id;
+        RETURN OLD;
+    END IF;
+
+    IF NOT (NEW.status = 'published' AND NEW.visibility = 'public') THEN
+        DELETE FROM latest_content
+        WHERE source_type = 'press' AND source_id = NEW.id;
+        RETURN NEW;
+    END IF;
+
+    IF TG_OP = 'UPDATE'
+       AND OLD.status = 'published'
+       AND OLD.visibility = 'public' THEN
+        UPDATE latest_content
+        SET title = NEW.title,
+            description = latest_content_plain_text(NEW.content_html),
+            display_date = NEW.release_date
+        WHERE source_type = 'press' AND source_id = NEW.id;
+        RETURN NEW;
+    END IF;
+
+    INSERT INTO latest_content (
+        source_type, source_id, title, description, display_date, published_at
+    ) VALUES (
+        'press', NEW.id, NEW.title, latest_content_plain_text(NEW.content_html),
+        NEW.release_date, CURRENT_TIMESTAMP
+    )
+    ON CONFLICT (source_type, source_id) DO UPDATE
+    SET title = EXCLUDED.title,
+        description = EXCLUDED.description,
+        display_date = EXCLUDED.display_date;
+
+    PERFORM prune_latest_content();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION sync_newsletter_latest_content()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        DELETE FROM latest_content
+        WHERE source_type = 'newsletter' AND source_id = OLD.id;
+        RETURN OLD;
+    END IF;
+
+    IF NOT (NEW.status = 'published' AND NEW.visibility = 'public') THEN
+        DELETE FROM latest_content
+        WHERE source_type = 'newsletter' AND source_id = NEW.id;
+        RETURN NEW;
+    END IF;
+
+    IF TG_OP = 'UPDATE'
+       AND OLD.status = 'published'
+       AND OLD.visibility = 'public' THEN
+        UPDATE latest_content
+        SET title = NEW.title,
+            description = latest_content_plain_text(NEW.content_html),
+            display_date = NEW.send_date
+        WHERE source_type = 'newsletter' AND source_id = NEW.id;
+        RETURN NEW;
+    END IF;
+
+    INSERT INTO latest_content (
+        source_type, source_id, title, description, display_date, published_at
+    ) VALUES (
+        'newsletter', NEW.id, NEW.title, latest_content_plain_text(NEW.content_html),
+        NEW.send_date, CURRENT_TIMESTAMP
+    )
+    ON CONFLICT (source_type, source_id) DO UPDATE
+    SET title = EXCLUDED.title,
+        description = EXCLUDED.description,
+        display_date = EXCLUDED.display_date;
+
+    PERFORM prune_latest_content();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMIT;
+
 -- Press Entries Migration
 -- Prerequisites: tables users(id) must already exist.
 
@@ -3488,5 +3685,81 @@ WHERE NOT EXISTS (
     FROM recording_collections
     WHERE placement_key = 'living-history-recordings'
 );
+
+COMMIT;
+
+-- Install source triggers only after all three source tables exist, then backfill
+-- the newest 10 currently published records.
+BEGIN;
+
+DROP TRIGGER IF EXISTS trg_events_sync_latest_content ON events;
+CREATE TRIGGER trg_events_sync_latest_content
+AFTER INSERT OR UPDATE OR DELETE ON events
+FOR EACH ROW
+EXECUTE FUNCTION sync_event_latest_content();
+
+DROP TRIGGER IF EXISTS trg_press_entries_sync_latest_content ON press_entries;
+CREATE TRIGGER trg_press_entries_sync_latest_content
+AFTER INSERT OR UPDATE OR DELETE ON press_entries
+FOR EACH ROW
+EXECUTE FUNCTION sync_press_latest_content();
+
+DROP TRIGGER IF EXISTS trg_newsletter_entries_sync_latest_content ON newsletter_entries;
+CREATE TRIGGER trg_newsletter_entries_sync_latest_content
+AFTER INSERT OR UPDATE OR DELETE ON newsletter_entries
+FOR EACH ROW
+EXECUTE FUNCTION sync_newsletter_latest_content();
+
+WITH candidates AS (
+    SELECT
+        'event'::VARCHAR(20) AS source_type,
+        id AS source_id,
+        title,
+        latest_content_plain_text(teaser) AS description,
+        start_at AS display_date,
+        COALESCE(updated_at, created_at) AS published_at
+    FROM events
+    WHERE published = TRUE AND privacy_type = 'public'
+
+    UNION ALL
+
+    SELECT
+        'press'::VARCHAR(20),
+        id,
+        title,
+        latest_content_plain_text(content_html),
+        release_date::TIMESTAMP,
+        COALESCE(publish_at, updated_at, created_at)
+    FROM press_entries
+    WHERE status = 'published' AND visibility = 'public'
+
+    UNION ALL
+
+    SELECT
+        'newsletter'::VARCHAR(20),
+        id,
+        title,
+        latest_content_plain_text(content_html),
+        send_date::TIMESTAMP,
+        COALESCE(publish_at, updated_at, created_at)
+    FROM newsletter_entries
+    WHERE status = 'published' AND visibility = 'public'
+), newest AS (
+    SELECT *
+    FROM candidates
+    ORDER BY published_at DESC, source_type ASC, source_id DESC
+    LIMIT 10
+)
+INSERT INTO latest_content (
+    source_type, source_id, title, description, display_date, published_at
+)
+SELECT source_type, source_id, title, description, display_date, published_at
+FROM newest
+ON CONFLICT (source_type, source_id) DO UPDATE
+SET title = EXCLUDED.title,
+    description = EXCLUDED.description,
+    display_date = EXCLUDED.display_date;
+
+SELECT prune_latest_content();
 
 COMMIT;
